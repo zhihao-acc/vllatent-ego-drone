@@ -8,7 +8,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 
 | step | status | date | notes |
 |---|---|---|---|
-| 1 — scaffold + git + GitHub + codegraph | in_progress | 2026-06-08 | local scaffold + git init + first commit done; **GitHub create + push USER-GATED** (mirror block); codegraph init pending verify |
+| 1 — scaffold + git + GitHub + codegraph | done | 2026-06-08 | scaffold+git+codegraph green; private repo `zhihao-acc/vllatent-ego-drone` created + pushed direct to github.com (workflow scope added); `origin` resolves, `main` tracks `origin/main` |
 | 2 — transcribe I/O contract → docs/io-contract.md | pending | | DoD item 1 (transcribe, not re-design) |
 | 3 — pure-tier tuple schemas | pending | | `vllatent/schemas.py` + test_schemas |
 | 4 — discrete→4-DoF action mapping | pending | | `vllatent/actions.py` vs AirVLN env_utils + test_actions |
@@ -24,6 +24,20 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 13 — Phase-A DoD verification | pending | | USER-GATED final sign-off; do NOT auto-flip done |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked`.
+
+---
+
+## 2026-06-08 — step 1: GitHub remote wired → DONE
+**Status:** in_progress → done.
+**What's done.** Created private GitHub repo `zhihao-acc/vllatent-ego-drone`; wired `origin`
+(fetch+push = **direct github.com**, no mirror — direct connect works from this host). Pushed `main`
+(`7ff793c`) after adding the `workflow` token scope (required to create `.github/workflows/ci.yml`).
+`git ls-remote origin` resolves; `main` tracks `origin/main`.
+**Tested.** Re-verified the full step-1 DoD today: codegraph_status healthy (19 files / 87 nodes / 87
+edges, `.codegraph/codegraph.db` present + gitignored); `make import-smoke` / `lint` / `typecheck` /
+`test` green (9 passed); `ALL=1 bash scripts/check_no_blobs.sh` OK.
+**Open / next.** Step 1 complete. Ralph loop now closes steps 2→5 autonomously (io-contract → schemas →
+actions → audit+fixtures), then STOPS at step 6 (S3 dataset download, **USER-GATED**).
 
 ---
 
