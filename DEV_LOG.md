@@ -27,6 +27,24 @@ Statuses: `pending` / `in_progress` / `done` / `blocked`.
 
 ---
 
+## 2026-06-08 — code-review pivot: STOP before step 7; refactor-before-Phase-B planned
+**Status:** Phase-A pure/data lane (steps 1–6 + 5b) DONE & green. Forward progress (steps 7–13) PAUSED
+pending a plan adjustment driven by a code review. Ralph loop stopped (`.claude/ralph-loop.local.md`
+removed).
+**Why.** A code review of the pure lane flagged structural issues to fix BEFORE Phase B (the ablation
+control surface is forming wrong): **H1/H2** no single typed source-of-truth for the swept knobs
+(T/H/depth/K) + untyped/mutable/decorative config (`load_config` orphan); **H3** the output seams
+(PredictorOutput / TrustReadout / Waypoint) are prose-only; **M1** quaternion primitives misplaced in
+`actions.py` + private cross-module imports (worse after 5b); **M2** `test_frames.py` no-flip-vs-fly0
+missing (the #1 foot-gun unmitigated); **M3** audit per-slice checks mis-scoped per-episode; **M4**
+`StepSample` lacks history/language masks; **M5** manifest stringly-typed + duplicated constants.
+**Artifacts (committed).** `plans/planning-prompt-2026-06-08-refactor-before-phaseB.md` (full review +
+planning-agent brief) + `plans/handoff-2026-06-08-refactor-session.md` (cold-start operator brief).
+**Next session.** Run the planning agent → `plans/phase-a5-refactor-before-phaseB.md` → user sign-off →
+ralph-execute (config single-source-of-truth first; items 1–3 are pure-tier, ~zero callers, cheapest now).
+
+---
+
 ## 2026-06-08 — steps 6 + 5b: real AerialVLN slice + audit (schema corrected from real data)
 **Status:** step 6 → done; step 5b → done. Step 5's `reference_path` assumption CORRECTED from real data.
 **Real-data finding (the load-bearing correction).** The scaffold/plan/fixtures assumed
