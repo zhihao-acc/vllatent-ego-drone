@@ -10,7 +10,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 |---|---|---|---|
 | 1 — scaffold + git + GitHub + codegraph | done | 2026-06-08 | scaffold+git+codegraph green; private repo `zhihao-acc/vllatent-ego-drone` created + pushed direct to github.com (workflow scope added); `origin` resolves, `main` tracks `origin/main` |
 | 2 — transcribe I/O contract → docs/io-contract.md | done | 2026-06-08 | DoD item 1; 4 seams + loader tuple + 2 foot-guns transcribed from vault arch §4/§6/§9; DoD grep PASS |
-| 3 — pure-tier tuple schemas | pending | | `vllatent/schemas.py` + test_schemas |
+| 3 — pure-tier tuple schemas | done | 2026-06-08 | `vllatent/schemas.py` (StepSample/EpisodeRecord/CacheManifestEntry, frozen+validated) + test_schemas (22 tests) |
 | 4 — discrete→4-DoF action mapping | pending | | `vllatent/actions.py` vs AirVLN env_utils + test_actions |
 | 5 — AerialVLN JSON audit parser (fixture) | pending | | `vllatent/audit.py` + tiny + quaternion_trap fixtures |
 | 6 — fetch real dataset JSON slice | pending | | USER-GATED (S3 / network / license) |
@@ -24,6 +24,27 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 13 — Phase-A DoD verification | pending | | USER-GATED final sign-off; do NOT auto-flip done |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked`.
+
+---
+
+## 2026-06-08 — step 3: pure-tier tuple schemas
+**Status:** pending → done (AUTONOMOUS).
+**What's done.** `vllatent/schemas.py` (numpy + stdlib only, no torch): three frozen dataclasses with
+boundary validation — (1) `StepSample` = the loader tuple `(z_t, history_latents, lang_tokens,
+action_id, z_next, delta_4dof, future_frame_rgb)` with the locked shapes/dtypes pinned as module
+constants (PATCH_TOKENS=196, EMBED_DIM=768, HISTORY=3, HORIZON=4, N_ACTIONS=8, DOF=4; latents fp16,
+delta f32, rgb uint8); (2) `EpisodeRecord` = parsed AerialVLN episode (quaternions canonical xyzw,
+actions int-aligned with reference_path); (3) `CacheManifestEntry` with `to_dict`/`from_dict` whose
+keys satisfy `vllatent.manifest.validate_manifest`. Array records use `eq=False` (numpy `__eq__` is an
+array) but stay `frozen`. `__post_init__` raises TypeError/ValueError with specific messages on a
+contract breach.
+**Tested.** `pytest -q tests/test_schemas.py` → 22 passed (shapes/dtypes, immutability, bad-input
+rejection, manifest-entry JSON round-trip + cross-check against the manifest validator). Full pure
+sweep green: import-smoke / lint / typecheck / `pytest -m "not torch and not sim"` (31 passed) /
+blob-guard.
+**Open / next.** Step 4 — discrete→continuous-4-DoF action mapping (`vllatent/actions.py` +
+`tests/test_actions.py`), transcribing AirVLN constants + reproducing `env_utils.getPoseAfterMakeAction`.
+**Vault.** No new decision (schemas implement the locked I/O contract).
 
 ---
 
