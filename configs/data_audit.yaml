@@ -1,0 +1,46 @@
+# AerialVLN audit target (Phase-A step 5/5b). The audit confirms the REAL JSON
+# matches this expected schema before any training code is written.
+# Source of truth for the field names: third_party/AirVLN (env.py, env_utils.py,
+# airsim_plugin/airsim_settings.py) — reuse/replay only, do NOT modify.
+
+dataset:
+  name: "aerialvln"
+  variant: "${AERIALVLN_VARIANT:-AerialVLN}"   # AerialVLN vs AerialVLN-S — confirm in step 5b
+  license: "CC BY-NC-SA 4.0"                    # non-commercial; confirm in step 6
+  splits: ["train", "val_seen", "val_unseen", "test"]
+  scene_id_range: [1, 25]
+
+episode_schema:
+  keys: ["episode_id", "trajectory_id", "scene_id", "instruction", "start_position", "start_rotation", "goals", "actions", "reference_path"]
+  instruction_text_key: "instruction.instruction_text"
+  start_position: "[x, y, z] meters, AirSim NED"
+  start_rotation: "[w, x, y, z] quaternion (w-FIRST)"        # foot-gun #1
+  reference_path: "list of [x, y, z, qx, qy, qz, qw] (xyzw, w-LAST)"  # foot-gun #1
+  actions: "list[int] 0-7, index-aligned with reference_path"
+
+action_enum:                                    # transcribe verbatim; verify in step 4
+  STOP: 0
+  MOVE_FORWARD: 1     # 5 m
+  TURN_LEFT: 2        # 15 deg (yaw -15)
+  TURN_RIGHT: 3       # 15 deg (yaw +15)
+  GO_UP: 4            # 2 m (-z, NED z-down)
+  GO_DOWN: 5          # 2 m (+z)
+  MOVE_LEFT: 6        # 5 m (body-lateral)
+  MOVE_RIGHT: 7       # 5 m (body-lateral)
+
+render:
+  rgb_image_type: "Scene"                       # uint8 BGR -> convert to RGB (foot-gun #2)
+  depth_image_type: "DepthPerspective"          # float meters, clip[0,100]/100
+  depth_vis_scenes: [1, 7]                       # these use DepthVis instead
+  camera_name: "front_0"
+  vehicle_name: "Drone_1"
+  rgb_hw: [224, 224]
+  depth_hw: [256, 256]
+
+# What the audit must VERIFY (DoD item 2):
+verify:
+  - "quaternion order pinned: start_rotation wxyz vs reference_path xyzw reconciled to xyzw"
+  - "actions[step] index-aligned with reference_path[step]"
+  - "continuous delta derived from consecutive poses matches the quantized action delta"
+  - "all 8 action classes observed across the slice"
+  - "scene_id within [1, 25]; {train,val_seen,val_unseen,test}.json present"

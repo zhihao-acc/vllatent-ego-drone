@@ -1,0 +1,61 @@
+name: ci
+
+# Env-split honest CI: lint + types + the PURE-tier import-smoke / unit tests + the
+# blob guard. NO torch, NO transformers, NO timm, NO AirSim, NO GPU, NO weights, NO
+# siblings. The torch tier (vllatent.encode, vllatent.data) and sim tier
+# (vllatent.render, vllatent.cache) are import-guarded and exercised locally
+# (`make test-torch`) / inside fly0-m1 — never here.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      - name: Install lint/type + PURE runtime deps (no torch, no transformers, no timm, no airsim)
+        run: |
+          python -m pip install --upgrade pip
+          pip install ruff mypy types-PyYAML pyyaml numpy pytest
+
+      - name: Pre-commit blob guard
+        run: ALL=1 bash scripts/check_no_blobs.sh
+
+      - name: Ruff lint
+        run: ruff check .
+
+      - name: Mypy (HARD gate on the PURE tier)
+        run: mypy vllatent/schemas.py vllatent/actions.py vllatent/frames.py vllatent/config.py vllatent/manifest.py vllatent/audit.py
+
+      - name: Import smoke (PURE tier — numpy/pyyaml only)
+        run: |
+          python -c "import vllatent.schemas"
+          python -c "import vllatent.actions"
+          python -c "import vllatent.frames"
+          python -c "import vllatent.config"
+          python -c "import vllatent.manifest"
+          python -c "import vllatent.audit"
+
+      - name: Cache-manifest CLI round-trip
+        run: python -m vllatent.manifest --emit-empty | python -m vllatent.manifest --validate -
+
+      - name: Pure unit tests (torch/sim-marked tests auto-skip)
+        run: pytest -q -m "not torch and not sim"

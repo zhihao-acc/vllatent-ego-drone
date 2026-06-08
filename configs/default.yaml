@@ -1,0 +1,38 @@
+# vllatent-ego-drone — default config (Phase A). Values are ${ENV:-default}-expandable.
+# The architecture is LOCKED (vault [[arch-design-2026-06-08-latent-pred]]); these
+# are the implementation knobs, not architectural choices.
+
+encoder:
+  model_id: "facebook/dinov3-vitb16"   # frozen, RGB-only
+  input_hw: [224, 224]
+  patch_tokens: 196
+  dim: 768
+  dtype: "float16"
+  hf_endpoint: "${HF_ENDPOINT:-https://hf-mirror.com}"
+
+predictor:                              # built in Phase B; pinned here for reference
+  depth: 12
+  heads: 12
+  mlp: 3072
+  history: 3                            # H
+  horizon: 4                            # T
+
+action:
+  # AirSim-NED body, yaw-only. Constants transcribed from AirVLN airsim_settings.py.
+  forward_step_m: 5
+  up_down_step_m: 2
+  left_right_step_m: 5
+  turn_deg: 15
+
+data:
+  root: "${VLLATENT_DATA:-data}"
+  json_dir: "${VLLATENT_DATA:-data}/aerialvln_json"
+  cache_dir: "${VLLATENT_CACHE:-data/latent_cache}"
+  scenes_root: "/opt/aerialvln"         # only inside the fly0-m1 docker
+  splits: ["train", "val_seen", "val_unseen", "test"]
+
+cache:
+  version: "0.1"
+  color_order: "RGB"                    # BGR->RGB applied before the encoder (foot-gun #2)
+  quaternion_order: "xyzw"              # canonical (foot-gun #1)
+  frame: "airsim_ned_body"

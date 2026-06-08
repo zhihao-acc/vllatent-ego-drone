@@ -1,0 +1,79 @@
+# vllatent-ego-drone — repo-wide ignores. Training-repo flavored (upipe base + latents/caches).
+
+# === Python ===
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+dist/
+downloads/
+*.egg-info/
+*.egg
+.venv/
+venv/
+
+# === Test / coverage / type caches ===
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.nox/
+.mypy_cache/
+.ruff_cache/
+
+# === Runtime artefacts (regenerated; never commit) ===
+runs/
+weights/
+checkpoints/
+logs/
+.cache/
+
+# === Cached latents / rendered frames / downloaded data (render-once; huge; live on the data disk) ===
+# Anchored to repo root with a leading slash so they do NOT shadow the vllatent/data/ package.
+/latents/
+/cache/
+/frames/
+/data/
+*.npy
+*.npz
+!fixtures/**            # tiny committed fixtures are allowed (see scripts/check_no_blobs.sh)
+
+# === Model checkpoints / large binaries ===
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.onnx
+*.bin
+*.h5
+
+# === Video artefacts ===
+*.mp4
+*.avi
+*.mov
+*.mkv
+
+# === Secrets ===
+.env
+.env.*
+*.pem
+*.key
+secrets/
+
+# === codegraph project-scoped index (DB lives here; never commit) ===
+.codegraph/
+
+# === Ralph loop session state (local; not shared) ===
+.claude/ralph-loop.local.md
+
+# === IDE / OS ===
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
