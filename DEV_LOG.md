@@ -9,7 +9,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | step | status | date | notes |
 |---|---|---|---|
 | 1 — scaffold + git + GitHub + codegraph | done | 2026-06-08 | scaffold+git+codegraph green; private repo `zhihao-acc/vllatent-ego-drone` created + pushed direct to github.com (workflow scope added); `origin` resolves, `main` tracks `origin/main` |
-| 2 — transcribe I/O contract → docs/io-contract.md | pending | | DoD item 1 (transcribe, not re-design) |
+| 2 — transcribe I/O contract → docs/io-contract.md | done | 2026-06-08 | DoD item 1; 4 seams + loader tuple + 2 foot-guns transcribed from vault arch §4/§6/§9; DoD grep PASS |
 | 3 — pure-tier tuple schemas | pending | | `vllatent/schemas.py` + test_schemas |
 | 4 — discrete→4-DoF action mapping | pending | | `vllatent/actions.py` vs AirVLN env_utils + test_actions |
 | 5 — AerialVLN JSON audit parser (fixture) | pending | | `vllatent/audit.py` + tiny + quaternion_trap fixtures |
@@ -24,6 +24,24 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 13 — Phase-A DoD verification | pending | | USER-GATED final sign-off; do NOT auto-flip done |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked`.
+
+---
+
+## 2026-06-08 — step 2: transcribe I/O contract → docs/io-contract.md
+**Status:** pending → done (AUTONOMOUS).
+**What's done.** Wrote `docs/io-contract.md` — a *transcription* (not a re-derivation) of the LOCKED
+I/O contract from vault `[[arch-design-2026-06-08-latent-pred]]`: the §4 tensor I/O table; the four
+seams — (a) action repr = discrete codebook 0–7 → per-step FiLM, with the verbatim AirVLN enum
+(STOP=0…MOVE_RIGHT=7) + step constants (FORWARD/LEFT_RIGHT=5, UP_DOWN=2, TURN/TILT=15); (b) language =
+frozen SigLIP/CLIP text tower 512→768 → cross-attention; (c) uncertainty = deployed single-pass
+horizon head, with K=5 ensemble + V-JEPA-2 marked Phase C (documented, not built); (d) waypoint→EGO =
+continuous 4-DoF (Δx,Δy,Δz,Δψ) AirSim-NED body + the NED→FLU→ENU remap marked **NOT executed in
+Phase A**. Pinned the loader output tuple (arch §6 item 5) + a "Frame & convention hazards" section
+covering both foot-guns (quaternion order `w-FIRST` vs xyzw; `BGR`→RGB) + licenses (CC BY-NC-SA 4.0).
+**Tested.** `test -f docs/io-contract.md && grep -q "NOT executed in Phase A" && grep -q "w-FIRST" &&
+grep -q "BGR"` → PASS.
+**Open / next.** Step 3 — pure-tier tuple schemas (`vllatent/schemas.py` + `tests/test_schemas.py`).
+**Vault.** No new decision (pure transcription of the locked arch doc).
 
 ---
 
