@@ -11,7 +11,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 1 — scaffold + git + GitHub + codegraph | done | 2026-06-08 | scaffold+git+codegraph green; private repo `zhihao-acc/vllatent-ego-drone` created + pushed direct to github.com (workflow scope added); `origin` resolves, `main` tracks `origin/main` |
 | 2 — transcribe I/O contract → docs/io-contract.md | done | 2026-06-08 | DoD item 1; 4 seams + loader tuple + 2 foot-guns transcribed from vault arch §4/§6/§9; DoD grep PASS |
 | 3 — pure-tier tuple schemas | done | 2026-06-08 | `vllatent/schemas.py` (StepSample/EpisodeRecord/CacheManifestEntry, frozen+validated) + test_schemas (22 tests) |
-| 4 — discrete→4-DoF action mapping | pending | | `vllatent/actions.py` vs AirVLN env_utils + test_actions |
+| 4 — discrete→4-DoF action mapping | done | 2026-06-08 | `vllatent/actions.py` (Action enum + constants verbatim; apply_delta reproduces env_utils; pose_pair_to_body_delta) + test_actions (64) |
 | 5 — AerialVLN JSON audit parser (fixture) | pending | | `vllatent/audit.py` + tiny + quaternion_trap fixtures |
 | 6 — fetch real dataset JSON slice | pending | | USER-GATED (S3 / network / license) |
 | 5b — audit on real slice | pending | | USER-GATED (depends on 6) — DoD item 2 |
@@ -24,6 +24,29 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 13 — Phase-A DoD verification | pending | | USER-GATED final sign-off; do NOT auto-flip done |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked`.
+
+---
+
+## 2026-06-08 — step 4: discrete→continuous-4-DoF action mapping
+**Status:** pending → done (AUTONOMOUS).
+**What's done.** `vllatent/actions.py` (pure numpy, NO airsim): `Action(IntEnum)` + step constants
+transcribed VERBATIM from `third_party/AirVLN/airsim_plugin/airsim_settings.py` (STOP=0…MOVE_RIGHT=7;
+FORWARD/LEFT_RIGHT=5, UP_DOWN=2, TURN=15). `action_to_delta(id)→(4,) f32` = canonical body-frame
+`(dx,dy,dz,dyaw_deg)`, NED z-down (GO_UP=−z), body-right=+y, lateral=±5. `apply_delta(pose,id)`
+reproduces `env_utils.getPoseAfterMakeAction` EXACTLY — incl. the AirSim quaternion↔euler formulas
+reproduced in-module (`to_eularian_angles` yaw, `to_quaternion(0,0,yaw)`), pitch/roll forced 0, the
+yaw-wrap at ±180, forward `unit_z==0`, and the `(yaw+90°)` body-lateral with LEFT×(−1).
+`pose_pair_to_body_delta(a,b)` = the inverse the step-5 audit will use to verify dataset poses vs
+quantized deltas.
+**Tested.** `pytest -q tests/test_actions.py` → 64 passed: enum/constants, per-action deltas,
+`apply_delta` at known starts (forward planar + yaw-following, lateral sign, z up/down, ±15° turn, STOP
+identity), and a 6-yaw × 8-action round-trip `apply_delta→derive == action_to_delta` (pre-validates the
+step-5 audit). Full pure sweep green: import-smoke / lint / typecheck / `pytest -m "not torch and not
+sim"` (95 passed) / blob-guard.
+**Open / next.** Step 5 — AerialVLN-JSON audit parser (`vllatent/audit.py`) + tiny_episode &
+quaternion_trap fixtures + test_audit; then `make audit` clean. After step 5 → step 6 (S3 download,
+USER-GATED) = STOP CHECK.
+**Vault.** No new decision (faithful reproduction of the AirVLN ground-truth action arithmetic).
 
 ---
 
