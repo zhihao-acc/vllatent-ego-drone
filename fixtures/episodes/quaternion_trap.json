@@ -1,5 +1,5 @@
 {
-  "_note": "Phase-A quaternion trap; start_rotation is w-FIRST [w,x,y,z]. A naive xyzw read mislabels yaw 90deg as 0deg.",
+  "_note": "Phase-A quaternion trap; start_rotation is w-FIRST quaternion [w,x,y,z]; reference_path is EULER. A naive xyzw read of start_rotation mislabels yaw 90deg as 0deg.",
   "episode_id": "trap-0001",
   "trajectory_id": "trap-traj-0001",
   "scene_id": 3,
@@ -37,8 +37,7 @@
       -12.0,
       0.0,
       0.0,
-      0.7071067811865475,
-      0.7071067811865476
+      1.5707963267948963
     ],
     [
       5.000000000000002,
@@ -46,17 +45,7 @@
       -12.0,
       0.0,
       0.0,
-      0.7071067811865475,
-      0.7071067811865476
-    ],
-    [
-      5.000000000000002,
-      10.0,
-      -12.0,
-      0.0,
-      0.0,
-      0.7071067811865475,
-      0.7071067811865476
+      1.5707963267948963
     ]
   ]
 }

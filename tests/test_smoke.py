@@ -33,7 +33,10 @@ def test_manifest_rejects_missing_keys() -> None:
 
 def test_frame_order_constants() -> None:
     from vllatent import frames
-    # The two data foot-guns, pinned: start_rotation is w-first, reference_path is xyzw.
+    # Foot-gun #1, pinned: start_rotation is a w-FIRST quaternion; reference_path is EULER
+    # [x,y,z,pitch,roll,yaw] (radians, 6-wide, yaw=row[5]) — NOT a quaternion (confirmed step 5b).
     assert frames.QUAT_ORDER_START_ROTATION == "wxyz"
-    assert frames.QUAT_ORDER_REFERENCE_PATH == "xyzw"
     assert frames.QUAT_ORDER_CANONICAL == "xyzw"
+    assert frames.REFERENCE_PATH_ORIENTATION == "euler_pitch_roll_yaw_rad"
+    assert frames.REFERENCE_PATH_ROW_WIDTH == 6
+    assert frames.REFERENCE_PATH_YAW_INDEX == 5

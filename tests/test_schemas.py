@@ -50,7 +50,7 @@ def _episode(**over: object) -> EpisodeRecord:
         start_rotation_xyzw=np.array([0.0, 0.0, 0.0, 1.0]),
         goal_positions=np.zeros((1, 3)),
         actions=np.array([1, 6, 7, 0], dtype=int),
-        reference_path=np.zeros((n + 1, 7)),
+        reference_path=np.zeros((n + 1, 6)),  # [x,y,z,pitch,roll,yaw] Euler
     )
     kw.update(over)
     return EpisodeRecord(**kw)  # type: ignore[arg-type]
@@ -110,7 +110,7 @@ def test_episoderecord_construct_and_immutable() -> None:
     e = _episode()
     assert e.scene_id == 1
     assert e.start_rotation_xyzw.shape == (4,)
-    assert e.reference_path.shape[1] == 7
+    assert e.reference_path.shape[1] == 6
     assert e.actions.dtype.kind == "i"
     with pytest.raises(dataclasses.FrozenInstanceError):
         e.scene_id = 2  # type: ignore[misc]
@@ -121,7 +121,7 @@ def test_episoderecord_construct_and_immutable() -> None:
     [
         dict(start_rotation_xyzw=np.zeros(3)),          # quaternion must be (4,)
         dict(start_position=np.zeros(2)),               # position must be (3,)
-        dict(reference_path=np.zeros((5, 6))),          # pose row must be 7-wide
+        dict(reference_path=np.zeros((5, 7))),          # pose row must be 6-wide [x,y,z,pitch,roll,yaw]
         dict(goal_positions=np.zeros((1, 2))),          # goal must be (G,3)
         dict(actions=np.zeros(4, dtype=float)),         # actions must be integer-kind
         dict(scene_id="1"),                             # scene_id must be int

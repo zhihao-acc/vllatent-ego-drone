@@ -96,9 +96,10 @@ class StepSample:
 class EpisodeRecord:
     """A parsed AerialVLN episode (output of ``vllatent.audit.parse_episode``).
 
-    Quaternion fields are CANONICAL ``xyzw``: ``start_rotation`` (w-FIRST in the raw
-    JSON) is reordered on parse; ``reference_path`` poses are already xyzw. ``actions``
-    is index-aligned with consecutive ``reference_path`` poses (audit asserts this).
+    ``start_rotation`` is a QUATERNION, w-FIRST in the raw JSON, reordered to canonical
+    ``xyzw`` on parse. ``reference_path`` rows are EULER ``[x,y,z,pitch,roll,yaw]`` (radians,
+    6-wide, pitch=roll==0; yaw = row[5]) — NOT quaternions (confirmed step 5b). ``actions``
+    index-aligns with the transitions ``reference_path[t] -> reference_path[t+1]``.
     """
 
     episode_id: str
@@ -106,10 +107,10 @@ class EpisodeRecord:
     scene_id: int
     instruction_text: str
     start_position: np.ndarray       # (3,) float — NED x,y,z
-    start_rotation_xyzw: np.ndarray  # (4,) float — canonical xyzw (reordered from w-FIRST start_rotation)
+    start_rotation_xyzw: np.ndarray  # (4,) float — canonical xyzw quaternion (reordered from w-FIRST)
     goal_positions: np.ndarray       # (G,3) float — goals[].position (NED)
     actions: np.ndarray              # (N,) int — discrete ids 0..7
-    reference_path: np.ndarray       # (P,7) float — [x,y,z,qx,qy,qz,qw] per pose (xyzw)
+    reference_path: np.ndarray       # (P,6) float — [x,y,z,pitch,roll,yaw] per pose (Euler radians)
 
     def __post_init__(self) -> None:
         if not isinstance(self.episode_id, str):
@@ -124,7 +125,7 @@ class EpisodeRecord:
         _check_array("start_rotation_xyzw", self.start_rotation_xyzw, (4,), kind="f")
         _check_array("goal_positions", self.goal_positions, (None, 3), kind="f")
         _check_array("actions", self.actions, (None,), kind="i")
-        _check_array("reference_path", self.reference_path, (None, 7), kind="f")
+        _check_array("reference_path", self.reference_path, (None, 6), kind="f")
 
 
 @dataclass(frozen=True)

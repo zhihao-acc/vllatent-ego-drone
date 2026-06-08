@@ -10,11 +10,14 @@ Pure-numpy / stdlib; NO sim, NO torch. Schema confirmed against AirVLN's own loa
   * ``start_position`` ``[x,y,z]`` (NED) · ``start_rotation`` ``[w,x,y,z]`` **w-FIRST**
     (env.py builds ``Quaternionr(x=sr[1], y=sr[2], z=sr[3], w=sr[0])``)
   * ``goals[].position`` · ``actions`` list[int] 0..7
-  * ``reference_path`` poses ``[x,y,z,qx,qy,qz,qw]`` (xyzw, w-LAST)
+  * ``reference_path`` rows ``[x,y,z,pitch,roll,yaw]`` — EULER radians, 6-wide,
+    pitch=roll==0 (4-DoF), yaw = row[5]. ``len(reference_path) == len(actions)``;
+    ``reference_path[0]`` is the start pose and ``actions[t]`` drives
+    ``reference_path[t] -> reference_path[t+1]`` (the terminal STOP has no stored next pose).
 
 What the audit does (foot-gun #1 + tuple/Δ verification):
-  * ``parse_episode``: reorder ``start_rotation`` (w-FIRST) -> canonical ``xyzw``.
-  * quaternion verdict: confirm the reordered start rotation matches ``reference_path[0]``,
+  * ``parse_episode``: reorder ``start_rotation`` (w-FIRST quaternion) -> canonical ``xyzw``.
+  * quaternion verdict: confirm the reordered start yaw matches ``reference_path[0]`` yaw,
     and FLAG that a naïve (no-reorder) read would corrupt the yaw (the foot-gun).
   * assert ``actions[t]`` is index-aligned with the pose pair
     ``reference_path[t] -> reference_path[t+1]``.
@@ -41,12 +44,15 @@ from typing import Any
 import numpy as np
 
 from vllatent.actions import (
+    Pose,
     _wrap_pi,
+    _xyzw_from_yaw,
     _yaw_from_xyzw,
     action_to_delta,
     pose_pair_to_body_delta,
 )
-from vllatent.schemas import DOF, N_ACTIONS, EpisodeRecord
+from vllatent.frames import REFERENCE_PATH_ROW_WIDTH, REFERENCE_PATH_YAW_INDEX
+from vllatent.schemas import N_ACTIONS, EpisodeRecord
 
 DELTA_TOL = 1e-3        # body-frame Δ match tolerance (m / deg) vs the quantized action delta
 QUAT_TOL_DEG = 1.0      # yaw consistency tolerance (degrees)
@@ -158,15 +164,16 @@ class AuditReport:
 
 
 def _quaternion_verdict(episode: dict[str, Any], rec: EpisodeRecord) -> QuaternionVerdict:
-    sr = episode["start_rotation"]  # raw, w-FIRST
+    sr = episode["start_rotation"]  # raw, w-FIRST quaternion
     canonical_yaw = math.degrees(_yaw_from_xyzw(rec.start_rotation_xyzw))
     naive_yaw = math.degrees(_yaw_from_xyzw(np.asarray(sr, dtype=float)))  # read as xyzw (wrong)
-    reference0_yaw = math.degrees(_yaw_from_xyzw(rec.reference_path[0, 3:7]))
+    # reference_path orientation is EULER radians; yaw is a direct field (no quaternion).
+    reference0_yaw = math.degrees(float(rec.reference_path[0, REFERENCE_PATH_YAW_INDEX]))
     consistent = abs(math.degrees(_wrap_pi(math.radians(canonical_yaw - reference0_yaw)))) <= QUAT_TOL_DEG
     naive_mismatch = abs(math.degrees(_wrap_pi(math.radians(naive_yaw - reference0_yaw)))) > QUAT_TOL_DEG
     return QuaternionVerdict(
         start_rotation_order="wxyz",
-        reference_path_order="xyzw",
+        reference_path_order="euler_pitch_roll_yaw_rad",
         canonical_yaw_deg=canonical_yaw,
         reference0_yaw_deg=reference0_yaw,
         naive_yaw_deg=naive_yaw,
@@ -175,12 +182,22 @@ def _quaternion_verdict(episode: dict[str, Any], rec: EpisodeRecord) -> Quaterni
     )
 
 
+def _euler_row_to_pose(row: np.ndarray) -> Pose:
+    """reference_path row [x,y,z,pitch,roll,yaw] (rad) -> (position, xyzw quaternion).
+
+    pitch == roll == 0 in AerialVLN (4-DoF); only yaw drives the body frame.
+    """
+    return (np.asarray(row[0:3], dtype=float), _xyzw_from_yaw(float(row[REFERENCE_PATH_YAW_INDEX])))
+
+
 def _delta_mismatches(rec: EpisodeRecord) -> list[DeltaMismatch]:
     mismatches: list[DeltaMismatch] = []
+    # action[t] drives reference_path[t] -> reference_path[t+1]; the terminal STOP (last
+    # action, no stored next pose) is unverifiable, so cap at len(reference_path) - 1.
     n_transitions = min(len(rec.actions), len(rec.reference_path) - 1)
     for t in range(n_transitions):
-        before = (rec.reference_path[t, 0:3], rec.reference_path[t, 3:7])
-        after = (rec.reference_path[t + 1, 0:3], rec.reference_path[t + 1, 3:7])
+        before = _euler_row_to_pose(rec.reference_path[t])
+        after = _euler_row_to_pose(rec.reference_path[t + 1])
         derived = pose_pair_to_body_delta(before, after)
         expected = action_to_delta(int(rec.actions[t]))
         err = float(np.max(np.abs(derived - expected)))
@@ -202,13 +219,18 @@ def audit_episode(episode: dict[str, Any]) -> AuditReport:
     rec = parse_episode(episode)
     counts = {int(k): int(v) for k, v in Counter(rec.actions.tolist()).items()}
     all_classes = all(counts.get(a, 0) >= 1 for a in range(N_ACTIONS))
-    alignment_ok = len(rec.reference_path) == len(rec.actions) + 1
+    # Real AerialVLN: one action per pose (len ==), reference_path[0] is the start pose.
+    starts_at_start = bool(
+        rec.reference_path.shape[0] > 0
+        and np.allclose(rec.reference_path[0, 0:3], rec.start_position, atol=1e-3)
+    )
+    alignment_ok = len(rec.reference_path) == len(rec.actions) and starts_at_start
     tuple_complete = bool(
         rec.instruction_text
         and rec.actions.size > 0
         and rec.reference_path.shape[0] > 0
         and rec.start_position.shape == (3,)
-        and rec.reference_path.shape[1] == DOF + 3  # [x,y,z,qx,qy,qz,qw]
+        and rec.reference_path.shape[1] == REFERENCE_PATH_ROW_WIDTH  # [x,y,z,pitch,roll,yaw]
     )
     quaternion = _quaternion_verdict(episode, rec)
     mismatches = _delta_mismatches(rec)

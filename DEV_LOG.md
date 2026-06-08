@@ -12,9 +12,9 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 2 — transcribe I/O contract → docs/io-contract.md | done | 2026-06-08 | DoD item 1; 4 seams + loader tuple + 2 foot-guns transcribed from vault arch §4/§6/§9; DoD grep PASS |
 | 3 — pure-tier tuple schemas | done | 2026-06-08 | `vllatent/schemas.py` (StepSample/EpisodeRecord/CacheManifestEntry, frozen+validated) + test_schemas (22 tests) |
 | 4 — discrete→4-DoF action mapping | done | 2026-06-08 | `vllatent/actions.py` (Action enum + constants verbatim; apply_delta reproduces env_utils; pose_pair_to_body_delta) + test_actions (64) |
-| 5 — AerialVLN JSON audit parser (fixture) | done | 2026-06-08 | `vllatent/audit.py` (parse_episode/audit_episode + AuditReport/QuaternionVerdict + CLI) + tiny & quaternion_trap fixtures + test_audit (7); `make audit` clean |
-| 6 — fetch real dataset JSON slice | pending | | USER-GATED (S3 / network / license) |
-| 5b — audit on real slice | pending | | USER-GATED (depends on 6) — DoD item 2 |
+| 5 — AerialVLN JSON audit parser (fixture) | done | 2026-06-08 | `vllatent/audit.py` (parse_episode/audit_episode + AuditReport/QuaternionVerdict + CLI) + tiny & quaternion_trap fixtures + test_audit; `make audit` clean. **`reference_path` schema corrected to 6-wide Euler in 5b** |
+| 6 — fetch real dataset JSON slice | done | 2026-06-08 | USER downloaded full splits (Kaggle/Baidu, NOT S3); `fetch_aerialvln_json.sh` finished (slicer); `train.slice.json` (50 eps); CC BY-NC-SA 4.0 |
+| 5b — audit on real slice | done | 2026-06-08 | 50/50 ok, ~10198 transitions **0 Δ-mismatches**, all 8 classes, quaternion consistent (34/50 would corrupt yaw w/o reorder) |
 | 7 — DINOv3 encoder wrapper | pending | | contract test AUTONOMOUS / real weights USER-GATED |
 | 8 — render harness (teleport+capture) | pending | | unit AUTONOMOUS / live render USER-GATED (docker+UE4) |
 | 9 — render→encode→cache + manifest | pending | | manifest test AUTONOMOUS / small-slice build USER-GATED |
@@ -24,6 +24,36 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 13 — Phase-A DoD verification | pending | | USER-GATED final sign-off; do NOT auto-flip done |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked`.
+
+---
+
+## 2026-06-08 — steps 6 + 5b: real AerialVLN slice + audit (schema corrected from real data)
+**Status:** step 6 → done; step 5b → done. Step 5's `reference_path` assumption CORRECTED from real data.
+**Real-data finding (the load-bearing correction).** The scaffold/plan/fixtures assumed
+`reference_path` rows were 7-wide quaternions `[x,y,z,qx,qy,qz,qw]`. The **real AerialVLN** rows are
+**6-wide EULER `[x,y,z,pitch,roll,yaw]` (radians)** — pitch=roll≡0 (4-DoF), **yaw = row[5]**; only
+`start_rotation` is a quaternion (w-FIRST). Also **`len(reference_path) == len(actions)`** (NOT +1):
+`reference_path[0]` is the start pose, `actions[t]` drives `ref[t]→ref[t+1]`, terminal STOP has no
+stored next pose. Validated `vllatent.actions` against raw data: **0 mismatches across 39,133
+transitions / 200 episodes** (all motion classes) — the action arithmetic was already correct; only the
+pose *format* assumption was wrong.
+**What's done.** Corrected `frames.py` (drop the bogus `reference_path=xyzw` constant → add
+`REFERENCE_PATH_ORIENTATION/ROW_WIDTH/YAW_INDEX`), `schemas.py` (`EpisodeRecord.reference_path` (P,6)),
+`audit.py` (Euler `_euler_row_to_pose`, yaw=row[5] quaternion verdict, alignment `len(ref)==len(actions)`
++ start-pose anchor, tuple width 6), `docs/io-contract.md` (foot-gun #1 rewritten: quaternion-vs-Euler),
+both fixtures regenerated to the real Euler layout, tests updated (smoke/schemas/audit). Finished
+`scripts/fetch_aerialvln_json.sh` (Kaggle/Baidu source doc + local slice-of-N writer for the real
+`{"episodes":[...]}`); sliced `train.slice.json` (50/16386).
+**Tested (5b on real slice).** `python -m vllatent.audit` over `train.slice.json`: **50/50 ok,
+~10,198 transitions, 0 Δ-mismatches, all 8 action classes, 50/50 quaternion reorder-consistent,
+34/50 episodes would corrupt yaw without the reorder**; 14 distinct scene_ids. Full pure sweep green
+(import-smoke / lint / typecheck / 102 tests / `make audit` / blob-guard). License **CC BY-NC-SA 4.0**
+recorded. `data/` gitignored — no JSON committed.
+**Open / next.** Step 7 — DINOv3 encoder wrapper (`vllatent/encode/dinov3.py`): contract test is
+AUTONOMOUS (monkeypatched backbone, BGR→RGB boundary, `(196,768) fp16`); real-weight smoke is dev-gated.
+Then steps 8 (render unit) / 9 (cache manifest) autonomous halves, 10 (loader), 12 (sizing).
+**Vault.** File the `reference_path = Euler (not quaternion)` + `len(ref)==len(actions)` finding under
+`latent-pred-pipeline/` (corrects the Phase-A data-audit assumption).
 
 ---
 

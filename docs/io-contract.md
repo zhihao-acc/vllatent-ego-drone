@@ -111,18 +111,24 @@ tuples.
 
 ## 3. Frame & convention hazards (the load-bearing data foot-guns)
 
-### Foot-gun #1 — quaternion order (audit + render)
+### Foot-gun #1 — orientation formats (audit + render) — CONFIRMED against real data (step 5b)
 
-| Field | Order | Note |
+The two orientation fields use **different representations** — that is the real foot-gun:
+
+| Field | Format | Note |
 |---|---|---|
-| AerialVLN `start_rotation` | `[w, x, y, z]` — **`w-FIRST`** | episode start orientation |
-| AerialVLN `reference_path` pose | `[x, y, z, qx, qy, qz, qw]` — `xyzw` (w-LAST) | per-pose orientation |
-| `airsim.Quaternionr(x, y, z, w)` | `xyzw` | sim API |
-| **Canonical internal order** | **`xyzw`** | `vllatent/frames.py` pins this |
+| AerialVLN `start_rotation` | **quaternion `[w, x, y, z]` — `w-FIRST`** | episode start orientation |
+| `airsim.Quaternionr(x, y, z, w)` | quaternion `xyzw` | sim API |
+| **Canonical internal order** | quaternion **`xyzw`** | `vllatent/frames.py` pins this |
+| AerialVLN `reference_path` row | **Euler `[x, y, z, pitch, roll, yaw]` (radians, 6-wide)** | per-pose; pitch=roll≡0; **yaw = `row[5]`** — NOT a quaternion |
 
-Reorder `start_rotation` (`w-FIRST`) → canonical `xyzw` **before any use**. The
-`fixtures/episodes/quaternion_trap.json` fixture is authored so a naïve (no-reorder) read yields a
-wrong yaw — the audit (step 5) **must flag it loudly** if the reorder is skipped.
+Reorder `start_rotation` (`w-FIRST`) → canonical `xyzw` **before any use**; read `reference_path`
+orientation as Euler (**yaw = `row[5]`**) — do **not** mistake the 6-wide row for a 7-wide quaternion.
+Index alignment (confirmed on real data): **`len(reference_path) == len(actions)`**; `reference_path[0]`
+is the start pose and `actions[t]` drives `reference_path[t] → reference_path[t+1]` (the terminal STOP
+has no stored next pose). The `fixtures/episodes/quaternion_trap.json` fixture is authored so a naïve
+(no-reorder) read of `start_rotation` yields a wrong yaw — the audit **flags it loudly**
+(`naive_would_mismatch`).
 
 ### Foot-gun #2 — `BGR` → RGB at the render→encode boundary
 

@@ -39,9 +39,11 @@ def test_tiny_has_all_action_classes() -> None:
         assert rep.action_counts.get(int(a), 0) >= 1
 
 
-def test_tiny_alignment_poses_eq_actions_plus_one() -> None:
+def test_tiny_alignment_poses_eq_actions() -> None:
+    # Real AerialVLN layout: one pose per action; reference_path[0] is the start pose.
     rep = audit_episode(_load("tiny_episode.json"))
-    assert rep.n_poses == rep.n_actions + 1
+    assert rep.n_poses == rep.n_actions
+    assert rep.alignment_ok
 
 
 # --- quaternion_trap: the foot-gun must be flagged ---
