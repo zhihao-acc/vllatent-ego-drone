@@ -167,6 +167,49 @@ class AuditReport:
         }
 
 
+@dataclass(frozen=True)
+class AuditSummary:
+    """SLICE-scope aggregate over many episode :class:`AuditReport`\\ s (M3).
+
+    The dataset-level checks — *all 8 action classes present*, *scene-id range*, *splits present*
+    — are properties of the SLICE, not a single episode. The per-episode ``AuditReport`` carries
+    its own (per-episode) view of those for the fixture, but on real data they are only meaningful
+    aggregated here: ``all_action_classes_present`` is the UNION over the slice, ``scene_id_range``
+    is min..max across episodes, and ``splits_present`` names the split(s) the slice covers.
+    """
+
+    n_episodes: int
+    n_ok: int
+    n_transitions: int
+    total_delta_mismatches: int
+    action_counts: dict[int, int]          # summed across the slice
+    all_action_classes_present: bool       # the slice UNION covers all N_ACTIONS ids
+    scene_ids: list[int]                   # sorted unique scene ids in the slice
+    scene_id_range: tuple[int, int]        # (min, max) across the slice
+    n_reorder_consistent: int              # episodes whose start-rotation reorder holds
+    n_naive_would_mismatch: int            # episodes the foot-gun would corrupt without the reorder
+    splits_present: list[str]              # split name(s) this slice covers
+    license: str
+    ok: bool                               # every episode ok AND the slice has all action classes
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "n_episodes": self.n_episodes,
+            "n_ok": self.n_ok,
+            "n_transitions": self.n_transitions,
+            "total_delta_mismatches": self.total_delta_mismatches,
+            "action_counts": {str(k): v for k, v in self.action_counts.items()},
+            "all_action_classes_present": self.all_action_classes_present,
+            "scene_ids": self.scene_ids,
+            "scene_id_range": list(self.scene_id_range),
+            "n_reorder_consistent": self.n_reorder_consistent,
+            "n_naive_would_mismatch": self.n_naive_would_mismatch,
+            "splits_present": self.splits_present,
+            "license": self.license,
+            "ok": self.ok,
+        }
+
+
 def _quaternion_verdict(episode: dict[str, Any], rec: EpisodeRecord) -> QuaternionVerdict:
     sr = episode["start_rotation"]  # raw, w-FIRST quaternion
     canonical_yaw = math.degrees(yaw_from_xyzw(rec.start_rotation_xyzw))
@@ -257,6 +300,45 @@ def audit_episode(episode: dict[str, Any]) -> AuditReport:
     )
 
 
+def summarize_episodes(reports: list[AuditReport], *, splits: list[str] | None = None) -> AuditSummary:
+    """Aggregate per-episode :class:`AuditReport`\\ s into a SLICE-scope :class:`AuditSummary` (M3).
+
+    The dataset-level checks (all action classes, scene-id range, splits) are computed across the
+    whole slice — the only scope at which they are meaningful on real AerialVLN data.
+    """
+    counts: dict[int, int] = {}
+    for r in reports:
+        for action_id, c in r.action_counts.items():
+            counts[action_id] = counts.get(action_id, 0) + c
+    all_classes = all(counts.get(a, 0) >= 1 for a in range(N_ACTIONS))
+    scene_ids = sorted({r.scene_id for r in reports})
+    scene_range = (scene_ids[0], scene_ids[-1]) if scene_ids else (0, 0)
+    n_ok = sum(1 for r in reports if r.ok)
+    # action[t] drives pose[t]->pose[t+1]; the terminal STOP has no stored next pose (see audit_episode).
+    n_transitions = sum(min(r.n_actions, max(r.n_poses - 1, 0)) for r in reports)
+    return AuditSummary(
+        n_episodes=len(reports),
+        n_ok=n_ok,
+        n_transitions=n_transitions,
+        total_delta_mismatches=sum(len(r.delta_mismatches) for r in reports),
+        action_counts=dict(sorted(counts.items())),
+        all_action_classes_present=all_classes,
+        scene_ids=scene_ids,
+        scene_id_range=scene_range,
+        n_reorder_consistent=sum(1 for r in reports if r.quaternion.reorder_consistent),
+        n_naive_would_mismatch=sum(1 for r in reports if r.quaternion.naive_would_mismatch),
+        splits_present=list(splits or []),
+        license=LICENSE,
+        ok=bool(len(reports) > 0 and n_ok == len(reports) and all_classes),
+    )
+
+
+def _infer_splits(path: str) -> list[str]:
+    """Best-effort split label from a slice filename, e.g. ``train.slice.json`` -> ``['train']``."""
+    stem = Path(path).name.split(".")[0]
+    return [stem] if stem in ("train", "val_seen", "val_unseen", "test") else []
+
+
 def _iter_episodes(data: Any) -> list[dict[str, Any]]:
     """Accept a single episode dict, a list of episodes, or ``{'episodes': [...]}``."""
     if isinstance(data, dict) and "episodes" in data:
@@ -267,15 +349,35 @@ def _iter_episodes(data: Any) -> list[dict[str, Any]]:
 
 
 def _main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="AerialVLN episode audit (Phase-A step 5)")
-    p.add_argument("--episode", required=True, help="path to an AerialVLN episode JSON")
-    p.add_argument("--report", help="write the AuditReport JSON here ('-' = stdout)")
+    p = argparse.ArgumentParser(description="AerialVLN episode/slice audit (Phase-A steps 5 / A5.7)")
+    src = p.add_mutually_exclusive_group(required=True)
+    src.add_argument("--episode", help="audit ONE file (episode or {'episodes':[...]}) -> per-episode reports")
+    src.add_argument("--slice", dest="slice_path", help="audit a slice file -> aggregated AuditSummary (M3)")
+    p.add_argument("--report", help="write per-episode AuditReport JSON here ('-' = stdout)")
+    p.add_argument("--summary", help="write the AuditSummary JSON here ('-' = stdout)")
+    p.add_argument("--split", action="append", dest="splits", help="split name(s) this slice covers (repeatable)")
     args = p.parse_args(argv)
 
-    data = json.loads(Path(args.episode).read_text())
-    reports = [audit_episode(ep) for ep in _iter_episodes(data)]
-    all_ok = all(r.ok for r in reports)
+    path = args.episode or args.slice_path
+    reports = [audit_episode(ep) for ep in _iter_episodes(json.loads(Path(path).read_text()))]
 
+    if args.slice_path:
+        summary = summarize_episodes(reports, splits=args.splits or _infer_splits(args.slice_path))
+        if args.summary == "-":
+            print(json.dumps(summary.to_dict(), indent=2))
+        elif args.summary:
+            Path(args.summary).write_text(json.dumps(summary.to_dict(), indent=2))
+        print(
+            f"[{'OK' if summary.ok else 'FAIL'}] slice: {summary.n_ok}/{summary.n_episodes} ok, "
+            f"{summary.n_transitions} transitions, {summary.total_delta_mismatches} Δ-mismatches, "
+            f"all_classes={summary.all_action_classes_present}, scenes={summary.scene_id_range}, "
+            f"reorder_consistent={summary.n_reorder_consistent}/{summary.n_episodes}, "
+            f"splits={summary.splits_present}",
+            file=sys.stderr,
+        )
+        return 0 if summary.ok else 1
+
+    all_ok = all(r.ok for r in reports)
     payload: Any = reports[0].to_dict() if len(reports) == 1 else [r.to_dict() for r in reports]
     if args.report == "-":
         print(json.dumps(payload, indent=2))
@@ -297,7 +399,9 @@ def _main(argv: list[str] | None = None) -> int:
 __all__ = [
     "parse_episode",
     "audit_episode",
+    "summarize_episodes",
     "AuditReport",
+    "AuditSummary",
     "QuaternionVerdict",
     "DeltaMismatch",
     "DELTA_TOL",

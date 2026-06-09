@@ -12,7 +12,13 @@ from pathlib import Path
 import numpy as np
 
 from vllatent.actions import Action
-from vllatent.audit import _main, audit_episode, parse_episode
+from vllatent.audit import (
+    _infer_splits,
+    _main,
+    audit_episode,
+    parse_episode,
+    summarize_episodes,
+)
 
 FIX = Path(__file__).resolve().parent.parent / "fixtures" / "episodes"
 
@@ -73,8 +79,67 @@ def test_naive_read_without_reorder_is_wrong() -> None:
     assert abs(rep.quaternion.naive_yaw_deg - rep.quaternion.canonical_yaw_deg) > 45.0
 
 
-# --- CLI exit code (drives `make audit`) ---
+# --- AuditSummary slice aggregator (A5.7, M3) ---
+
+def _both_reports() -> list:
+    return [audit_episode(_load("tiny_episode.json")), audit_episode(_load("quaternion_trap.json"))]
+
+
+def test_summary_aggregates_dataset_level_checks_across_slice() -> None:
+    reps = _both_reports()  # tiny (scene 1, all 8 classes) + quaternion_trap (scene 3, subset)
+    summ = summarize_episodes(reps, splits=["train"])
+    assert summ.n_episodes == 2 and summ.n_ok == 2
+    # all-8-classes is the UNION over the slice (tiny alone supplies all 8), not per-episode.
+    assert summ.all_action_classes_present
+    # scene-id range is min..max across the slice (1..3), not the (id,id) the per-episode report uses.
+    assert summ.scene_id_range == (1, 3) and summ.scene_ids == [1, 3]
+    assert summ.splits_present == ["train"]
+    assert summ.n_reorder_consistent == 2          # both fixtures reorder-consistent
+    assert summ.n_naive_would_mismatch == 1        # only quaternion_trap trips the foot-gun
+    assert summ.total_delta_mismatches == 0
+    # action_counts is the SUM across episodes.
+    expected: dict[int, int] = {}
+    for r in reps:
+        for a, c in r.action_counts.items():
+            expected[a] = expected.get(a, 0) + c
+    assert summ.action_counts == dict(sorted(expected.items()))
+    assert summ.ok  # all episodes ok AND the slice has all action classes
+
+
+def test_summary_not_ok_when_a_class_is_missing() -> None:
+    # quaternion_trap alone (scene 3) does NOT contain all 8 classes -> slice not ok.
+    summ = summarize_episodes([audit_episode(_load("quaternion_trap.json"))])
+    assert not summ.all_action_classes_present
+    assert not summ.ok
+    assert summ.scene_id_range == (3, 3) and summ.splits_present == []
+
+
+def test_summary_empty_slice_is_not_ok() -> None:
+    summ = summarize_episodes([])
+    assert summ.n_episodes == 0 and not summ.ok and summ.scene_id_range == (0, 0)
+
+
+def test_infer_splits_from_filename() -> None:
+    assert _infer_splits("data/aerialvln_json/train.slice.json") == ["train"]
+    assert _infer_splits("/x/val_unseen.slice.json") == ["val_unseen"]
+    assert _infer_splits("/x/whatever.json") == []
+
+
+# --- CLI exit codes ---
 
 def test_cli_returns_zero_on_clean_episode() -> None:
     rc = _main(["--episode", str(FIX / "tiny_episode.json")])
     assert rc == 0
+
+
+def test_cli_slice_summary_writes_aggregate(tmp_path) -> None:
+    slice_file = tmp_path / "train.slice.json"
+    slice_file.write_text(json.dumps({"episodes": [_load("tiny_episode.json"), _load("quaternion_trap.json")]}))
+    out = tmp_path / "summary.json"
+    rc = _main(["--slice", str(slice_file), "--summary", str(out)])
+    summ = json.loads(out.read_text())
+    assert summ["n_episodes"] == 2
+    assert summ["all_action_classes_present"] is True
+    assert summ["scene_id_range"] == [1, 3]
+    assert summ["splits_present"] == ["train"]            # inferred from the filename
+    assert rc == (0 if summ["ok"] else 1)

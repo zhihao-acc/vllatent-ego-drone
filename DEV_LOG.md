@@ -22,7 +22,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.4 — typed manifest builder fed from Config (M5) | done | 2026-06-08 | `manifest.build_manifest(Config, …)` is the one builder; `empty_manifest` delegates to it; 196/768 from `schemas` constants, version from `CacheConfig`, encoder-id/dtype/convention/dataset(name+license) from `Config`; stubbed `teacher` provenance section (worldvln id+rev, disagreement_source-from-Config, vjepa2 id, render hash); entry-required-keys derived from `CacheManifestEntry.required_keys()` (type-enforced, not hand-kept); 127→134 tests |
 | A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | done | 2026-06-08 | frozen+validated `PredictorOutput.predicted_latents (T,196,768) fp16`, `TrustReadout {p_commit (T,)∈[0,1], k_star∈[0,T] float, sigma≥0}`, `Waypoint.delta_4dof (4,) f32 NED-body`; io-contract §0 references them; teacher `OracleTarget` seam deferred to A5.9; 134→150 tests |
 | A5.6 — StepSample history_mask + lang padding-mask (M4) | done | 2026-06-08 | `StepSample` gains `history_mask (H,) bool` (block-causal, real vs zero-pad at episode start) + `lang_mask (M,) bool` (== M of lang_tokens); `MASK_DTYPE=np.bool_`; validation + length cross-check; loader-tuple in io-contract §2 updated (9-tuple); 150→155 tests |
-| A5.7 — AuditSummary slice aggregator (M3) | pending | | PURE code AUTO / real-slice re-run USER-GATED |
+| A5.7 — AuditSummary slice aggregator (M3) | in_progress | 2026-06-09 | CODE done+green: `AuditSummary` + `summarize_episodes` + `--slice/--summary/--split` CLI; the dataset-level checks (all-8-classes UNION, scene-id min..max, splits) computed at SLICE scope (M3 — were mis-scoped per-episode); 162→167 tests. **Real-slice re-run USER-GATED** — command block emitted, awaiting the user's pasted aggregate |
 | A5.8 — investigation: WorldVLN determinism/weights/6-DoF/license | done | 2026-06-09 | USER-verified probe of `EmbodiedCity/WorldVLN`: weights complete (~36.9 GB; InfinityStar 4-shard backbone + 1.06 GB action decoder + 0.74 GB VAE); inference **STOCHASTIC by default** (top_k900/top_p0.97/cfg34, per-segment seed) ⇒ K-rollout disagreement FREE (overturns prior "deterministic"); action head **6-DoF [roll,yaw,pitch,x,y,z]** SE(3)-integrated vs our 4-DoF student ⇒ 6→4 projection (A5.9); ckpt env `INFINITY_CKPT`+`ACTIONHEAD_CKPT`; lang enc T5; **LICENSE SPLIT** code CC BY 4.0 / weights `license:other` (flag pre-publication) |
 | A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | pending | | PURE/AUTO; after A5.8 |
 | A5.10 — DINOv3 student-encoder wrapper | pending | | TORCH; contract AUTO / real-weight USER-GATED |
@@ -36,6 +36,32 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-09 — A5.7: AuditSummary slice aggregator (M3) — CODE done; real-slice USER-GATED (STOP CHECK)
+**Status:** A5.7 pending → in_progress (PURE code AUTONOMOUS; the real-slice re-run is USER-GATED per
+ralph-rules — command block emitted, awaiting the user's paste).
+**What's done.** Closed M3's "dataset-level checks mis-scoped per-episode" by adding `AuditSummary` +
+`summarize_episodes(reports, *, splits)` to `vllatent/audit.py`: the SLICE-scope aggregate computes
+`all_action_classes_present` as the UNION over the slice, `scene_id_range` as min..max across episodes,
+`splits_present` from the slice, plus `n_episodes`/`n_ok`/`n_transitions`/`total_delta_mismatches`/summed
+`action_counts`/`n_reorder_consistent`/`n_naive_would_mismatch`, and `ok` = every-episode-ok AND
+all-classes. New CLI surface `--slice <file> --summary <out|-> [--split …]` (split auto-inferred from the
+filename, e.g. `train.slice.json`→`train`); the per-episode `--episode` path is unchanged (`make audit`
+still green). The per-episode `AuditReport` keeps its (per-episode) fields but the summary is now the
+authoritative dataset-level source — amends step-5b's ad-hoc no-code check into first-class code.
+**Tested.** A5.7 step command `pytest tests/test_audit.py` 7→**12** (+5: slice aggregation reproduces
+all-classes-union/scene-range/splits/summed-counts; not-ok when a class missing; empty-slice; `_infer_splits`;
+`--slice --summary` CLI on a 2-episode temp slice). Full pure sweep `make test` 162→**167**; `make
+import-smoke`/`lint`(ruff)/`typecheck`(mypy, 6 files) clean; `make audit` fixture clean; blob-guard OK.
+**Open / next — STOP CHECK (real-slice is USER-GATED + next pure step A5.9 has a design decision).**
+Emitting the A5.7 real-slice command block (`--slice data/aerialvln_json/train.slice.json --summary -`;
+expect 50/50 ok, all 8 classes, scene range, 0 Δ-mismatch) — A5.7 flips to `done` when the user pastes it.
+**A5.9** (`TeacherOutput`/`OracleTarget` seam + finalize Config placeholders) is now UNBLOCKED by A5.8 but
+needs a user call on the **6-DoF→4-DoF projection** (teacher emits 6-DoF abs SE(3); student is 4-DoF body
+delta) + the **weights-license** question — surfaced for decision, not executed.
+**Vault.** No new decision (implements the M3 AuditSummary per the signed-off re-plan).
 
 ---
 
