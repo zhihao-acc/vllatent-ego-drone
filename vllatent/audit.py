@@ -45,13 +45,17 @@ import numpy as np
 
 from vllatent.actions import (
     Pose,
-    _wrap_pi,
-    _xyzw_from_yaw,
-    _yaw_from_xyzw,
     action_to_delta,
     pose_pair_to_body_delta,
 )
-from vllatent.frames import REFERENCE_PATH_ROW_WIDTH, REFERENCE_PATH_YAW_INDEX
+from vllatent.frames import (
+    REFERENCE_PATH_ROW_WIDTH,
+    REFERENCE_PATH_YAW_INDEX,
+    reorder_wxyz_to_xyzw,
+    wrap_pi,
+    xyzw_from_yaw,
+    yaw_from_xyzw,
+)
 from vllatent.schemas import N_ACTIONS, EpisodeRecord
 
 DELTA_TOL = 1e-3        # body-frame Δ match tolerance (m / deg) vs the quantized action delta
@@ -65,7 +69,7 @@ def parse_episode(episode: dict[str, Any]) -> EpisodeRecord:
     Reorders ``start_rotation`` from w-FIRST ``[w,x,y,z]`` to canonical ``xyzw`` (foot-gun #1).
     """
     sr = episode["start_rotation"]  # [w, x, y, z] — w-FIRST
-    start_rotation_xyzw = np.array([sr[1], sr[2], sr[3], sr[0]], dtype=float)
+    start_rotation_xyzw = reorder_wxyz_to_xyzw(sr)
     goals = episode.get("goals", [])
     goal_positions = np.asarray([g["position"] for g in goals], dtype=float) if goals else np.zeros((0, 3))
     return EpisodeRecord(
@@ -165,12 +169,12 @@ class AuditReport:
 
 def _quaternion_verdict(episode: dict[str, Any], rec: EpisodeRecord) -> QuaternionVerdict:
     sr = episode["start_rotation"]  # raw, w-FIRST quaternion
-    canonical_yaw = math.degrees(_yaw_from_xyzw(rec.start_rotation_xyzw))
-    naive_yaw = math.degrees(_yaw_from_xyzw(np.asarray(sr, dtype=float)))  # read as xyzw (wrong)
+    canonical_yaw = math.degrees(yaw_from_xyzw(rec.start_rotation_xyzw))
+    naive_yaw = math.degrees(yaw_from_xyzw(np.asarray(sr, dtype=float)))  # read as xyzw (wrong)
     # reference_path orientation is EULER radians; yaw is a direct field (no quaternion).
     reference0_yaw = math.degrees(float(rec.reference_path[0, REFERENCE_PATH_YAW_INDEX]))
-    consistent = abs(math.degrees(_wrap_pi(math.radians(canonical_yaw - reference0_yaw)))) <= QUAT_TOL_DEG
-    naive_mismatch = abs(math.degrees(_wrap_pi(math.radians(naive_yaw - reference0_yaw)))) > QUAT_TOL_DEG
+    consistent = abs(math.degrees(wrap_pi(math.radians(canonical_yaw - reference0_yaw)))) <= QUAT_TOL_DEG
+    naive_mismatch = abs(math.degrees(wrap_pi(math.radians(naive_yaw - reference0_yaw)))) > QUAT_TOL_DEG
     return QuaternionVerdict(
         start_rotation_order="wxyz",
         reference_path_order="euler_pitch_roll_yaw_rad",
@@ -187,7 +191,7 @@ def _euler_row_to_pose(row: np.ndarray) -> Pose:
 
     pitch == roll == 0 in AerialVLN (4-DoF); only yaw drives the body frame.
     """
-    return (np.asarray(row[0:3], dtype=float), _xyzw_from_yaw(float(row[REFERENCE_PATH_YAW_INDEX])))
+    return (np.asarray(row[0:3], dtype=float), xyzw_from_yaw(float(row[REFERENCE_PATH_YAW_INDEX])))
 
 
 def _delta_mismatches(rec: EpisodeRecord) -> list[DeltaMismatch]:

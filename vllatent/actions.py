@@ -26,6 +26,8 @@ from enum import IntEnum
 
 import numpy as np
 
+from vllatent.frames import wrap_pi, xyzw_from_yaw, yaw_from_xyzw
+
 # A NED pose: (position (3,) [x,y,z], rotation (4,) quaternion xyzw). See vllatent.frames.
 Pose = tuple[np.ndarray, np.ndarray]
 
@@ -62,25 +64,6 @@ _DELTA_TABLE: dict[Action, tuple[float, float, float, float]] = {
 }
 
 
-def _yaw_from_xyzw(q: np.ndarray) -> float:
-    """Yaw (radians) from an xyzw quaternion — reproduces airsim.to_eularian_angles (z-axis)."""
-    x, y, z, w = float(q[0]), float(q[1]), float(q[2]), float(q[3])
-    ysqr = y * y
-    t3 = 2.0 * (w * z + x * y)
-    t4 = 1.0 - 2.0 * (ysqr + z * z)
-    return math.atan2(t3, t4)
-
-
-def _xyzw_from_yaw(yaw: float) -> np.ndarray:
-    """xyzw quaternion for a yaw-only rotation — reproduces airsim.to_quaternion(0, 0, yaw)."""
-    return np.array([0.0, 0.0, math.sin(yaw * 0.5), math.cos(yaw * 0.5)], dtype=float)
-
-
-def _wrap_pi(angle: float) -> float:
-    """Wrap a radian angle to (-pi, pi]."""
-    return (angle + math.pi) % (2.0 * math.pi) - math.pi
-
-
 def action_to_delta(action_id: int) -> np.ndarray:
     """Canonical body-frame quantized delta ``(dx, dy, dz, dyaw_deg)`` for a discrete action id."""
     return np.array(_DELTA_TABLE[Action(int(action_id))], dtype=np.float32)
@@ -95,7 +78,7 @@ def apply_delta(pose: Pose, action_id: int) -> Pose:
     position = np.asarray(pose[0], dtype=float).copy()
     rotation = np.asarray(pose[1], dtype=float).copy()
     action = Action(int(action_id))
-    yaw = _yaw_from_xyzw(rotation)  # pitch = roll = 0 (env_utils forces them)
+    yaw = yaw_from_xyzw(rotation)  # pitch = roll = 0 (env_utils forces them)
 
     new_position = position.copy()
     new_rotation = rotation.copy()
@@ -107,18 +90,19 @@ def apply_delta(pose: Pose, action_id: int) -> Pose:
         new_yaw = yaw - math.radians(TURN_ANGLE)
         if math.degrees(new_yaw) < -180:
             new_yaw = math.radians(360) + new_yaw
-        new_rotation = _xyzw_from_yaw(new_yaw)
+        new_rotation = xyzw_from_yaw(new_yaw)
     elif action == Action.TURN_RIGHT:
         new_yaw = yaw + math.radians(TURN_ANGLE)
         if math.degrees(new_yaw) > 180:
             new_yaw = math.radians(-360) + new_yaw
-        new_rotation = _xyzw_from_yaw(new_yaw)
+        new_rotation = xyzw_from_yaw(new_yaw)
     elif action == Action.GO_UP:
         new_position = position + np.array([0.0, 0.0, -1.0]) * UP_DOWN_STEP_SIZE
     elif action == Action.GO_DOWN:
         new_position = position + np.array([0.0, 0.0, -1.0]) * UP_DOWN_STEP_SIZE * (-1)
     elif action in (Action.MOVE_LEFT, Action.MOVE_RIGHT):
         # Body-lateral: env_utils builds a unit vector at (yaw + 90 deg); LEFT scales by -1.
+        # radians(degrees(yaw) + 90) == yaw + pi/2 (kept verbatim to match env_utils arithmetic).
         unit_x = math.cos(math.radians(math.degrees(yaw) + 90))
         unit_y = math.sin(math.radians(math.degrees(yaw) + 90))
         unit = np.array([unit_x, unit_y, 0.0])
@@ -139,15 +123,15 @@ def pose_pair_to_body_delta(pose_before: Pose, pose_after: Pose) -> np.ndarray:
     """
     pos_before = np.asarray(pose_before[0], dtype=float)
     pos_after = np.asarray(pose_after[0], dtype=float)
-    yaw_before = _yaw_from_xyzw(np.asarray(pose_before[1], dtype=float))
-    yaw_after = _yaw_from_xyzw(np.asarray(pose_after[1], dtype=float))
+    yaw_before = yaw_from_xyzw(np.asarray(pose_before[1], dtype=float))
+    yaw_after = yaw_from_xyzw(np.asarray(pose_after[1], dtype=float))
 
     dpos_world = pos_after - pos_before
     cos_y, sin_y = math.cos(yaw_before), math.sin(yaw_before)
     body_x = cos_y * dpos_world[0] + sin_y * dpos_world[1]
     body_y = -sin_y * dpos_world[0] + cos_y * dpos_world[1]
     body_z = dpos_world[2]
-    dyaw_deg = math.degrees(_wrap_pi(yaw_after - yaw_before))
+    dyaw_deg = math.degrees(wrap_pi(yaw_after - yaw_before))
     return np.array([body_x, body_y, body_z, dyaw_deg], dtype=np.float32)
 
 

@@ -16,7 +16,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 6 — fetch real dataset JSON slice | done | 2026-06-08 | USER downloaded full splits (Kaggle/Baidu, NOT S3); `fetch_aerialvln_json.sh` finished (slicer); `train.slice.json` (50 eps); CC BY-NC-SA 4.0 |
 | 5b — audit on real slice | done | 2026-06-08 | 50/50 ok, ~10198 transitions **0 Δ-mismatches**, all 8 classes, quaternion consistent (34/50 would corrupt yaw w/o reorder) |
 | 7–13 (old DINOv3-latent pipeline) | superseded | 2026-06-08 | **replaced by A5.1–A5.18** per `plans/phase-a5-replan-postpivot.md` (post-WorldVLN-pivot re-plan) |
-| A5.1 — extract public frame/quaternion primitives → frames.py (M1) | pending | | PURE/AUTO; audit.py+actions.py import public API; no private cross-module imports |
+| A5.1 — extract public frame/quaternion primitives → frames.py (M1) | done | 2026-06-08 | `frames.py` owns public `yaw_from_xyzw`/`xyzw_from_yaw`/`wrap_pi`/`reorder_wxyz_to_xyzw`; actions.py+audit.py import them; no private cross-module imports; L1 verified (ROW_WIDTH=6); 102 pure tests green |
 | A5.2 — test_frames.py no-flip + NED→FLU→ENU remap math (M2) | pending | | PURE/AUTO; hard CI gate; live fly0 wiring stays Phase D |
 | A5.3 — frozen typed Config + from_yaml + validation (H1/H2/L2/L3) | pending | | PURE/AUTO; single source-of-truth for swept knobs; full set + placeholders |
 | A5.4 — typed manifest builder fed from Config (M5) | pending | | PURE/AUTO; de-dup 196/768; teacher-provenance fields stubbed |
@@ -36,6 +36,25 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-08 (PM) — A5.1: extract public frame/quaternion primitives → frames.py (M1)
+**Status:** A5.1 pending → done (AUTONOMOUS, pure-tier).
+**What's done.** Moved the yaw/quaternion math out of `actions.py` into `frames.py` as the public,
+single-owner API: `yaw_from_xyzw`, `xyzw_from_yaw`, `wrap_pi`, + new `reorder_wxyz_to_xyzw` (the
+w-FIRST→xyzw foot-gun, previously inlined in `audit.parse_episode`). `actions.py` and `audit.py` now
+import these from `frames.py` — **no private `_`-prefixed cross-module imports remain** (M1; the leak
+5b had widened is closed). L1 verified: no `DOF+3` pun, `REFERENCE_PATH_ROW_WIDTH = 6` kept. Added the
+`== yaw + pi/2` clarifying comment on `apply_delta`'s body-lateral branch (review micro-nit). Behavior
+unchanged — math moved verbatim.
+**Tested.** `pytest tests/test_actions.py tests/test_audit.py tests/test_smoke.py` (80) + full pure
+sweep `make test` (102) green; `make import-smoke` / `lint` (ruff) / `typecheck` (mypy, 6 files clean);
+`make audit` on the fixture OK (reorder_consistent=True, 0 Δ-mismatches); blob-guard OK; grep guards
+confirm no private cross-module import + no stale `_yaw_from_xyzw`/`_xyzw_from_yaw`/`_wrap_pi`.
+**Open / next.** A5.2 — `tests/test_frames.py` no-flip basis + NED→FLU→ENU remap math (M2, hard CI gate;
+live fly0 wiring stays Phase D), then A5.3 (typed Config SoT) → STOP CHECK at started_step+3.
+**Vault.** No new decision (refactor only; consolidates the #1-foot-gun owner per the re-plan).
 
 ---
 
