@@ -23,7 +23,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | done | 2026-06-08 | frozen+validated `PredictorOutput.predicted_latents (T,196,768) fp16`, `TrustReadout {p_commit (T,)∈[0,1], k_star∈[0,T] float, sigma≥0}`, `Waypoint.delta_4dof (4,) f32 NED-body`; io-contract §0 references them; teacher `OracleTarget` seam deferred to A5.9; 134→150 tests |
 | A5.6 — StepSample history_mask + lang padding-mask (M4) | done | 2026-06-08 | `StepSample` gains `history_mask (H,) bool` (block-causal, real vs zero-pad at episode start) + `lang_mask (M,) bool` (== M of lang_tokens); `MASK_DTYPE=np.bool_`; validation + length cross-check; loader-tuple in io-contract §2 updated (9-tuple); 150→155 tests |
 | A5.7 — AuditSummary slice aggregator (M3) | pending | | PURE code AUTO / real-slice re-run USER-GATED |
-| A5.8 — investigation: WorldVLN determinism/weights/4-vs-6-DoF/license | pending | | USER-GATED; gates A5.9/A5.11/A5.14; may run parallel to A5.1–A5.7 |
+| A5.8 — investigation: WorldVLN determinism/weights/6-DoF/license | done | 2026-06-09 | USER-verified probe of `EmbodiedCity/WorldVLN`: weights complete (~36.9 GB; InfinityStar 4-shard backbone + 1.06 GB action decoder + 0.74 GB VAE); inference **STOCHASTIC by default** (top_k900/top_p0.97/cfg34, per-segment seed) ⇒ K-rollout disagreement FREE (overturns prior "deterministic"); action head **6-DoF [roll,yaw,pitch,x,y,z]** SE(3)-integrated vs our 4-DoF student ⇒ 6→4 projection (A5.9); ckpt env `INFINITY_CKPT`+`ACTIONHEAD_CKPT`; lang enc T5; **LICENSE SPLIT** code CC BY 4.0 / weights `license:other` (flag pre-publication) |
 | A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | pending | | PURE/AUTO; after A5.8 |
 | A5.10 — DINOv3 student-encoder wrapper | pending | | TORCH; contract AUTO / real-weight USER-GATED |
 | A5.11 — frozen WorldVLN teacher wrapper | pending | | TORCH; USER-GATED (server); after A5.8 |
@@ -36,6 +36,38 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-09 — A5.8: WorldVLN scoping investigation RESOLVED (USER-verified; gates A5.9/A5.11/A5.14)
+**Status:** A5.8 pending → done (USER-GATED; user pasted the `EmbodiedCity/WorldVLN` probe output — weights
+listing + code-repo greps). The investigation's four unknowns are now answered; this UN-blocks A5.9.
+**Findings (4).** (1) **Weights complete + sized:** ~36.9 GB / 11 files — InfinityStar backbone as a 4-shard
+safetensors (~35 GB) + `WorldVLN_action_decoder.pt` (1.06 GB) + VAE (0.74 GB). (2) **Inference is STOCHASTIC
+by default** — `infer/server.py`: `INFINITY_TOP_K=900`, `TOP_P=0.97`, `CFG=34`, two-phase late_top_k/p,
+`lock_seed_across_steps=False` (per-segment `local_seed = seed + segment_index`), backbone
+`sample_with_top_k_top_p_…(g_seed,…)`. **This overturns the prior "deterministic inference" assumption** —
+K-rollout disagreement is FREE (vary `g_seed`); we do NOT need to engineer MC-dropout / re-enable sampling.
+(3) **Action head is 6-DoF, not 4-DoF** — `latent_traj_manifest.py` `delta=np.zeros((T,6))`; `predict_pose.py`
+emits `(T,6)` absolute `[roll,yaw,pitch,x,y,z]` integrated via SE(3) (`integrate_trajectory_se3`, ZYX Euler).
+(`num_heads=6` are attention heads, NOT DoF.) Our `vllatent` student is 4-DoF `(Δx,Δy,Δz,Δψ)`, roll≡pitch≡0
+⇒ the distillation needs an explicit **6→4 projection** (drop/verify-≈0 roll & pitch + absolute→body-delta)
+at the teacher→student seam (A5.9). (4) **Checkpoints/encoder:** backbone env `INFINITY_CKPT`; action head env
+`ACTIONHEAD_CKPT`/`ACTIONHEAD_REF_CKPT` (the guessed `STAGE2_LATENT2ACTION_CKPT` is the training-stage name,
+artifact `stage2_latent2action_combined.pt`); two-stage train (stageA→stageB); language encoder = **T5**
+(`T5EncoderModel`), NOT SigLIP/CLIP; backbone @ 81 frames / step 16 / fps 16. **License SPLIT:** GitHub code =
+CC BY 4.0; HF weights frontmatter = `license: other` (undeclared) — the weights are what we distill from, so
+the permissive read is NOT automatic → **flag for a clarification email before publishing on the student**.
+**Decision #2 (disagreement source) RESOLVED.** try-in-order collapses to option (a): **WorldVLN native
+stochastic rollouts** (free); AirScape (2507.08885) demoted from fallback to contingency only; V-JEPA-2 surprise
+stays the independent second gate. The A5.3 Config placeholders (`disagreement_source`=`worldvln_rollout` is
+already the default; `k_rollouts`; `vjepa_surprise_threshold`) are FINALIZED in A5.9.
+**Next / open for A5.9 (USER input).** (i) the **6→4 projection** design at the OracleTarget seam (carry the
+6-DoF teacher waypoint + project, and verify teacher roll/pitch≈0 on AerialVLN); (ii) the **weights-license**
+question (email authors). Probe clone was scratch `/tmp/worldvln_code` (nothing committed). Re-probe the exact
+`infer/server.py` rollout call signature when building the A5.11 teacher wrapper (TORCH/USER-GATED), not now.
+**Vault.** Findings + the corrected "deterministic→stochastic" caveat recorded in `[[project-latent-pred-arch-locked]]`
++ MEMORY.md (user did this in-session).
 
 ---
 
