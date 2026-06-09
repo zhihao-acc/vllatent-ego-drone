@@ -8,8 +8,10 @@
 
 ## Per-iteration protocol
 
-1. **READ** — `DEV_LOG.md` (find position), this file, `plans/phase-a-data-and-io-contract.md` (the step DoD).
-2. **IDENTIFY** — the lowest `pending` (or `in_progress` you own) step in the DEV_LOG step-status table.
+1. **READ** — `DEV_LOG.md` (find position), this file, **`plans/phase-a5-replan-postpivot.md`** (the step
+   DoD + exact test command; it **supersedes steps 7–13** of `plans/phase-a-data-and-io-contract.md`).
+2. **IDENTIFY** — the lowest `pending` (or `in_progress` you own) step in the DEV_LOG step-status table
+   (the **A5.x** rows; the old `7–13` row is `superseded` — skip it). Lowest pending now = **A5.1**.
 3. **REVIEW** — re-read the step's DoD + test command; `ls` the relevant subtree; verify prior outputs exist.
 4. **EXECUTE** — implement per the quality gates. **Pure-tier / fixtures-first**: write the numpy-only
    logic + its mocked/fixture test so it closes in CI before any sim/GPU is touched. Guard every
@@ -43,14 +45,17 @@
 
 ## User-gated steps (the load-bearing rule)
 
-Any step that **renders frames**, **dumps cached latents**, downloads the **dataset**, or touches the
-**H20 / AutoDL / docker / SSH**, stays **`in_progress`** until the USER pastes back the verification
-output. **Never auto-mark such a step `done`.** The agent produces the exact command BLOCK (it does NOT
-drive SSH, launch UE4, run `docker exec`, rent/operate a GPU, or provide keys); the user pastes it and
-returns the result. In Phase A this is: step 6 (S3 download), step 5b (real-slice audit), the live
-halves of steps 7/8/9 (real weights / docker render / sim+GPU cache build), step 11 (loader over the
-real dump), the bulk run of step 12, and the step-13 final sign-off. The pure-tier steps
-(2,3,4,5,10 + the mocked halves of 7/8/9 + the sizing guard of 12) auto-close in the loop.
+Any step that **renders frames**, **dumps cached latents**, downloads the **dataset / model weights**,
+or touches the **H20 / AutoDL / docker / SSH / WorldVLN-server**, stays **`in_progress`** until the USER
+pastes back the verification output. **Never auto-mark such a step `done`.** The agent produces the exact
+command BLOCK (it does NOT drive SSH, launch UE4, run `docker exec`, rent/operate a GPU, download multi-GB
+weights, or provide keys); the user pastes it and returns the result. Under the A5.x re-plan the
+USER-GATED steps are: **A5.7** (real-slice audit re-run), **A5.8** (WorldVLN determinism/weights probe),
+**A5.10** (DINOv3 real weights), **A5.11** (WorldVLN teacher, server), **A5.12** (V-JEPA-2 weights),
+**A5.13** (live docker+UE4 render), **A5.14** (small-slice cache build), **A5.16** (loader over the real
+dump), **A5.17** (bulk run), **A5.18** (final sign-off). The pure-tier steps (**A5.1–A5.6, A5.9**, the
+code/mocked halves of A5.7/A5.10/A5.13/A5.14, the loader A5.15, and the sizing guard of A5.17) auto-close
+in the loop.
 
 ## Deterministic stop / backstop
 

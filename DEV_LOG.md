@@ -15,15 +15,47 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 5 — AerialVLN JSON audit parser (fixture) | done | 2026-06-08 | `vllatent/audit.py` (parse_episode/audit_episode + AuditReport/QuaternionVerdict + CLI) + tiny & quaternion_trap fixtures + test_audit; `make audit` clean. **`reference_path` schema corrected to 6-wide Euler in 5b** |
 | 6 — fetch real dataset JSON slice | done | 2026-06-08 | USER downloaded full splits (Kaggle/Baidu, NOT S3); `fetch_aerialvln_json.sh` finished (slicer); `train.slice.json` (50 eps); CC BY-NC-SA 4.0 |
 | 5b — audit on real slice | done | 2026-06-08 | 50/50 ok, ~10198 transitions **0 Δ-mismatches**, all 8 classes, quaternion consistent (34/50 would corrupt yaw w/o reorder) |
-| 7 — DINOv3 encoder wrapper | pending | | contract test AUTONOMOUS / real weights USER-GATED |
-| 8 — render harness (teleport+capture) | pending | | unit AUTONOMOUS / live render USER-GATED (docker+UE4) |
-| 9 — render→encode→cache + manifest | pending | | manifest test AUTONOMOUS / small-slice build USER-GATED |
-| 10 — cached-latent loader | pending | | `vllatent/data/loader.py` + test_data_shapes (tiny_dump) — DoD item 3 code |
-| 11 — loader over real dump | pending | | USER-GATED (depends on 9) — DoD item 3 |
-| 12 — size full render→cache job | pending | | sizing + guard AUTONOMOUS / bulk run USER-GATED |
-| 13 — Phase-A DoD verification | pending | | USER-GATED final sign-off; do NOT auto-flip done |
+| 7–13 (old DINOv3-latent pipeline) | superseded | 2026-06-08 | **replaced by A5.1–A5.18** per `plans/phase-a5-replan-postpivot.md` (post-WorldVLN-pivot re-plan) |
+| A5.1 — extract public frame/quaternion primitives → frames.py (M1) | pending | | PURE/AUTO; audit.py+actions.py import public API; no private cross-module imports |
+| A5.2 — test_frames.py no-flip + NED→FLU→ENU remap math (M2) | pending | | PURE/AUTO; hard CI gate; live fly0 wiring stays Phase D |
+| A5.3 — frozen typed Config + from_yaml + validation (H1/H2/L2/L3) | pending | | PURE/AUTO; single source-of-truth for swept knobs; full set + placeholders |
+| A5.4 — typed manifest builder fed from Config (M5) | pending | | PURE/AUTO; de-dup 196/768; teacher-provenance fields stubbed |
+| A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | pending | | PURE/AUTO |
+| A5.6 — StepSample history_mask + lang padding-mask (M4) | pending | | PURE/AUTO; before the loader |
+| A5.7 — AuditSummary slice aggregator (M3) | pending | | PURE code AUTO / real-slice re-run USER-GATED |
+| A5.8 — investigation: WorldVLN determinism/weights/4-vs-6-DoF/license | pending | | USER-GATED; gates A5.9/A5.11/A5.14; may run parallel to A5.1–A5.7 |
+| A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | pending | | PURE/AUTO; after A5.8 |
+| A5.10 — DINOv3 student-encoder wrapper | pending | | TORCH; contract AUTO / real-weight USER-GATED |
+| A5.11 — frozen WorldVLN teacher wrapper | pending | | TORCH; USER-GATED (server); after A5.8 |
+| A5.12 — V-JEPA-2 surprise verifier wrapper | pending | | TORCH; USER-GATED |
+| A5.13 — render harness | pending | | SIM; unit AUTO / live USER-GATED (docker+UE4) |
+| A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED |
+| A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | pending | | TORCH/AUTO |
+| A5.16 — loader over real teacher/oracle dump | pending | | USER-GATED |
+| A5.17 — size full render→teacher→cache job | pending | | sizing AUTO / bulk USER-GATED |
+| A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
-Statuses: `pending` / `in_progress` / `done` / `blocked`.
+Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-08 (PM) — post-pivot re-plan signed off; ralph loop restarting at A5.1
+**Status:** Re-plan `plans/phase-a5-replan-postpivot.md` written + **USER-SIGNED-OFF**. Old steps 7–13
+**superseded** by A5.1–A5.18. Ralph loop restarting at **A5.1** (pure-tier cheap-wins first).
+**What changed.** (1) Backbone pivot — reuse **WorldVLN as a frozen teacher → distil into the student**
+(= the latent-prediction transformer + waypoint + trust heads; **DINOv3 is the student's frozen cached
+encoder, NOT the student**); oracle = WorldVLN rollout-disagreement + V-JEPA-2 surprise. (2) Code-review
+must-fix set absorbed: H1/H2 (typed Config SoT)→A5.3, H3 (typed seams)→A5.5(+A5.9), M1→A5.1, M2→A5.2,
+M3→A5.7, M4→A5.6, M5→A5.4(+A5.14). **L1 already resolved** by the 5b Euler fix (`REFERENCE_PATH_ROW_WIDTH=6`)
+— the brief's "POSE_ROW=7" was stale.
+**3 decisions locked (user).** H3 = student seams now, teacher seam after the A5.8 investigation;
+disagreement = try-in-order (re-enable WorldVLN AR sampling → else AirScape native multi-seed; V-JEPA-2
+the independent gate); Config = full swept set now with placeholders finalized in A5.9.
+**Survives untouched.** `actions.py`, `audit.py` core + real-slice audit, frame conventions, the data
+slice (1–6+5b), scaffold/CI, the 4-DoF→fly0-ENU output seam (Phase D).
+**Next.** Loop runs A5.1→A5.3 then STOP CHECK (`started_step + 3`); A5.8 is USER-GATED and may run in
+parallel. Planning brief: `plans/planning-prompt-2026-06-08-PM-replan-postpivot.md`. Superseded review:
+`plans/planning-prompt-2026-06-08-refactor-before-phaseB.md`.
 
 ---
 
