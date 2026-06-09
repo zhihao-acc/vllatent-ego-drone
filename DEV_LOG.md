@@ -22,7 +22,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.4 — typed manifest builder fed from Config (M5) | done | 2026-06-08 | `manifest.build_manifest(Config, …)` is the one builder; `empty_manifest` delegates to it; 196/768 from `schemas` constants, version from `CacheConfig`, encoder-id/dtype/convention/dataset(name+license) from `Config`; stubbed `teacher` provenance section (worldvln id+rev, disagreement_source-from-Config, vjepa2 id, render hash); entry-required-keys derived from `CacheManifestEntry.required_keys()` (type-enforced, not hand-kept); 127→134 tests |
 | A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | done | 2026-06-08 | frozen+validated `PredictorOutput.predicted_latents (T,196,768) fp16`, `TrustReadout {p_commit (T,)∈[0,1], k_star∈[0,T] float, sigma≥0}`, `Waypoint.delta_4dof (4,) f32 NED-body`; io-contract §0 references them; teacher `OracleTarget` seam deferred to A5.9; 134→150 tests |
 | A5.6 — StepSample history_mask + lang padding-mask (M4) | done | 2026-06-08 | `StepSample` gains `history_mask (H,) bool` (block-causal, real vs zero-pad at episode start) + `lang_mask (M,) bool` (== M of lang_tokens); `MASK_DTYPE=np.bool_`; validation + length cross-check; loader-tuple in io-contract §2 updated (9-tuple); 150→155 tests |
-| A5.7 — AuditSummary slice aggregator (M3) | in_progress | 2026-06-09 | CODE done+green: `AuditSummary` + `summarize_episodes` + `--slice/--summary/--split` CLI; the dataset-level checks (all-8-classes UNION, scene-id min..max, splits) computed at SLICE scope (M3 — were mis-scoped per-episode); 162→167 tests. **Real-slice re-run USER-GATED** — command block emitted, awaiting the user's pasted aggregate |
+| A5.7 — AuditSummary slice aggregator (M3) | done | 2026-06-09 | `AuditSummary` + `summarize_episodes` + `--slice/--summary/--split` CLI; dataset-level all-classes/scene-range/splits at SLICE scope (M3); 162→167 tests. **Real-slice VERIFIED (user-pasted):** 50/50 ok, 10198 transitions, 0 Δ-mismatch, all 8 classes, 14 scenes ∈[1,26], 34/50 naive-would-mismatch, splits=[train] — reproduces step-5b exactly |
 | A5.8 — investigation: WorldVLN determinism/weights/6-DoF/license | done | 2026-06-09 | USER-verified probe of `EmbodiedCity/WorldVLN`: weights complete (~36.9 GB; InfinityStar 4-shard backbone + 1.06 GB action decoder + 0.74 GB VAE); inference **STOCHASTIC by default** (top_k900/top_p0.97/cfg34, per-segment seed) ⇒ K-rollout disagreement FREE (overturns prior "deterministic"); action head **6-DoF [roll,yaw,pitch,x,y,z]** SE(3)-integrated vs our 4-DoF student ⇒ 6→4 projection (A5.9); ckpt env `INFINITY_CKPT`+`ACTIONHEAD_CKPT`; lang enc T5; **LICENSE SPLIT** code CC BY 4.0 / weights `license:other` (flag pre-publication) |
 | A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | done | 2026-06-09 | frozen+validated `TeacherOutput.rollouts_pose6 (K,6)` + `rollout_spread()→(6,)`; `OracleTarget {waypoint_4dof (4,) f32, teacher_pose6 (6,), rollpitch_resid, disagreement, vjepa_surprise}` (user-approved shape; finite/bool/dtype validated); `TEACHER_DOF=6`; TrustConfig placeholders FINALIZED (A5.8: worldvln_rollout, stochastic⇒free); io-contract §0 teacher-seam note; focused adversarial review CLEAN; 167→181 tests |
 | A5.10 — DINOv3 student-encoder wrapper | pending | | TORCH; contract AUTO / real-weight USER-GATED |
@@ -36,6 +36,23 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-09 — A5.7 real-slice VERIFIED → done; WorldVLN license email SENT
+**Status:** A5.7 in_progress → **done** (user pasted the real-slice `AuditSummary`). License-clarification
+email to the WorldVLN authors **SENT** (the `license:other` weights track — runs parallel to development;
+blocks publication, not Phase-A plumbing).
+**Real-slice result (user-run `--slice data/aerialvln_json/train.slice.json --summary -`).** `n_episodes 50,
+n_ok 50, n_transitions 10198, total_delta_mismatches 0, all_action_classes_present true` (counts per id
+0..7 = 50/5055/1120/936/1323/1329/239/196), `scene_ids` = 14 distinct ∈ [1,26], `n_reorder_consistent 50,
+n_naive_would_mismatch 34, splits ["train"], ok true`. **Reproduces step-5b exactly** — the `AuditSummary`
+aggregator is now the first-class, committed replacement for 5b's ad-hoc script (M3 closed end-to-end).
+**Open / next.** Phase-A pure+contract lane is now fully green through A5.9; A5.7 closed. Next = **A5.10**
+(DINOv3 student-encoder wrapper) — the first **TORCH-tier** step (pure→torch transition; needs the
+`vllatent-ego-drone` Py3.10+torch env, NOT the pure `vln-ego-drone-1.1`); contract test autonomous,
+real-weight encode-smoke USER-GATED. Cold-start brief: `plans/handoff-2026-06-09-resume-ralph-A5.10.md`.
+**Vault.** No new decision (verification + the license-track is recorded in the A5.8/A5.9 entries).
 
 ---
 
