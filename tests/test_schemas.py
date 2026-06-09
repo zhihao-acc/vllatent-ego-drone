@@ -35,7 +35,9 @@ def _step_sample(**over: object) -> StepSample:
     kw: dict[str, object] = dict(
         z_t=np.zeros((PATCH_TOKENS, EMBED_DIM), LATENT_DTYPE),
         history_latents=np.zeros((HISTORY, PATCH_TOKENS, EMBED_DIM), LATENT_DTYPE),
+        history_mask=np.ones((HISTORY,), bool),
         lang_tokens=np.zeros((5, EMBED_DIM), LATENT_DTYPE),
+        lang_mask=np.ones((5,), bool),
         action_id=1,
         z_next=np.zeros((PATCH_TOKENS, EMBED_DIM), LATENT_DTYPE),
         delta_4dof=np.zeros((DOF,), DELTA_DTYPE),
@@ -83,6 +85,18 @@ def test_stepsample_optional_future_frame() -> None:
     assert s.future_frame_rgb.dtype == np.uint8
 
 
+def test_stepsample_masks_are_real_fields() -> None:
+    # M4: history_mask + language padding-mask are explicit boolean fields the loader honors.
+    s = _step_sample(
+        history_mask=np.array([False, True, True]),
+        lang_tokens=np.zeros((3, EMBED_DIM), LATENT_DTYPE),
+        lang_mask=np.array([True, True, False]),
+    )
+    assert s.history_mask.shape == (HISTORY,) and s.history_mask.dtype == np.bool_
+    assert s.lang_mask.shape == (3,) and s.lang_mask.dtype == np.bool_
+    assert not bool(s.history_mask[0]) and bool(s.history_mask[1])
+
+
 def test_stepsample_is_immutable() -> None:
     s = _step_sample()
     with pytest.raises(dataclasses.FrozenInstanceError):
@@ -97,7 +111,11 @@ def test_stepsample_is_immutable() -> None:
         dict(delta_4dof=np.zeros((3,), DELTA_DTYPE)),                           # wrong DoF
         dict(delta_4dof=np.zeros((DOF,), np.float16)),                          # wrong delta dtype
         dict(history_latents=np.zeros((2, PATCH_TOKENS, EMBED_DIM), LATENT_DTYPE)),  # wrong H
+        dict(history_mask=np.ones((HISTORY,), np.float32)),                     # mask wrong dtype
+        dict(history_mask=np.ones((HISTORY + 1,), bool)),                       # mask wrong length
         dict(lang_tokens=np.zeros((5, 512), LATENT_DTYPE)),                     # wrong embed dim
+        dict(lang_mask=np.ones((4,), bool)),                                   # mask length != M
+        dict(lang_mask=np.ones((5,), np.int8)),                               # mask wrong dtype
         dict(action_id=N_ACTIONS),                                             # out of range high
         dict(action_id=-1),                                                    # out of range low
         dict(action_id=True),                                                  # bool is not a valid id

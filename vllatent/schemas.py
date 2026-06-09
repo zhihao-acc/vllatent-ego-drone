@@ -35,6 +35,7 @@ DOF = 4                     # continuous waypoint DoF: (dx, dy, dz, dyaw)
 LATENT_DTYPE = np.float16   # cached DINOv3 latents on disk
 DELTA_DTYPE = np.float32    # continuous 4-DoF delta, AirSim-NED body frame
 RGB_DTYPE = np.uint8        # rendered frame (RGB, after BGR->RGB)
+MASK_DTYPE = np.bool_       # validity masks (history padding / language padding): True = real token
 
 
 def _check_array(
@@ -70,11 +71,18 @@ class StepSample:
     All latents are the FROZEN DINOv3 patch space; ``delta_4dof`` is AirSim-NED body
     (the model's native convention — the NED->FLU->ENU remap is Phase D, see
     docs/io-contract.md). ``future_frame_rgb`` is the optional Phase-C V-JEPA-2 target.
+
+    Two padding masks make the variable-validity inputs explicit (M4): ``history_mask``
+    marks which of the H history slots are real vs zero-padded (block-causal at an episode
+    start), and ``lang_mask`` marks real language tokens vs padding (so attention can ignore
+    the pad). Both are ``True`` = real, ``False`` = padding; the loader (A5.15) consumes them.
     """
 
     z_t: np.ndarray              # (196,768) fp16   — DINOv3 patch tokens, obs @ t (cached)
-    history_latents: np.ndarray  # (3,196,768) fp16 — z_{t-2..t}; padded+masked at episode start
+    history_latents: np.ndarray  # (3,196,768) fp16 — z_{t-2..t}; zero-padded at episode start
+    history_mask: np.ndarray     # (3,) bool        — True = real history frame, False = padding
     lang_tokens: np.ndarray      # (M,768) fp16     — frozen text-tower tokens (cached per episode)
+    lang_mask: np.ndarray        # (M,) bool        — True = real language token, False = padding
     action_id: int               # int in [0,7]     — AerialVLN discrete actions[t]
     z_next: np.ndarray           # (196,768) fp16   — DINOv3 latent of next obs = prediction target
     delta_4dof: np.ndarray       # (4,) f32         — (dx,dy,dz,dyaw) AirSim-NED body, yaw-only
@@ -83,7 +91,14 @@ class StepSample:
     def __post_init__(self) -> None:
         _check_array("z_t", self.z_t, (PATCH_TOKENS, EMBED_DIM), dtype=LATENT_DTYPE)
         _check_array("history_latents", self.history_latents, (HISTORY, PATCH_TOKENS, EMBED_DIM), dtype=LATENT_DTYPE)
+        _check_array("history_mask", self.history_mask, (HISTORY,), dtype=MASK_DTYPE)
         _check_array("lang_tokens", self.lang_tokens, (None, EMBED_DIM), dtype=LATENT_DTYPE)
+        _check_array("lang_mask", self.lang_mask, (None,), dtype=MASK_DTYPE)
+        if self.lang_mask.shape[0] != self.lang_tokens.shape[0]:
+            raise ValueError(
+                f"lang_mask: length {self.lang_mask.shape[0]} must match lang_tokens "
+                f"M={self.lang_tokens.shape[0]}"
+            )
         _check_array("z_next", self.z_next, (PATCH_TOKENS, EMBED_DIM), dtype=LATENT_DTYPE)
         _check_array("delta_4dof", self.delta_4dof, (DOF,), dtype=DELTA_DTYPE)
         if isinstance(self.action_id, bool) or not isinstance(self.action_id, (int, np.integer)):
@@ -248,6 +263,7 @@ __all__ = [
     "LATENT_DTYPE",
     "DELTA_DTYPE",
     "RGB_DTYPE",
+    "MASK_DTYPE",
     "StepSample",
     "PredictorOutput",
     "TrustReadout",

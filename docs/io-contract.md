@@ -98,14 +98,16 @@ Per step the cached-latent loader (`vllatent/data/loader.py`, step 10) emits the
 (`vllatent/schemas.py`, step 3):
 
 ```
-(z_t, history_latents, lang_tokens, action_id, z_next, delta_4dof, future_frame_rgb)
+(z_t, history_latents, history_mask, lang_tokens, lang_mask, action_id, z_next, delta_4dof, future_frame_rgb)
 ```
 
 | field | shape / dtype | frame / notes |
 |---|---|---|
 | `z_t` | `(196, 768)` fp16 | DINOv3 patch tokens (cached), obs at step t |
-| `history_latents` | `(H=3, 196, 768)` fp16 | cached latents `z_{t-2..t}`; padded+masked at episode start |
+| `history_latents` | `(H=3, 196, 768)` fp16 | cached latents `z_{t-2..t}`; zero-padded at episode start |
+| `history_mask` | `(H=3,)` bool | True = real history frame, False = padding (block-causal at episode start) — M4 |
 | `lang_tokens` | `(M, 768)` fp16 | frozen text-tower output; cached per episode |
+| `lang_mask` | `(M,)` bool | True = real language token, False = padding (attention ignores pad) — M4 |
 | `action_id` | `int ∈ [0, 7]` | AerialVLN discrete `actions[t]` |
 | `z_next` | `(196, 768)` fp16 | DINOv3 latent of the next obs = prediction **target** |
 | `delta_4dof` | `(4,)` float32 | `(Δx,Δy,Δz,Δψ)` **AirSim-NED body, yaw-only**, derived from poses |

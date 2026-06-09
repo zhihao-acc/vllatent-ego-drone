@@ -21,7 +21,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.3 — frozen typed Config + from_yaml + validation (H1/H2/L2/L3) | done | 2026-06-08 | frozen `Config` tree (encoder/predictor/distill/trust/data/cache) + `from_yaml` (env-expand, strict unknown-key reject) + boundary validation; replaces orphan `load_config`; swept knobs single-sourced (loader reads from Config, default.yaml trimmed to overrides); trust placeholders for A5.9; test_config (18); 127 pure tests green |
 | A5.4 — typed manifest builder fed from Config (M5) | done | 2026-06-08 | `manifest.build_manifest(Config, …)` is the one builder; `empty_manifest` delegates to it; 196/768 from `schemas` constants, version from `CacheConfig`, encoder-id/dtype/convention/dataset(name+license) from `Config`; stubbed `teacher` provenance section (worldvln id+rev, disagreement_source-from-Config, vjepa2 id, render hash); entry-required-keys derived from `CacheManifestEntry.required_keys()` (type-enforced, not hand-kept); 127→134 tests |
 | A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | done | 2026-06-08 | frozen+validated `PredictorOutput.predicted_latents (T,196,768) fp16`, `TrustReadout {p_commit (T,)∈[0,1], k_star∈[0,T] float, sigma≥0}`, `Waypoint.delta_4dof (4,) f32 NED-body`; io-contract §0 references them; teacher `OracleTarget` seam deferred to A5.9; 134→150 tests |
-| A5.6 — StepSample history_mask + lang padding-mask (M4) | pending | | PURE/AUTO; before the loader |
+| A5.6 — StepSample history_mask + lang padding-mask (M4) | done | 2026-06-08 | `StepSample` gains `history_mask (H,) bool` (block-causal, real vs zero-pad at episode start) + `lang_mask (M,) bool` (== M of lang_tokens); `MASK_DTYPE=np.bool_`; validation + length cross-check; loader-tuple in io-contract §2 updated (9-tuple); 150→155 tests |
 | A5.7 — AuditSummary slice aggregator (M3) | pending | | PURE code AUTO / real-slice re-run USER-GATED |
 | A5.8 — investigation: WorldVLN determinism/weights/4-vs-6-DoF/license | pending | | USER-GATED; gates A5.9/A5.11/A5.14; may run parallel to A5.1–A5.7 |
 | A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | pending | | PURE/AUTO; after A5.8 |
@@ -36,6 +36,30 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-08 (PM) — A5.6: StepSample history + language padding masks (M4) — STOP CHECK
+**Status:** A5.6 pending → done (AUTONOMOUS, pure-tier). **started_step+3 STOP CHECK reached (A5.4–A5.6).**
+**What's done.** Closed M4 by making the two variable-validity inputs of the loader tuple explicit before
+the loader (A5.15) is written: `StepSample` gains `history_mask (H=3,) bool` (True = real history frame,
+False = zero-padding at the block-causal episode start — the old "padded+masked" comment is now a real
+field) and `lang_mask (M,) bool` (True = real language token, False = padding so attention ignores the
+pad). Added `MASK_DTYPE = np.bool_`; `__post_init__` validates both via `_check_array` and cross-checks
+`len(lang_mask) == M == lang_tokens.shape[0]`. Field order keeps each mask beside the array it covers
+(`history_latents, history_mask` / `lang_tokens, lang_mask`); the loader tuple in `docs/io-contract.md` §2
+is now the 9-tuple `(z_t, history_latents, history_mask, lang_tokens, lang_mask, action_id, z_next,
+delta_4dof, future_frame_rgb)` with both mask rows documented.
+**Tested.** A5.6 step command `pytest tests/test_schemas.py` (50) green; full pure sweep `make test`
+150→**155** (+5: masks-are-real-fields + 4 bad-input rejections — wrong dtype/length, lang length≠M); the
+existing `_step_sample` helper updated to supply valid masks; `make import-smoke` / `lint` (ruff) /
+`typecheck` (mypy, 6 files) clean; manifest CLI round-trip OK; `make audit` fixture clean (0 Δ-mismatch);
+blob-guard OK.
+**Open / next — STOP CHECK.** Pushing A5.4–A5.6 to `origin/main` + emitting the loop promise + the
+USER-GATED **A5.8** command block (WorldVLN determinism/weights/4-vs-6-DoF/license probe — parallel,
+gates A5.9/A5.11/A5.14). Resume after the push at **A5.7** (`AuditSummary` slice aggregator, M3 — PURE
+code AUTO, real-slice re-run USER-GATED) → then A5.8-dependent A5.9.
+**Vault.** No new decision (closes the M4 mask gap per the signed-off re-plan).
 
 ---
 
