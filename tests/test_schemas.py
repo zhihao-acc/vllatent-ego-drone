@@ -18,12 +18,16 @@ from vllatent.schemas import (
     DOF,
     EMBED_DIM,
     HISTORY,
+    HORIZON,
     LATENT_DTYPE,
     N_ACTIONS,
     PATCH_TOKENS,
     CacheManifestEntry,
     EpisodeRecord,
+    PredictorOutput,
     StepSample,
+    TrustReadout,
+    Waypoint,
 )
 
 
@@ -103,6 +107,71 @@ def test_stepsample_is_immutable() -> None:
 def test_stepsample_rejects_bad_inputs(bad: dict[str, object]) -> None:
     with pytest.raises((ValueError, TypeError)):
         _step_sample(**bad)
+
+
+# --- Student output seams (A5.5, H3) ---
+
+def test_predictor_output_valid_and_immutable() -> None:
+    po = PredictorOutput(predicted_latents=np.zeros((HORIZON, PATCH_TOKENS, EMBED_DIM), LATENT_DTYPE))
+    assert po.predicted_latents.shape == (HORIZON, PATCH_TOKENS, EMBED_DIM)
+    assert po.predicted_latents.dtype == LATENT_DTYPE
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        po.predicted_latents = po.predicted_latents  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    "arr",
+    [
+        np.zeros((HORIZON, PATCH_TOKENS, EMBED_DIM), np.float32),        # wrong dtype (must be fp16)
+        np.zeros((HORIZON + 1, PATCH_TOKENS, EMBED_DIM), LATENT_DTYPE),  # wrong horizon T
+        np.zeros((HORIZON, 10, EMBED_DIM), LATENT_DTYPE),               # wrong token count
+        np.zeros((PATCH_TOKENS, EMBED_DIM), LATENT_DTYPE),             # wrong ndim
+    ],
+)
+def test_predictor_output_rejects_bad(arr: np.ndarray) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        PredictorOutput(predicted_latents=arr)
+
+
+def test_trust_readout_valid() -> None:
+    tr = TrustReadout(p_commit=np.full((HORIZON,), 0.5), k_star=2.0, sigma=0.1)
+    assert tr.p_commit.shape == (HORIZON,)
+    assert 0.0 <= tr.k_star <= HORIZON and tr.sigma >= 0.0
+
+
+def test_trust_readout_accepts_int_scalars() -> None:
+    # k_star/sigma may arrive as ints; both must validate (int is a valid float here).
+    tr = TrustReadout(p_commit=np.zeros((HORIZON,)), k_star=0, sigma=0)
+    assert tr.k_star == 0 and tr.sigma == 0
+
+
+@pytest.mark.parametrize(
+    "kw",
+    [
+        dict(p_commit=np.full((HORIZON,), 1.5)),          # probability above 1
+        dict(p_commit=np.full((HORIZON,), -0.1)),         # probability below 0
+        dict(p_commit=np.zeros((HORIZON + 1,))),          # wrong horizon
+        dict(p_commit=np.zeros((HORIZON,), dtype=int)),   # not float-kind
+        dict(k_star=-1.0),                                # k* below 0
+        dict(k_star=float(HORIZON) + 1.0),                # k* above T
+        dict(k_star=True),                                # bool is not a valid k*
+        dict(sigma=-0.01),                                # sigma negative
+    ],
+)
+def test_trust_readout_rejects_bad(kw: dict[str, object]) -> None:
+    base: dict[str, object] = dict(p_commit=np.full((HORIZON,), 0.5), k_star=1.0, sigma=0.1)
+    base.update(kw)
+    with pytest.raises((ValueError, TypeError)):
+        TrustReadout(**base)  # type: ignore[arg-type]
+
+
+def test_waypoint_valid_and_rejects_bad() -> None:
+    wp = Waypoint(delta_4dof=np.zeros((DOF,), DELTA_DTYPE))
+    assert wp.delta_4dof.shape == (DOF,) and wp.delta_4dof.dtype == DELTA_DTYPE
+    with pytest.raises((ValueError, TypeError)):
+        Waypoint(delta_4dof=np.zeros((DOF,), np.float16))   # wrong dtype (must be f32)
+    with pytest.raises((ValueError, TypeError)):
+        Waypoint(delta_4dof=np.zeros((3,), DELTA_DTYPE))    # wrong DoF
 
 
 # --- EpisodeRecord ---

@@ -22,6 +22,13 @@
 | → remap | `(4,)` body-FLU delta | fly0 convention | remap layer (**Phase D**) |
 | → handoff | `WaypointHandoff.G_world (3,)` ENU **+ Δψ** | **world ENU** | fly0 `frames.py` + odom (**Phase D**) |
 
+> **Typed student seams (Phase A, `vllatent/schemas.py`).** The model-output rows above are frozen,
+> shape/dtype-validated dataclasses (review H3) so an ablation is a config flag, not code surgery:
+> `ẑ_{t+1..t+T}` → `PredictorOutput.predicted_latents` `(T,196,768)` fp16; trust readout →
+> `TrustReadout {p_commit (T,) ∈ [0,1], k_star ∈ [0,T], sigma ≥ 0}`; waypoint (native) →
+> `Waypoint.delta_4dof (4,)` f32, AirSim-NED body. The loader-input tuple is `StepSample` (§2). The
+> teacher-side `OracleTarget` distillation seam is typed later (A5.9, after the A5.8 investigation).
+
 ---
 
 ## 1. The four locked seams

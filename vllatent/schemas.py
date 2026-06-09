@@ -1,10 +1,12 @@
 """Loader output-tuple SCHEMAS (PURE tier) — Phase-A step 3.
 
 Frozen dataclasses for the tuple the cached-latent loader emits (arch-design §6
-item 5), the parsed AerialVLN episode (output of ``vllatent.audit.parse_episode``),
-and one cache-manifest entry (the typed view of ``vllatent.manifest``'s per-episode
-entry). numpy-typed; **stdlib + numpy only** (no torch / no airsim / no sibling) so
-CI imports this module. Each field documents its frame / dtype / order.
+item 5), the **student output seams** (predictor rollout / trust readout / waypoint
+— H3, typed so an ablation is a config flag not code surgery), the parsed AerialVLN
+episode (output of ``vllatent.audit.parse_episode``), and one cache-manifest entry
+(the typed view of ``vllatent.manifest``'s per-episode entry). numpy-typed; **stdlib +
+numpy only** (no torch / no airsim / no sibling) so CI imports this module. Each field
+documents its frame / dtype / order.
 
 Locked shapes/dtypes come from ``docs/io-contract.md`` / vault
 ``[[arch-design-2026-06-08-latent-pred]]`` §4. Construction validates at the boundary
@@ -90,6 +92,70 @@ class StepSample:
             raise ValueError(f"action_id: expected 0..{N_ACTIONS - 1}, got {self.action_id}")
         if self.future_frame_rgb is not None:
             _check_array("future_frame_rgb", self.future_frame_rgb, (None, None, 3), dtype=RGB_DTYPE)
+
+
+# --- Student output seams (H3) — typed so "−trust" / swap-predictor is a config flag, not surgery ---
+
+@dataclass(frozen=True, eq=False)
+class PredictorOutput:
+    """The latent predictor's rollout ẑ_{t+1..t+T} (arch-design §4; io-contract §0).
+
+    ``predicted_latents`` lives in the FROZEN DINOv3 patch space and is compared against the
+    cached ``z_next`` targets, so it carries the cache dtype (fp16); the live predictor computes
+    in fp32 and casts at this seam. The leading axis is the horizon T = ``HORIZON``.
+    """
+
+    predicted_latents: np.ndarray  # (T,196,768) fp16 — ẑ_{t+1..t+T}, DINOv3 patch space
+
+    def __post_init__(self) -> None:
+        _check_array(
+            "predicted_latents",
+            self.predicted_latents,
+            (HORIZON, PATCH_TOKENS, EMBED_DIM),
+            dtype=LATENT_DTYPE,
+        )
+
+
+@dataclass(frozen=True, eq=False)
+class TrustReadout:
+    """The deployed single-pass trust/horizon head readout (arch-design §9.6; io-contract §1c).
+
+    ``p_commit`` = per-step "still-trusted" probabilities p_j ∈ [0,1]^T; ``k_star`` = the soft
+    expected horizon k* = Σ_j Π_{i≤j} p_i ∈ [0,T] (how far to commit); ``sigma`` = a scalar
+    predictive uncertainty σ ≥ 0. ONE forward pass — the K=5 ensemble teacher is Phase C.
+    """
+
+    p_commit: np.ndarray  # (T,) float — per-step commit probabilities in [0,1]
+    k_star: float         # soft expected horizon in [0, T]
+    sigma: float          # scalar predictive uncertainty >= 0
+
+    def __post_init__(self) -> None:
+        _check_array("p_commit", self.p_commit, (HORIZON,), kind="f")
+        if not bool(np.all((self.p_commit >= 0.0) & (self.p_commit <= 1.0))):
+            raise ValueError(f"p_commit: expected all values in [0,1], got {self.p_commit}")
+        for name in ("k_star", "sigma"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
+                raise TypeError(f"{name}: expected float, got {type(v).__name__}")
+        if not (0.0 <= float(self.k_star) <= HORIZON):
+            raise ValueError(f"k_star: expected 0..{HORIZON}, got {self.k_star}")
+        if float(self.sigma) < 0.0:
+            raise ValueError(f"sigma: expected >= 0, got {self.sigma}")
+
+
+@dataclass(frozen=True, eq=False)
+class Waypoint:
+    """The waypoint head output: continuous 4-DoF (Δx,Δy,Δz,Δψ), AirSim-NED body, yaw-only.
+
+    Native model convention (arch-design §9.7). The NED→FLU→world-ENU remap is Phase D — this
+    seam carries the raw body-frame delta, NOT a world pose. Same quantity as ``StepSample``'s
+    ``delta_4dof`` GT target, but here it is the model's PREDICTED waypoint.
+    """
+
+    delta_4dof: np.ndarray  # (4,) f32 — (dx,dy,dz,dyaw) AirSim-NED body, yaw-only
+
+    def __post_init__(self) -> None:
+        _check_array("delta_4dof", self.delta_4dof, (DOF,), dtype=DELTA_DTYPE)
 
 
 @dataclass(frozen=True, eq=False)
@@ -183,6 +249,9 @@ __all__ = [
     "DELTA_DTYPE",
     "RGB_DTYPE",
     "StepSample",
+    "PredictorOutput",
+    "TrustReadout",
+    "Waypoint",
     "EpisodeRecord",
     "CacheManifestEntry",
 ]

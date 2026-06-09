@@ -20,7 +20,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.2 — test_frames.py no-flip + NED→FLU→ENU remap math (M2) | done | 2026-06-08 | `frames.py` R_FLU_FROM_FRD/R_ENU_FROM_NED + ned_frd_to_flu/ned_to_enu/remap_waypoint_ned_body_to_flu; `tests/test_frames.py` (7) pins no-flip basis + det=+1; collected by `make test` (102→109); live fly0 wiring Phase D |
 | A5.3 — frozen typed Config + from_yaml + validation (H1/H2/L2/L3) | done | 2026-06-08 | frozen `Config` tree (encoder/predictor/distill/trust/data/cache) + `from_yaml` (env-expand, strict unknown-key reject) + boundary validation; replaces orphan `load_config`; swept knobs single-sourced (loader reads from Config, default.yaml trimmed to overrides); trust placeholders for A5.9; test_config (18); 127 pure tests green |
 | A5.4 — typed manifest builder fed from Config (M5) | done | 2026-06-08 | `manifest.build_manifest(Config, …)` is the one builder; `empty_manifest` delegates to it; 196/768 from `schemas` constants, version from `CacheConfig`, encoder-id/dtype/convention/dataset(name+license) from `Config`; stubbed `teacher` provenance section (worldvln id+rev, disagreement_source-from-Config, vjepa2 id, render hash); entry-required-keys derived from `CacheManifestEntry.required_keys()` (type-enforced, not hand-kept); 127→134 tests |
-| A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | pending | | PURE/AUTO |
+| A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | done | 2026-06-08 | frozen+validated `PredictorOutput.predicted_latents (T,196,768) fp16`, `TrustReadout {p_commit (T,)∈[0,1], k_star∈[0,T] float, sigma≥0}`, `Waypoint.delta_4dof (4,) f32 NED-body`; io-contract §0 references them; teacher `OracleTarget` seam deferred to A5.9; 134→150 tests |
 | A5.6 — StepSample history_mask + lang padding-mask (M4) | pending | | PURE/AUTO; before the loader |
 | A5.7 — AuditSummary slice aggregator (M3) | pending | | PURE code AUTO / real-slice re-run USER-GATED |
 | A5.8 — investigation: WorldVLN determinism/weights/4-vs-6-DoF/license | pending | | USER-GATED; gates A5.9/A5.11/A5.14; may run parallel to A5.1–A5.7 |
@@ -36,6 +36,27 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-08 (PM) — A5.5: typed student output seams in schemas.py (H3)
+**Status:** A5.5 pending → done (AUTONOMOUS, pure-tier).
+**What's done.** Promoted the three model-output rows of the I/O contract from prose into frozen,
+shape/dtype-validated dataclasses in `vllatent/schemas.py` (review H3 — so a `−trust` / swap-predictor
+ablation is a config flag over typed seams, not code surgery in Phase B): (1) `PredictorOutput`
+`predicted_latents (T=HORIZON, 196, 768) fp16` (the rollout ẑ_{t+1..t+T} in DINOv3 patch space, cache
+dtype to match the `z_next` target); (2) `TrustReadout` = the deployed single-pass head readout
+`{p_commit (T,) float ∈ [0,1], k_star float ∈ [0,T] (soft expected horizon Σ_j Π p_i), sigma float ≥ 0}`;
+(3) `Waypoint` `delta_4dof (4,) f32` AirSim-NED body, yaw-only (predicted analogue of `StepSample.delta_4dof`;
+the NED→FLU→ENU remap stays Phase D). All reuse the existing `_check_array` validator + `eq=False`
+(array fields) + `frozen`; scalar `k_star`/`sigma` reject bool and out-of-range. `docs/io-contract.md`
+§0 now references the typed seams + notes the teacher `OracleTarget` seam lands in A5.9. Added to `__all__`.
+**Tested.** A5.5 step command `pytest tests/test_schemas.py` (45) green; full pure sweep `make test`
+134→**150** (+16: PredictorOutput/TrustReadout/Waypoint valid + bad-input rejection); `make import-smoke`
+/ `lint` (ruff) / `typecheck` (mypy, 6 files) clean; blob-guard OK.
+**Open / next.** A5.6 — `StepSample` `history_mask` + language padding-mask (M4) = **started_step+3 STOP
+CHECK** (push + pause). A5.8 (WorldVLN investigation) USER-GATED, parallel — command block at the STOP CHECK.
+**Vault.** No new decision (types the locked student-output seams per the signed-off re-plan).
 
 ---
 
