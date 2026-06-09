@@ -10,14 +10,17 @@ a frozen cached encoder is a fixed target and cannot collapse).
 :meth:`DinoV3Encoder.encode_bgr` flips the channels at this render->encode boundary (and the cache
 manifest records ``color_order = "RGB"``). :meth:`encode_rgb` is for already-RGB input.
 
-**torch / transformers imports are LAZY** — every heavy import lives inside :func:`_load_backbone`
+**torch / timm imports are LAZY** — every heavy import lives inside :func:`_load_backbone`
 or a method, so a torch-free box (the pure CI lane) imports this module without crashing. The pure
 tier (``vllatent.{schemas,actions,frames,config,manifest,audit}``) NEVER imports this module.
 
+The backbone is timm's **non-gated** re-host of Meta's DINOv3 ViT-B/16 (HF
+``timm/vit_base_patch16_dinov3.lvd1689m``) — same LVD-1689M weights, **no HF token / no gate** (Meta's
+``facebook/dinov3-vitb16-pretrain-lvd1689m`` is gated and rejected our access 2026-06-09).
+
 Tested two ways (A5.10): a monkeypatched-backbone **contract** test (``tests/test_encode_contract.py``,
 ``@pytest.mark.torch``) that pins the BGR->RGB flip + the ``(196,768)`` fp16 output without real
-weights, and a **USER-GATED** real-weight smoke ``HF_ENDPOINT=https://hf-mirror.com make encode-smoke``
-(downloads the DINOv3 weights + runs a real forward; the agent does NOT drive the download).
+weights, and a real-weight smoke ``make encode-smoke`` (downloads ~330 MB; no token needed).
 
 See plans/phase-a5-replan-postpivot.md A5.10.
 """
@@ -37,7 +40,7 @@ if TYPE_CHECKING:  # type-only; never imported at runtime on the pure box
 
 # Single source of truth = vllatent.config (pure tier); the A5.14 cache build passes
 # config.encoder.{model_id,input_hw}. DINOv3 ViT-B/16: 224/16 = 14 -> 14*14 = 196 patch tokens,
-# each EMBED_DIM (768)-wide. The HF weights are GATED (DINOv3 license) -> the smoke is USER-GATED.
+# each EMBED_DIM (768)-wide. Weights = timm's NON-GATED re-host (no token; see _load_backbone).
 _ENCODER_DEFAULTS = EncoderConfig()
 MODEL_ID = _ENCODER_DEFAULTS.model_id
 INPUT_HW = (_ENCODER_DEFAULTS.input_hw, _ENCODER_DEFAULTS.input_hw)
@@ -62,23 +65,25 @@ def bgr_to_rgb(frame: np.ndarray) -> np.ndarray:
 
 
 def _load_backbone(model_id: str, device: str, dtype: str) -> BackboneForward:
-    """Lazy-load the real frozen DINOv3 backbone + image processor; return its forward callable.
+    """Lazy-load the frozen DINOv3 ViT-B/16 backbone via **timm**; return its forward callable.
 
-    ALL heavy imports (torch / transformers) live in here so the module imports on a torch-free
-    box. Monkeypatched in the contract test (so no real weights are downloaded in CI). The returned
-    closure maps an RGB uint8 ``(H,W,3)`` frame -> ``last_hidden_state`` ``(1,T,768)``.
+    Uses timm's NON-GATED re-host of Meta's DINOv3 ViT-B/16 (HF ``timm/<model_id>``) — same
+    LVD-1689M weights, no gate/token (Meta's gated repo rejected our access 2026-06-09). ALL heavy
+    imports (torch / timm) live in here so the module imports on a torch-free box. Monkeypatched in
+    the contract test (so no real weights are downloaded in CI). The returned closure maps an RGB
+    uint8 ``(H,W,3)`` frame -> token sequence ``(1,T,768)`` (T = 1 CLS + 4 registers + 196 patches).
     """
+    import timm
     import torch
-    from transformers import AutoImageProcessor, AutoModel
+    from timm.data import resolve_model_data_config
 
     try:
-        processor = AutoImageProcessor.from_pretrained(model_id)
-        model = AutoModel.from_pretrained(model_id)
-    except Exception as exc:  # gated weights / missing HF_TOKEN / offline — make it actionable
+        model = timm.create_model(model_id, pretrained=True, num_classes=0)
+    except Exception as exc:  # network / offline — make it actionable
         raise RuntimeError(
-            f"Failed to load DINOv3 weights {model_id!r}. These are GATED (DINOv3 license): accept the "
-            f"license at https://huggingface.co/{model_id} then set HF_TOKEN (and, from CN, "
-            f"HF_ENDPOINT=https://hf-mirror.com). Original error: {exc}"
+            f"Failed to load DINOv3 weights {model_id!r} via timm (HF 'timm/{model_id}'). These are "
+            f"NON-GATED — no HF_TOKEN needed. From CN, set HF_ENDPOINT=https://hf-mirror.com if the "
+            f"direct download is slow. Original error: {exc}"
         ) from exc
     model = model.to(device).eval()
     if dtype == "float16":
@@ -86,11 +91,23 @@ def _load_backbone(model_id: str, device: str, dtype: str) -> BackboneForward:
     for param in model.parameters():  # frozen — no grads, never trains
         param.requires_grad_(False)
 
+    # timm's canonical normalization for THIS checkpoint (mean/std/input size). Frames are rendered
+    # at INPUT_HW already, so the fast path is a pure normalize (resize only if a stray size slips
+    # in). Pure torch — no PIL/torchvision dependency.
+    data_cfg = resolve_model_data_config(model)
+    mean = torch.tensor(data_cfg["mean"]).view(1, 3, 1, 1)
+    std = torch.tensor(data_cfg["std"]).view(1, 3, 1, 1)
+    target_hw = (int(data_cfg["input_size"][1]), int(data_cfg["input_size"][2]))
+    compute_dtype = torch.float16 if dtype == "float16" else torch.float32
+
     def _forward(frame_rgb: np.ndarray) -> torch.Tensor:
-        inputs = processor(images=frame_rgb, return_tensors="pt").to(device)
+        t = torch.from_numpy(np.ascontiguousarray(frame_rgb)).permute(2, 0, 1)[None].float().div_(255.0)
+        if t.shape[-2:] != target_hw:
+            t = torch.nn.functional.interpolate(t, size=target_hw, mode="bicubic", align_corners=False)
+        t = ((t - mean) / std).to(device=device, dtype=compute_dtype)
         with torch.no_grad():
-            out = model(**inputs)
-        return out.last_hidden_state  # (1, T, 768)
+            tokens = model.forward_features(t)  # (1, T, 768)
+        return tokens
 
     return _forward
 
@@ -143,11 +160,11 @@ def _validate_latent(arr: np.ndarray) -> None:
         raise ValueError(f"latent: expected dtype {np.dtype(LATENT_DTYPE)}, got {arr.dtype}")
 
 
-def _smoke(model_id: str, device: str) -> int:  # pragma: no cover - USER-GATED (downloads weights)
+def _smoke(model_id: str, device: str) -> int:  # pragma: no cover - downloads real weights
     """Real-weight smoke: build the encoder, encode one random BGR frame, assert the contract.
 
-    Run via ``HF_ENDPOINT=https://hf-mirror.com make encode-smoke`` (downloads multi-GB DINOv3
-    weights). USER-GATED — the agent emits the command block; it does not drive the download.
+    Run via ``make encode-smoke`` (downloads ~330 MB non-gated timm DINOv3 weights; no HF token).
+    From CN, ``HF_ENDPOINT=https://hf-mirror.com`` speeds the download.
     """
     rng = np.random.default_rng(0)
     frame_bgr = rng.integers(0, 256, size=(INPUT_HW[0], INPUT_HW[1], 3), dtype=np.uint8)

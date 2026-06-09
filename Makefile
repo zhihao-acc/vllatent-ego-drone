@@ -19,7 +19,7 @@ help:
 	@echo "  make import-smoke - import the PURE tier (numpy/pyyaml only, no torch/sim)"
 	@echo "  make test         - pure unit tests (-m 'not torch and not sim')"
 	@echo "  make test-torch   - torch-tier tests (needs the torch extra)"
-	@echo "  make encode-smoke - USER-GATED real-weight DINOv3 forward (downloads gated weights; HF_TOKEN+mirror)"
+	@echo "  make encode-smoke - real-weight DINOv3 forward (downloads ~330MB non-gated timm weights; no token)"
 	@echo "  make audit        - run the AerialVLN audit parser on the fixture episode (after step 5)"
 	@echo "  make blob         - pre-commit blob guard"
 	@echo "  make ralph        - print the /ralph-loop launch command"
@@ -49,8 +49,8 @@ test:
 test-torch:
 	$(PY) -m pytest -q -m torch
 
-# USER-GATED: downloads the gated DINOv3 ViT-B/16 weights (DINOv3 license) + runs a real forward.
-# Needs HF auth (HF_TOKEN) + the CN mirror: HF_ENDPOINT=https://hf-mirror.com make encode-smoke
+# Downloads timm's NON-GATED DINOv3 ViT-B/16 re-host (~330MB, no token) + runs a real forward.
+# From CN, HF_ENDPOINT=https://hf-mirror.com speeds the download: HF_ENDPOINT=... make encode-smoke
 encode-smoke:
 	$(PY) -m vllatent.encode.dinov3 --smoke
 

@@ -54,7 +54,10 @@ def _expand_env(value: Any) -> Any:
 class EncoderConfig:
     """Frozen DINOv3 student-encoder settings (the 196/768 shapes are schemas constants)."""
 
-    model_id: str = "facebook/dinov3-vitb16-pretrain-lvd1689m"  # exact HF id (gated, DINOv3 license)
+    # timm's NON-GATED re-host of Meta's DINOv3 ViT-B/16 (LVD-1689M) — same weights, no gate/token,
+    # loaded via timm.create_model (HF repo 'timm/vit_base_patch16_dinov3.lvd1689m'). Meta's own
+    # 'facebook/dinov3-vitb16-pretrain-lvd1689m' is gated and rejected our access (2026-06-09).
+    model_id: str = "vit_base_patch16_dinov3.lvd1689m"
     input_hw: int = 224
     dtype: str = "float16"
     hf_endpoint: str = "https://hf-mirror.com"

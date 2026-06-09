@@ -25,7 +25,9 @@ encoder ⇒ **no EMA / no VICReg**. **Phase A is plumbing + data, not research.*
 ## Architecture — LOCKED vs OPEN
 
 **LOCKED — do NOT relitigate. See vault `[[arch-design-2026-06-08-latent-pred]]` (authoritative).**
-Encoder DINOv3 ViT-B/16 frozen+cached (RGB-only, 224², 196×768 fp16) · predictor block-causal ViT
+Encoder DINOv3 ViT-B/16 frozen+cached (RGB-only, 224², 196×768 fp16; **loaded via timm's NON-GATED
+re-host `vit_base_patch16_dinov3.lvd1689m` — same LVD-1689M weights, no token; Meta's gated
+`facebook/dinov3-vitb16-pretrain-lvd1689m` rejected our access 2026-06-09**) · predictor block-causal ViT
 D=768 depth 12 heads 12 MLP 3072 · discrete-codebook→per-step FiLM action · frozen-text (SigLIP/CLIP
 text tower 512→768)→cross-attention language · H=3 / T=4 · trust = deployed single-pass horizon head;
 offline K=5 ensemble teacher + V-JEPA-2 surprise = **Phase C** · continuous 4-DoF waypoint head ·

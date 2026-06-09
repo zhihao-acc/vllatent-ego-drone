@@ -26,7 +26,8 @@ def test_defaults_construct_and_match_schemas_constants() -> None:
     assert cfg.predictor.history == HISTORY
     assert cfg.predictor.horizon == HORIZON
     assert cfg.predictor.depth == 12 and cfg.predictor.heads == 12
-    assert cfg.encoder.model_id == "facebook/dinov3-vitb16-pretrain-lvd1689m"
+    # timm's NON-GATED DINOv3 ViT-B/16 re-host (Meta's gated repo rejected our access 2026-06-09).
+    assert cfg.encoder.model_id == "vit_base_patch16_dinov3.lvd1689m"
     # Trust knobs FINALIZED in A5.9 (A5.8 proved WorldVLN is stochastic-by-default).
     assert cfg.trust.disagreement_source == "worldvln_rollout"
     assert cfg.trust.k_rollouts == 5
