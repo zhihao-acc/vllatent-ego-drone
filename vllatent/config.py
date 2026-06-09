@@ -54,7 +54,7 @@ def _expand_env(value: Any) -> Any:
 class EncoderConfig:
     """Frozen DINOv3 student-encoder settings (the 196/768 shapes are schemas constants)."""
 
-    model_id: str = "facebook/dinov3-vitb16"
+    model_id: str = "facebook/dinov3-vitb16-pretrain-lvd1689m"  # exact HF id (gated, DINOv3 license)
     input_hw: int = 224
     dtype: str = "float16"
     hf_endpoint: str = "https://hf-mirror.com"

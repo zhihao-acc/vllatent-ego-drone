@@ -25,7 +25,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.7 — AuditSummary slice aggregator (M3) | done | 2026-06-09 | `AuditSummary` + `summarize_episodes` + `--slice/--summary/--split` CLI; dataset-level all-classes/scene-range/splits at SLICE scope (M3); 162→167 tests. **Real-slice VERIFIED (user-pasted):** 50/50 ok, 10198 transitions, 0 Δ-mismatch, all 8 classes, 14 scenes ∈[1,26], 34/50 naive-would-mismatch, splits=[train] — reproduces step-5b exactly |
 | A5.8 — investigation: WorldVLN determinism/weights/6-DoF/license | done | 2026-06-09 | USER-verified probe of `EmbodiedCity/WorldVLN`: weights complete (~36.9 GB; InfinityStar 4-shard backbone + 1.06 GB action decoder + 0.74 GB VAE); inference **STOCHASTIC by default** (top_k900/top_p0.97/cfg34, per-segment seed) ⇒ K-rollout disagreement FREE (overturns prior "deterministic"); action head **6-DoF [roll,yaw,pitch,x,y,z]** SE(3)-integrated vs our 4-DoF student ⇒ 6→4 projection (A5.9); ckpt env `INFINITY_CKPT`+`ACTIONHEAD_CKPT`; lang enc T5; **LICENSE SPLIT** code CC BY 4.0 / weights `license:other` (flag pre-publication) |
 | A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | done | 2026-06-09 | frozen+validated `TeacherOutput.rollouts_pose6 (K,6)` + `rollout_spread()→(6,)`; `OracleTarget {waypoint_4dof (4,) f32, teacher_pose6 (6,), rollpitch_resid, disagreement, vjepa_surprise}` (user-approved shape; finite/bool/dtype validated); `TEACHER_DOF=6`; TrustConfig placeholders FINALIZED (A5.8: worldvln_rollout, stochastic⇒free); io-contract §0 teacher-seam note; focused adversarial review CLEAN; 167→181 tests |
-| A5.10 — DINOv3 student-encoder wrapper | pending | | TORCH; contract AUTO / real-weight USER-GATED |
+| A5.10 — DINOv3 student-encoder wrapper | in_progress | 2026-06-09 | TORCH; **contract done** (monkeypatched test, lazy import, BGR→RGB, (196,768) fp16; pure gate 181→182, torch 4); real-weight encode-smoke USER-GATED (gated DINOv3 weights + HF_TOKEN) — command block emitted |
 | A5.11 — frozen WorldVLN teacher wrapper | pending | | TORCH; USER-GATED (server); after A5.8 |
 | A5.12 — V-JEPA-2 surprise verifier wrapper | pending | | TORCH; USER-GATED |
 | A5.13 — render harness | pending | | SIM; unit AUTO / live USER-GATED (docker+UE4) |
@@ -36,6 +36,35 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-09 — A5.10: DINOv3 student-encoder wrapper (TORCH tier) — CONTRACT done; real-weight USER-GATED (STOP CHECK: tier boundary)
+**Status:** A5.10 pending → in_progress (CONTRACT half AUTONOMOUS; the real-weight encode-smoke is USER-GATED per
+ralph-rules — command block emitted, awaiting the user's paste). **First TORCH-tier step = the pure→torch boundary.**
+**What's done.** `vllatent/encode/dinov3.py` — frozen DINOv3 ViT-B/16 wrapper (the student's FROZEN cached front-end
+encoder, **NOT** the student): `encode_bgr` enforces foot-gun #2 (BGR→RGB flip at the render→encode boundary via the
+pure-numpy `bgr_to_rgb`) then `encode_rgb` runs the backbone, takes the **TRAILING `PATCH_TOKENS` (196)** tokens
+(robust to the `[CLS]`+4-register prefix — research-confirmed DINOv3 layout = 201 tokens @ 224²), casts fp16, and
+`_validate_latent` pins `(196,768)` fp16 (== `LATENT_DTYPE`). **torch/transformers imports are LAZY** (`_load_backbone`
++ methods; `if TYPE_CHECKING: import torch` only) so a torch-free box imports the module (verified: `torch` NOT in
+`sys.modules` post-import). Model id single-sourced from `config.EncoderConfig` (corrected the placeholder
+`facebook/dinov3-vitb16` → the real **gated** id `facebook/dinov3-vitb16-pretrain-lvd1689m`; DINOv3 license, needs
+HF_TOKEN — surfaced as an actionable load error). Added the USER-GATED `make encode-smoke` target.
+**Tested.** Contract (AUTO): `tests/test_encode_contract.py` (4 tests, `@pytest.mark.torch`, **monkeypatched backbone
+— NO weights**): BGR→RGB reaches the backbone, `(196,768)` fp16 output, trailing-196 drops CLS+registers, bad-input
+rejection → `make test-torch` **4 passed** (torch present in the pure env). Pure gate UNCHANGED-GREEN: a torch-FREE
+guard in `tests/test_smoke.py` (imports the module + AST-checks no module-level heavy import) lands in `make test`
+181→**182**; `make import-smoke`/`lint`(ruff)/`typecheck`(mypy, 6 pure files) clean; blob-guard OK. An **adversarial
+4-skeptic verify panel** (tier-purity / contract-fidelity / real-weight-path / DoD) ran the gates + refute-attempts:
+**3 holds**; the 4th's issues fixed here (removed dead `return 2`; added the gated-weights HF_TOKEN load error;
+clarified the always-fp16 cache comment) — its only remaining flag was "test file untracked" = closed by this commit.
+**Open / next — STOP CHECK (pure→torch tier boundary + A5.10 real-weight is USER-GATED).** Emitting the encode-smoke
+command block (`HF_TOKEN=… HF_ENDPOINT=https://hf-mirror.com make encode-smoke`; expect `latent (196,768) float16`)
+— A5.10 flips to `done` when the user pastes it. Next pending = **A5.11** (frozen WorldVLN teacher wrapper, TORCH,
+USER-GATED server) → A5.12 (V-JEPA-2) → A5.13 (render harness).
+**Vault.** No new decision (implements the A5.10 DINOv3 wrapper per the signed-off re-plan; the gated-license weights
+track is already recorded in the A5.8 entry).
 
 ---
 

@@ -7,7 +7,7 @@ SHELL := /bin/bash
 # PURE tier (numpy/pyyaml only; CI-importable). The HARD mypy + import gate scopes here.
 PURE_TIER := vllatent/schemas.py vllatent/actions.py vllatent/frames.py vllatent/config.py vllatent/manifest.py vllatent/audit.py
 
-.PHONY: help setup setup-torch lint typecheck typecheck-all import-smoke test test-torch audit blob ralph
+.PHONY: help setup setup-torch lint typecheck typecheck-all import-smoke test test-torch encode-smoke audit blob ralph
 
 help:
 	@echo "vllatent-ego-drone dev targets:"
@@ -19,6 +19,7 @@ help:
 	@echo "  make import-smoke - import the PURE tier (numpy/pyyaml only, no torch/sim)"
 	@echo "  make test         - pure unit tests (-m 'not torch and not sim')"
 	@echo "  make test-torch   - torch-tier tests (needs the torch extra)"
+	@echo "  make encode-smoke - USER-GATED real-weight DINOv3 forward (downloads gated weights; HF_TOKEN+mirror)"
 	@echo "  make audit        - run the AerialVLN audit parser on the fixture episode (after step 5)"
 	@echo "  make blob         - pre-commit blob guard"
 	@echo "  make ralph        - print the /ralph-loop launch command"
@@ -47,6 +48,11 @@ test:
 
 test-torch:
 	$(PY) -m pytest -q -m torch
+
+# USER-GATED: downloads the gated DINOv3 ViT-B/16 weights (DINOv3 license) + runs a real forward.
+# Needs HF auth (HF_TOKEN) + the CN mirror: HF_ENDPOINT=https://hf-mirror.com make encode-smoke
+encode-smoke:
+	$(PY) -m vllatent.encode.dinov3 --smoke
 
 audit:
 	$(PY) -m vllatent.audit --episode fixtures/episodes/tiny_episode.json
