@@ -18,7 +18,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 7–13 (old DINOv3-latent pipeline) | superseded | 2026-06-08 | **replaced by A5.1–A5.18** per `plans/phase-a5-replan-postpivot.md` (post-WorldVLN-pivot re-plan) |
 | A5.1 — extract public frame/quaternion primitives → frames.py (M1) | done | 2026-06-08 | `frames.py` owns public `yaw_from_xyzw`/`xyzw_from_yaw`/`wrap_pi`/`reorder_wxyz_to_xyzw`; actions.py+audit.py import them; no private cross-module imports; L1 verified (ROW_WIDTH=6); 102 pure tests green |
 | A5.2 — test_frames.py no-flip + NED→FLU→ENU remap math (M2) | done | 2026-06-08 | `frames.py` R_FLU_FROM_FRD/R_ENU_FROM_NED + ned_frd_to_flu/ned_to_enu/remap_waypoint_ned_body_to_flu; `tests/test_frames.py` (7) pins no-flip basis + det=+1; collected by `make test` (102→109); live fly0 wiring Phase D |
-| A5.3 — frozen typed Config + from_yaml + validation (H1/H2/L2/L3) | pending | | PURE/AUTO; single source-of-truth for swept knobs; full set + placeholders |
+| A5.3 — frozen typed Config + from_yaml + validation (H1/H2/L2/L3) | done | 2026-06-08 | frozen `Config` tree (encoder/predictor/distill/trust/data/cache) + `from_yaml` (env-expand, strict unknown-key reject) + boundary validation; replaces orphan `load_config`; swept knobs single-sourced (loader reads from Config, default.yaml trimmed to overrides); trust placeholders for A5.9; test_config (18); 127 pure tests green |
 | A5.4 — typed manifest builder fed from Config (M5) | pending | | PURE/AUTO; de-dup 196/768; teacher-provenance fields stubbed |
 | A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | pending | | PURE/AUTO |
 | A5.6 — StepSample history_mask + lang padding-mask (M4) | pending | | PURE/AUTO; before the loader |
@@ -36,6 +36,31 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-08 (PM) — A5.3: frozen typed Config single-source-of-truth (H1/H2/L2/L3) — STOP CHECK
+**Status:** A5.3 pending → done (AUTONOMOUS, pure-tier). **started_step+3 STOP CHECK reached (A5.1–A5.3).**
+**What's done.** Replaced the orphan untyped `load_config` dict with a frozen, validated `Config`
+dataclass tree (`vllatent/config.py`): `EncoderConfig / PredictorConfig / DistillConfig / TrustConfig /
+DataConfig / CacheConfig` + `Config.from_yaml` (env-`${VAR:-default}` expansion + **strict unknown-key
+rejection** so an ablation-yaml typo fails fast). Dataclass defaults are the source of truth; the swept
+ablation knobs (T/H, predictor depth/heads/mlp_ratio, distill λ-weights+temperature, trust
+disagreement_source/k_rollouts/vjepa_surprise_threshold) live ONLY here; the spike-dependent trust knobs
+are typed **placeholders finalized in A5.9**. Fixed shapes (196/768) stay `schemas` constants; AirVLN step
+sizes stay `actions` constants — both referenced, not duplicated. De-duped HISTORY/HORIZON (now single
+literals in `schemas`): `data/loader.py` reads H/T from `Config` (closes L2's local re-declaration);
+trimmed `configs/default.yaml` to env overrides only (dropped the fixed-shape + `action:` duplication —
+the M5 manifest de-dup lands in A5.4). Boundary validation (positive ints, heads∣EMBED_DIM, enum
+disagreement_source, dtype∈{f16,f32}, thresholds∈[0,1]) + immutability. No resume/snapshot (Phase B).
+**Tested.** `pytest tests/test_config.py` (18: defaults, from_yaml + env-expand, override, unknown
+section/key rejection, validation, FrozenInstanceError) green; full pure sweep `make test` 109→**127**;
+`make import-smoke` / `lint` (ruff) / `typecheck` (mypy, 6 files) clean; blob-guard OK; loader imports
+config-driven (no torch needed).
+**Open / next.** STOP CHECK (started_step+3): pushing + emitting the loop promise. Resume at **A5.4**
+(typed manifest builder fed from Config, M5) → A5.5 (student seams, H3) → A5.6 (StepSample masks, M4) →
+A5.7 (AuditSummary, M3). **A5.8 (WorldVLN investigation) is USER-GATED** and may run in parallel.
+**Vault.** No new decision (implements the H1/H2 typed config SoT per the signed-off re-plan).
 
 ---
 
