@@ -174,6 +174,8 @@ def test_trust_readout_accepts_int_scalars() -> None:
         dict(k_star=float(HORIZON) + 1.0),                # k* above T
         dict(k_star=True),                                # bool is not a valid k*
         dict(sigma=-0.01),                                # sigma negative
+        dict(sigma=float("nan")),                         # sigma must be finite
+        dict(sigma=float("inf")),                         # sigma must be finite
     ],
 )
 def test_trust_readout_rejects_bad(kw: dict[str, object]) -> None:
@@ -305,3 +307,39 @@ def test_validate_manifest_entry_keys_enforced_from_type() -> None:
     errs = validate_manifest(m)
     for k in ("scene_id", "n_frames", "latent_path"):
         assert any(f"missing key: {k}" in e for e in errs)
+
+
+def test_build_manifest_reads_shapes_from_schemas_not_literals(monkeypatch: pytest.MonkeyPatch) -> None:
+    # True de-dup proof: build_manifest must READ PATCH_TOKENS/EMBED_DIM from schemas, not re-hardcode
+    # 196/768. Patch the constants in the manifest module's namespace and require the output to follow
+    # (a re-hardcoded literal would ignore the patch and this test would fail).
+    import vllatent.manifest as manifest_mod
+    monkeypatch.setattr(manifest_mod, "PATCH_TOKENS", 4242)
+    monkeypatch.setattr(manifest_mod, "EMBED_DIM", 1717)
+    m = manifest_mod.build_manifest(Config())
+    assert m["encoder"]["patch_tokens"] == 4242
+    assert m["encoder"]["dim"] == 1717
+
+
+def test_validate_manifest_rejects_bad_disagreement_source() -> None:
+    m = empty_manifest()
+    m["teacher"]["disagreement_source"] = "bogus_source"
+    assert any("disagreement_source" in e for e in validate_manifest(m))
+
+
+def test_validate_manifest_accepts_empty_disagreement_source_stub() -> None:
+    m = empty_manifest()
+    m["teacher"]["disagreement_source"] = ""  # the allowed stub (provenance populated in A5.14)
+    assert validate_manifest(m) == []
+
+
+def test_validate_manifest_rejects_missing_dataset_key() -> None:
+    m = empty_manifest()
+    del m["dataset"]["license"]
+    assert any("dataset missing keys" in e for e in validate_manifest(m))
+
+
+def test_validate_manifest_rejects_missing_teacher_key() -> None:
+    m = empty_manifest()
+    del m["teacher"]["vjepa2_model_id"]
+    assert any("teacher missing keys" in e for e in validate_manifest(m))

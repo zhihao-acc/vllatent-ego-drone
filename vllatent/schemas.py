@@ -154,8 +154,9 @@ class TrustReadout:
                 raise TypeError(f"{name}: expected float, got {type(v).__name__}")
         if not (0.0 <= float(self.k_star) <= HORIZON):
             raise ValueError(f"k_star: expected 0..{HORIZON}, got {self.k_star}")
-        if float(self.sigma) < 0.0:
-            raise ValueError(f"sigma: expected >= 0, got {self.sigma}")
+        # Two-sided/finite, symmetric with k_star + p_commit (a one-sided check would let NaN/inf pass).
+        if not np.isfinite(float(self.sigma)) or float(self.sigma) < 0.0:
+            raise ValueError(f"sigma: expected a finite value >= 0, got {self.sigma}")
 
 
 @dataclass(frozen=True, eq=False)

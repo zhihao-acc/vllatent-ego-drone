@@ -39,6 +39,25 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 ---
 
+## 2026-06-08 (PM) — A5.4–A5.6 adversarial-review hardening (0 blockers; 5 real non-blockers fixed)
+**Status:** STOP-CHECK gate. A 5-dimension review→adversarial-verify pass (contract-fidelity /
+validation-correctness / tier-purity+de-dup / DoD-completeness / test-adequacy) over the `2a89b68..ba0dc04`
+diff returned **0 confirmed blockers** — every locked invariant + each step's DoD verified met. It also
+surfaced 5 *real, mutation-confirmed* non-blocker gaps in the just-written code, all fixed here before push:
+(1) `TrustReadout.sigma` used a one-sided `< 0` check → NaN/+inf slipped through (asymmetric with the
+two-sided `k_star`/`p_commit`); now rejects non-finite (`np.isfinite`). (2–4) three `validate_manifest`
+clauses had no test — deleting each (`dataset` missing-keys, `teacher` per-key completeness, `teacher.
+disagreement_source` enum/`""`-stub) left all tests green; added negative tests for each + the `""` stub
+accept. (5) the de-dup assertion `== PATCH_TOKENS` couldn't catch a `196/768` re-hardcode (since
+`PATCH_TOKENS==196`); added a monkeypatch test that repoints the manifest-module constants to sentinels
+and requires the manifest to follow (a literal would ignore the patch and fail).
+**Tested.** Full pure sweep `make test` 155→**162** (+7); `make import-smoke` / `lint` (ruff) /
+`typecheck` (mypy, 6 files) clean; manifest CLI round-trip OK; blob-guard OK. No step-status change
+(A5.4–A5.6 stay `done`); the sigma change is the only production edit (a not-yet-wired seam, defensive).
+**Vault.** No new decision (review-driven hardening of the signed-off A5.4–A5.6 surface).
+
+---
+
 ## 2026-06-08 (PM) — A5.6: StepSample history + language padding masks (M4) — STOP CHECK
 **Status:** A5.6 pending → done (AUTONOMOUS, pure-tier). **started_step+3 STOP CHECK reached (A5.4–A5.6).**
 **What's done.** Closed M4 by making the two variable-validity inputs of the loader tuple explicit before
