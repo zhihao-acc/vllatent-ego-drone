@@ -28,7 +28,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.10 — DINOv3 student-encoder wrapper | done | 2026-06-09 | TORCH; contract (4) + real-weight **encode-smoke GREEN** `(196,768) fp16 cuda`, run live this session (user = operator). **Encoder swapped to timm's NON-GATED `vit_base_patch16_dinov3.lvd1689m`** (same LVD-1689M ViT-B/16 weights; Meta gated repo rejected access) — loader = `timm.create_model`+manual-normalize (pure-torch, no PIL); config model_id + manifest provenance + Makefile + test_config updated; new env `vllatent-ego-drone` (Py3.10). ⚠ `[torch]` extra pulled transformers 5.10/torch 2.12+cu130 (drift vs spec 4.56/2.8-cu12x — pin before A5.14) |
 | A5.11 — frozen WorldVLN teacher wrapper | pending | | TORCH; USER-GATED (server); after A5.8 |
 | A5.12 — V-JEPA-2 surprise verifier wrapper | pending | | TORCH; USER-GATED |
-| A5.13 — render harness | pending | | SIM; unit AUTO / live USER-GATED (docker+UE4) |
+| A5.13 — render harness | in_progress | 2026-06-09 | SIM; **mock unit half done** (teleport+capture; yaw→xyzw quat (foot-gun#1); BGRA→BGR→RGB (foot-gun#2); EVERY client call Lock-wrapped (foot-gun#3); 9 unit tests in the pure gate, airsim+cv2-free import) — API copied from fly0 `sim/airsim_client.py`+AirVLN; live render USER-GATED (fly0-m1 docker + UE4 scene on :41451) — command block emitted |
 | A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED |
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
 | A5.16 — loader over real teacher/oracle dump | pending | | USER-GATED |
@@ -36,6 +36,38 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-09 — A5.13: render harness — MOCK unit half done; live render USER-GATED (STOP CHECK)
+**Status:** A5.13 pending → in_progress (mock unit half AUTONOMOUS; live render USER-GATED per ralph-rules —
+command block emitted). Front-loaded per the operator's autonomous-first choice.
+**Reference discipline.** Per the operator: the AirSim API is COPIED from the end-to-end pipeline
+`CODE/vln-ego-drone/fly0-style-pipeline` (`sim/airsim_client.py`) + `third_party/AirVLN` — re-derived into
+THIS repo (Phases A–C are standalone, fly0 is NOT imported; we copy the semantics + unit-test them). Ground
+truth confirmed: `airsim.Quaternionr(x,y,z,w)` is **xyzw**; `simSetVehiclePose(pose, ignore_collision=True,
+vehicle_name='Drone_1')`; `simGetImages([ImageRequest('front_0', ImageType.Scene, False, False)], …)`; Scene
+buffer is **4-channel BGRA** → `[:,:,:3]` (BGR) → reverse to RGB; teleport-only needs just `confirmConnection`.
+**What's done.** `vllatent/render/harness.py` — `RenderHarness.teleport(pos_ned, yaw)` builds the pose with a
+yaw-only **xyzw** quaternion via `frames.xyzw_from_yaw` (== `airsim.to_quaternion(0,0,yaw)`; foot-gun #1);
+`capture_rgb()` requests the Scene camera and `decode_scene_to_rgb` drops the BGRA alpha + reverses BGR→RGB
+(foot-gun #2) to `(H,W,3)` uint8; `render_reference_row(row6)` does teleport+capture for one Euler row. **Every
+`client.X()` is wrapped in one `threading.Lock`** (foot-gun #3 — single-threaded msgpack-RPC). `airsim` import
+is LAZY (`_connect`); module imports airsim+cv2-free (no resize here — the DINOv3 processor resizes to 224²,
+and the harness owns the BGR→RGB flip so the encoder uses `encode_rgb`, no double-flip). Added the USER-GATED
+live CLI `python -m vllatent.render --episode … --scene 1 --out …`.
+**Tested.** `tests/test_render_unit.py` (9 tests, MOCKED airsim + fake client — runs in the PURE gate, not
+`@pytest.mark.sim`): BGRA→RGB decode (+3-channel + size-mismatch), the yaw→xyzw quaternion, Scene/camera/vehicle
+request args, **every client call asserted under the lock**, row-width validation, and an airsim-free import
+guard. `make test` 190→**199** (+9); `make test-torch` 5; `make import-smoke`/`lint`(ruff)/`typecheck`(mypy, 6
+pure files) clean; blob-guard OK.
+**Open / next — STOP CHECK.** A5.15 + A5.13 (autonomous-first batch) done/in_progress + verified; pushing.
+The user-gated infra block remains: **A5.11** (WorldVLN-8B teacher; needs the live `infer/server.py` re-probe),
+**A5.12** (V-JEPA-2), **A5.13 live render**, **A5.14** (cache build, + pin the `[torch]` extra) — one operator
+session. The live-render command block: `python -m vllatent.render --episode fixtures/episodes/tiny_episode.json
+--scene 1 --out /tmp/render_smoke/` inside fly0-m1 with the UE4 scene hot on :41451.
+**Vault.** No new decision (implements the A5.13 render harness per the signed-off re-plan; AirSim API copied
+from the fly0 end-to-end pipeline per the operator's reference-first instruction).
 
 ---
 
