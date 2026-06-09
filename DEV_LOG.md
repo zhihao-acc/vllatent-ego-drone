@@ -19,7 +19,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.1 — extract public frame/quaternion primitives → frames.py (M1) | done | 2026-06-08 | `frames.py` owns public `yaw_from_xyzw`/`xyzw_from_yaw`/`wrap_pi`/`reorder_wxyz_to_xyzw`; actions.py+audit.py import them; no private cross-module imports; L1 verified (ROW_WIDTH=6); 102 pure tests green |
 | A5.2 — test_frames.py no-flip + NED→FLU→ENU remap math (M2) | done | 2026-06-08 | `frames.py` R_FLU_FROM_FRD/R_ENU_FROM_NED + ned_frd_to_flu/ned_to_enu/remap_waypoint_ned_body_to_flu; `tests/test_frames.py` (7) pins no-flip basis + det=+1; collected by `make test` (102→109); live fly0 wiring Phase D |
 | A5.3 — frozen typed Config + from_yaml + validation (H1/H2/L2/L3) | done | 2026-06-08 | frozen `Config` tree (encoder/predictor/distill/trust/data/cache) + `from_yaml` (env-expand, strict unknown-key reject) + boundary validation; replaces orphan `load_config`; swept knobs single-sourced (loader reads from Config, default.yaml trimmed to overrides); trust placeholders for A5.9; test_config (18); 127 pure tests green |
-| A5.4 — typed manifest builder fed from Config (M5) | pending | | PURE/AUTO; de-dup 196/768; teacher-provenance fields stubbed |
+| A5.4 — typed manifest builder fed from Config (M5) | done | 2026-06-08 | `manifest.build_manifest(Config, …)` is the one builder; `empty_manifest` delegates to it; 196/768 from `schemas` constants, version from `CacheConfig`, encoder-id/dtype/convention/dataset(name+license) from `Config`; stubbed `teacher` provenance section (worldvln id+rev, disagreement_source-from-Config, vjepa2 id, render hash); entry-required-keys derived from `CacheManifestEntry.required_keys()` (type-enforced, not hand-kept); 127→134 tests |
 | A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | pending | | PURE/AUTO |
 | A5.6 — StepSample history_mask + lang padding-mask (M4) | pending | | PURE/AUTO; before the loader |
 | A5.7 — AuditSummary slice aggregator (M3) | pending | | PURE code AUTO / real-slice re-run USER-GATED |
@@ -36,6 +36,32 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-08 (PM) — A5.4: typed manifest builder fed from Config (M5)
+**Status:** A5.4 pending → done (AUTONOMOUS, pure-tier).
+**What's done.** Replaced the hand-built `empty_manifest()` (which hardcoded the encoder id, 196/768,
+the cache version, and the conventions) with a typed `build_manifest(config: Config, *, split, variant,
+entries)` that reads everything from the single source of truth: encoder `model_id`/`dtype` +
+`dataset.name`/`license` + `cache.{version,quaternion_order,color_order,frame}` from `Config`, and the
+fixed DINOv3 shapes `patch_tokens`/`dim` from `schemas.PATCH_TOKENS`/`EMBED_DIM` (kills the third copy of
+196/768; M5 de-dup). `empty_manifest()` now just delegates to `build_manifest(Config())`; `CACHE_VERSION`
+is the derived `CacheConfig().version` alias (one literal). Added the **stubbed `teacher` provenance
+section** for the distillation pivot — `worldvln_model_id`/`worldvln_revision`/`vjepa2_model_id`/
+`render_config_hash` are empty stubs (populated at cache build in A5.14), `disagreement_source` is read
+from `Config.trust` now (finalized A5.9); validator accepts `""` as the stub value. Added `name`/`license`
+to `DataConfig`. The per-entry required keys are now derived from `CacheManifestEntry.required_keys()`
+(the no-default fields) so the validator is **type-enforced, not hand-kept** in sync; `validate_manifest`
+gained `dataset`/`teacher` section checks. `manifest.py` is still pure tier (now imports `config`+`schemas`,
+both numpy/pyyaml).
+**Tested.** A5.4 step command `pytest tests/test_smoke.py tests/test_schemas.py` (38) green; full pure
+sweep `make test` 127→**134** (7 new build_manifest/required_keys/teacher-stub tests); `make import-smoke`
+/ `lint` (ruff) / `typecheck` (mypy, 6 files) clean; manifest CLI emit→validate round-trip OK; blob-guard OK.
+**Open / next.** A5.5 — student output seams (`PredictorOutput`/`TrustReadout`/`Waypoint`) in `schemas.py`
+(H3) → A5.6 (StepSample masks, M4) = **started_step+3 STOP CHECK** (push + pause). A5.8 (WorldVLN
+investigation) stays USER-GATED, parallel — a command block is emitted at the STOP CHECK.
+**Vault.** No new decision (implements the M5 typed-manifest de-dup per the signed-off re-plan).
 
 ---
 

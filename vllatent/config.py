@@ -125,8 +125,10 @@ class TrustConfig:
 
 @dataclass(frozen=True)
 class DataConfig:
-    """Environment data paths + the dataset splits."""
+    """Dataset identity + environment data paths + the splits."""
 
+    name: str = "aerialvln"
+    license: str = "CC BY-NC-SA 4.0"        # non-commercial, share-alike (flag at publication)
     root: str = "data"
     json_dir: str = "data/aerialvln_json"
     cache_dir: str = "data/latent_cache"

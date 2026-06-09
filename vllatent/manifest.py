@@ -1,16 +1,19 @@
-"""Cached-latent CACHE MANIFEST — serialization + validation (PURE tier).
+"""Cached-latent CACHE MANIFEST — typed builder + validation (PURE tier).
 
 Cached latents are **render-once**: RGB is rendered from the AirSim sim at each
 ground-truth pose, encoded by the frozen DINOv3 ViT-B/16, and written to disk as
 fp16 patch tokens. A cache without a manifest is unauditable, so EVERY cache build
 writes/updates one. The manifest pins exactly the things that make a cached latent
-reproducible — the encoder identity, the dataset slice, and the two data foot-guns
-(quaternion order + colour order).
+reproducible — the encoder identity, the dataset slice, the two data foot-guns
+(quaternion order + colour order), and (post-pivot) the teacher/oracle provenance.
 
-This module imports stdlib only (no numpy needed, no torch, no sibling), so it is
-CI-importable and provides the ``--validate`` / ``--emit-empty`` CLI used by CI.
-The typed dataclasses live in ``vllatent.schemas`` (Phase-A step 3); this module
-validates plain dicts so it works independently of that step.
+This module is PURE tier (numpy/pyyaml/stdlib): it builds the manifest from the
+typed ``vllatent.config.Config`` — the single source of truth — so the encoder id,
+dtype, cache version, and conventions are NOT re-hardcoded here, and the fixed
+DINOv3 shapes (196/768) come from ``vllatent.schemas`` constants (M5 de-dup). The
+per-entry required keys are derived from ``CacheManifestEntry`` so the validator is
+type-enforced, not hand-kept in sync. Provides the ``--validate`` / ``--emit-empty``
+CLI used by CI.
 """
 from __future__ import annotations
 
@@ -20,7 +23,12 @@ import sys
 from pathlib import Path
 from typing import Any
 
-CACHE_VERSION = "0.1"
+from vllatent.config import DISAGREEMENT_SOURCES, CacheConfig, Config
+from vllatent.schemas import EMBED_DIM, PATCH_TOKENS, CacheManifestEntry
+
+# Cache-manifest schema version. The single literal lives in CacheConfig.version; this
+# derived alias is kept for backward-compatible external reads.
+CACHE_VERSION = CacheConfig().version
 
 # Required top-level keys of a cache manifest, with their expected JSON types.
 _REQUIRED: dict[str, type] = {
@@ -28,38 +36,75 @@ _REQUIRED: dict[str, type] = {
     "encoder": dict,      # {model_id, revision, dtype, patch_tokens, dim}
     "dataset": dict,      # {name, variant, split, license}
     "convention": dict,   # {quaternion_order, color_order, frame}
+    "teacher": dict,      # {worldvln_model_id, worldvln_revision, disagreement_source, vjepa2_model_id, render_config_hash}
     "entries": list,      # list of per-episode entries
 }
 
 _REQUIRED_ENCODER = {"model_id", "revision", "dtype", "patch_tokens", "dim"}
+_REQUIRED_DATASET = {"name", "variant", "split", "license"}
 _REQUIRED_CONVENTION = {"quaternion_order", "color_order", "frame"}
+# Teacher/oracle provenance for the distillation pivot (stubbed at build, populated in A5.14).
+_REQUIRED_TEACHER = {
+    "worldvln_model_id",
+    "worldvln_revision",
+    "disagreement_source",
+    "vjepa2_model_id",
+    "render_config_hash",
+}
 
 
-def empty_manifest() -> dict[str, Any]:
-    """A minimal VALID cache manifest (empty entry list), for round-trip CLI tests."""
+def build_manifest(
+    config: Config,
+    *,
+    split: str = "",
+    variant: str = "",
+    entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a cache manifest from the typed ``Config`` (the single source of truth).
+
+    The fixed encoder shapes come from ``vllatent.schemas`` (``PATCH_TOKENS`` / ``EMBED_DIM``)
+    — NOT re-hardcoded here. The teacher-provenance fields are STUBBED now (empty strings) and
+    populated at cache-build time (A5.14); only ``disagreement_source`` is known from
+    ``Config.trust`` today (finalized in A5.9). ``split`` / ``variant`` are per-build labels.
+    """
+    enc, cache, data = config.encoder, config.cache, config.data
     return {
-        "cache_version": CACHE_VERSION,
+        "cache_version": cache.version,
         "encoder": {
-            "model_id": "facebook/dinov3-vitb16",
-            "revision": "",
-            "dtype": "float16",
-            "patch_tokens": 196,
-            "dim": 768,
+            "model_id": enc.model_id,
+            "revision": "",            # pinned at real-weight load (A5.10/A5.14)
+            "dtype": enc.dtype,
+            "patch_tokens": PATCH_TOKENS,   # de-dup: the one true 196 (schemas)
+            "dim": EMBED_DIM,               # de-dup: the one true 768 (schemas)
         },
         "dataset": {
-            "name": "aerialvln",
-            "variant": "",
-            "split": "",
-            "license": "CC BY-NC-SA 4.0",
+            "name": data.name,
+            "variant": variant,
+            "split": split,
+            "license": data.license,
         },
         "convention": {
             # The two data foot-guns, pinned in the manifest so a cache is auditable.
-            "quaternion_order": "xyzw",  # canonical order latents were rendered under
-            "color_order": "RGB",        # BGR->RGB applied before the encoder
-            "frame": "airsim_ned_body",
+            "quaternion_order": cache.quaternion_order,  # canonical order latents rendered under
+            "color_order": cache.color_order,            # BGR->RGB applied before the encoder
+            "frame": cache.frame,
         },
-        "entries": [],
+        "teacher": {
+            # Distillation/oracle provenance. STUBS — populated by the cache build (A5.14);
+            # disagreement_source is the only field known from Config today (finalized A5.9).
+            "worldvln_model_id": "",
+            "worldvln_revision": "",
+            "disagreement_source": config.trust.disagreement_source,
+            "vjepa2_model_id": "",
+            "render_config_hash": "",
+        },
+        "entries": list(entries) if entries is not None else [],
     }
+
+
+def empty_manifest() -> dict[str, Any]:
+    """A minimal VALID cache manifest (default ``Config``, empty entries) for round-trip/CLI."""
+    return build_manifest(Config())
 
 
 def validate_manifest(data: dict[str, Any]) -> list[str]:
@@ -77,6 +122,12 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
         if missing:
             errors.append(f"encoder missing keys: {sorted(missing)}")
 
+    ds = data.get("dataset")
+    if isinstance(ds, dict):
+        missing = _REQUIRED_DATASET - set(ds)
+        if missing:
+            errors.append(f"dataset missing keys: {sorted(missing)}")
+
     conv = data.get("convention")
     if isinstance(conv, dict):
         missing = _REQUIRED_CONVENTION - set(conv)
@@ -87,12 +138,27 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
         if conv.get("quaternion_order") not in (None, "xyzw", "wxyz"):
             errors.append(f"convention.quaternion_order must be xyzw|wxyz, got {conv.get('quaternion_order')!r}")
 
+    teacher = data.get("teacher")
+    if isinstance(teacher, dict):
+        missing = _REQUIRED_TEACHER - set(teacher)
+        if missing:
+            errors.append(f"teacher missing keys: {sorted(missing)}")
+        # "" is the allowed stub value (provenance populated later in A5.14).
+        src = teacher.get("disagreement_source")
+        if src not in (None, "", *DISAGREEMENT_SOURCES):
+            errors.append(
+                f"teacher.disagreement_source must be one of {DISAGREEMENT_SOURCES} or '' (stub), got {src!r}"
+            )
+
+    # The per-entry required keys are the no-default fields of CacheManifestEntry — derived from
+    # the type, not a hand-kept literal (M5).
+    required_entry_keys = CacheManifestEntry.required_keys()
     if isinstance(data.get("entries"), list):
         for i, e in enumerate(data["entries"]):
             if not isinstance(e, dict):
                 errors.append(f"entries[{i}] must be an object")
                 continue
-            for k in ("episode_id", "scene_id", "n_frames", "latent_path"):
+            for k in required_entry_keys:
                 if k not in e:
                     errors.append(f"entries[{i}] missing key: {k}")
     return errors
@@ -128,7 +194,7 @@ def _main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["CACHE_VERSION", "empty_manifest", "validate_manifest", "write_manifest"]
+__all__ = ["CACHE_VERSION", "build_manifest", "empty_manifest", "validate_manifest", "write_manifest"]
 
 
 if __name__ == "__main__":  # pragma: no cover

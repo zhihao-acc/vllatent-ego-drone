@@ -17,7 +17,7 @@ equality + a JSON round-trip.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import MISSING, dataclass, fields
 from typing import Any
 
 import numpy as np
@@ -142,6 +142,15 @@ class CacheManifestEntry:
     n_frames: int
     latent_path: str          # path to the per-episode latent dump, relative to the cache dir
     trajectory_id: str = ""
+
+    @classmethod
+    def required_keys(cls) -> tuple[str, ...]:
+        """Entry keys with NO default — exactly what ``manifest.validate_manifest`` requires per
+        entry. Derived from the dataclass fields so the manifest validator is type-enforced, not
+        hand-kept in sync (M5)."""
+        return tuple(
+            f.name for f in fields(cls) if f.default is MISSING and f.default_factory is MISSING
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {

@@ -11,7 +11,8 @@ import json
 import numpy as np
 import pytest
 
-from vllatent.manifest import empty_manifest, validate_manifest
+from vllatent.config import DISAGREEMENT_SOURCES, Config
+from vllatent.manifest import build_manifest, empty_manifest, validate_manifest
 from vllatent.schemas import (
     DELTA_DTYPE,
     DOF,
@@ -146,3 +147,74 @@ def test_manifest_entry_satisfies_manifest_validator() -> None:
     m = empty_manifest()
     m["entries"].append(CacheManifestEntry("ep0", 2, 42, "ep0/latents.npy").to_dict())
     assert validate_manifest(m) == []
+
+
+def test_manifest_entry_required_keys_are_the_no_default_fields() -> None:
+    # The validator's per-entry required keys come from the type, not a hand-kept literal (M5).
+    assert CacheManifestEntry.required_keys() == ("episode_id", "scene_id", "n_frames", "latent_path")
+
+
+# --- build_manifest: typed builder fed from Config (A5.4, M5) ---
+
+def test_build_manifest_from_config_is_valid_and_dedups_shapes() -> None:
+    cfg = Config()
+    m = build_manifest(cfg, split="train", variant="v1")
+    assert validate_manifest(m) == []
+    # De-dup: encoder identity + shapes come from Config / schemas constants, not re-hardcoded.
+    assert m["encoder"]["model_id"] == cfg.encoder.model_id
+    assert m["encoder"]["dtype"] == cfg.encoder.dtype
+    assert m["encoder"]["patch_tokens"] == PATCH_TOKENS
+    assert m["encoder"]["dim"] == EMBED_DIM
+    assert m["cache_version"] == cfg.cache.version
+    assert m["dataset"]["name"] == cfg.data.name
+    assert m["dataset"]["license"] == cfg.data.license
+    assert m["dataset"]["split"] == "train" and m["dataset"]["variant"] == "v1"
+    assert m["convention"]["quaternion_order"] == cfg.cache.quaternion_order
+    assert m["convention"]["color_order"] == cfg.cache.color_order
+
+
+def test_build_manifest_teacher_provenance_is_stubbed() -> None:
+    m = build_manifest(Config())
+    t = m["teacher"]
+    assert set(t) == {
+        "worldvln_model_id",
+        "worldvln_revision",
+        "disagreement_source",
+        "vjepa2_model_id",
+        "render_config_hash",
+    }
+    # Stubs now (populated by the cache build in A5.14), except disagreement_source from Config.
+    assert t["worldvln_model_id"] == "" and t["worldvln_revision"] == ""
+    assert t["vjepa2_model_id"] == "" and t["render_config_hash"] == ""
+    assert t["disagreement_source"] in DISAGREEMENT_SOURCES
+
+
+def test_build_manifest_reflects_config_sweep_no_code_surgery() -> None:
+    # Flipping a trust knob in Config flows into the manifest — the whole point of the SoT.
+    cfg = dataclasses.replace(
+        Config(), trust=dataclasses.replace(Config().trust, disagreement_source="airscape_multiseed")
+    )
+    m = build_manifest(cfg)
+    assert m["teacher"]["disagreement_source"] == "airscape_multiseed"
+    assert validate_manifest(m) == []
+
+
+def test_build_manifest_with_typed_entries_roundtrips() -> None:
+    entry = CacheManifestEntry("ep0", 2, 42, "ep0/latents.npy", trajectory_id="traj0").to_dict()
+    m = build_manifest(Config(), entries=[entry])
+    assert validate_manifest(m) == []
+    assert m["entries"][0]["episode_id"] == "ep0"
+
+
+def test_validate_manifest_rejects_missing_teacher_section() -> None:
+    m = empty_manifest()
+    del m["teacher"]
+    assert any("missing key: teacher" in e for e in validate_manifest(m))
+
+
+def test_validate_manifest_entry_keys_enforced_from_type() -> None:
+    m = empty_manifest()
+    m["entries"].append({"episode_id": "ep0"})  # missing scene_id / n_frames / latent_path
+    errs = validate_manifest(m)
+    for k in ("scene_id", "n_frames", "latent_path"):
+        assert any(f"missing key: {k}" in e for e in errs)
