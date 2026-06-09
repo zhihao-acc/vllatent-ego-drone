@@ -2,11 +2,12 @@
 
 Frozen dataclasses for the tuple the cached-latent loader emits (arch-design §6
 item 5), the **student output seams** (predictor rollout / trust readout / waypoint
-— H3, typed so an ablation is a config flag not code surgery), the parsed AerialVLN
-episode (output of ``vllatent.audit.parse_episode``), and one cache-manifest entry
-(the typed view of ``vllatent.manifest``'s per-episode entry). numpy-typed; **stdlib +
-numpy only** (no torch / no airsim / no sibling) so CI imports this module. Each field
-documents its frame / dtype / order.
+— H3, typed so an ablation is a config flag not code surgery), the **teacher
+distillation seam** (``TeacherOutput`` / ``OracleTarget`` — A5.9, the per-step target the
+student distills against), the parsed AerialVLN episode (output of
+``vllatent.audit.parse_episode``), and one cache-manifest entry (the typed view of
+``vllatent.manifest``'s per-episode entry). numpy-typed; **stdlib + numpy only** (no torch /
+no airsim / no sibling) so CI imports this module. Each field documents its frame / dtype / order.
 
 Locked shapes/dtypes come from ``docs/io-contract.md`` / vault
 ``[[arch-design-2026-06-08-latent-pred]]`` §4. Construction validates at the boundary
@@ -31,6 +32,7 @@ HISTORY = 3                 # H — history frames fed to the predictor (DINO-WM
 HORIZON = 4                 # T — prediction horizon (documented; not a StepSample field)
 N_ACTIONS = 8               # AerialVLN discrete action set, ids 0..7
 DOF = 4                     # continuous waypoint DoF: (dx, dy, dz, dyaw)
+TEACHER_DOF = 6             # WorldVLN teacher action head: absolute [roll,yaw,pitch,x,y,z] (A5.8)
 
 LATENT_DTYPE = np.float16   # cached DINOv3 latents on disk
 DELTA_DTYPE = np.float32    # continuous 4-DoF delta, AirSim-NED body frame
@@ -174,6 +176,63 @@ class Waypoint:
         _check_array("delta_4dof", self.delta_4dof, (DOF,), dtype=DELTA_DTYPE)
 
 
+# --- Teacher distillation seam (A5.9) — the (StepSample, OracleTarget) the student trains against ---
+
+@dataclass(frozen=True, eq=False)
+class TeacherOutput:
+    """Raw frozen-WorldVLN inference for one step: K stochastic rollouts of the 6-DoF pose (A5.9).
+
+    A5.8 confirmed WorldVLN inference is STOCHASTIC by default (top_k/top_p, per-segment seed), so
+    K rollouts of the same input DIFFER — that spread is the trust-oracle disagreement signal, FREE
+    (no MC-dropout). Pose order is the teacher-native ``[roll,yaw,pitch,x,y,z]`` (SE(3)-integrated,
+    A5.8). The 6->4 projection to the student waypoint + the disagreement scalarization happen at
+    cache-build (A5.14); this seam pins the raw rollouts + how the per-DoF spread is read.
+    """
+
+    rollouts_pose6: np.ndarray  # (K,6) float — K stochastic teacher poses [roll,yaw,pitch,x,y,z]
+
+    def __post_init__(self) -> None:
+        _check_array("rollouts_pose6", self.rollouts_pose6, (None, TEACHER_DOF), kind="f")
+        if self.rollouts_pose6.shape[0] < 1:
+            raise ValueError(f"rollouts_pose6: expected K>=1 rollouts, got {self.rollouts_pose6.shape[0]}")
+
+    def rollout_spread(self) -> np.ndarray:
+        """Per-DoF standard deviation across the K rollouts, shape ``(6,)`` — the raw disagreement.
+
+        A5.14 scalarizes this (over the 4 student-relevant channels yaw,x,y,z) into
+        ``OracleTarget.disagreement``; Phase-C calibrates the gate threshold.
+        """
+        return np.std(self.rollouts_pose6, axis=0)
+
+
+@dataclass(frozen=True, eq=False)
+class OracleTarget:
+    """Per-step distillation TARGET (frozen seam, A5.9) the student trains against.
+
+    Pairs 1:1 with a :class:`StepSample` (the loader emits ``(StepSample, OracleTarget)``; A5.15).
+    Combines the frozen WorldVLN teacher (waypoint + rollout disagreement) with the independent
+    V-JEPA-2 surprise gate. ``waypoint_4dof`` is the 6->4-projected (drop roll/pitch + abs->body-delta)
+    student target; ``teacher_pose6`` + ``rollpitch_resid`` are kept as provenance + a
+    lossless-projection audit (roll/pitch are ≈0 on AerialVLN by construction — verify, don't assume).
+    """
+
+    waypoint_4dof: np.ndarray   # (4,) f32  — student target (dx,dy,dz,dyaw), AirSim-NED body
+    teacher_pose6: np.ndarray   # (6,) float — raw teacher pose [roll,yaw,pitch,x,y,z] (provenance)
+    rollpitch_resid: float      # |roll| + |pitch| of teacher_pose6 (>= 0; ≈0 audit on AerialVLN)
+    disagreement: float         # K-rollout spread scalar (>= 0) — trust-horizon distillation target
+    vjepa_surprise: float       # V-JEPA-2 surprise (>= 0) — independent second gate
+
+    def __post_init__(self) -> None:
+        _check_array("waypoint_4dof", self.waypoint_4dof, (DOF,), dtype=DELTA_DTYPE)
+        _check_array("teacher_pose6", self.teacher_pose6, (TEACHER_DOF,), kind="f")
+        for name in ("rollpitch_resid", "disagreement", "vjepa_surprise"):
+            v = getattr(self, name)
+            if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
+                raise TypeError(f"{name}: expected float, got {type(v).__name__}")
+            if not np.isfinite(float(v)) or float(v) < 0.0:
+                raise ValueError(f"{name}: expected a finite value >= 0, got {v}")
+
+
 @dataclass(frozen=True, eq=False)
 class EpisodeRecord:
     """A parsed AerialVLN episode (output of ``vllatent.audit.parse_episode``).
@@ -261,6 +320,7 @@ __all__ = [
     "HORIZON",
     "N_ACTIONS",
     "DOF",
+    "TEACHER_DOF",
     "LATENT_DTYPE",
     "DELTA_DTYPE",
     "RGB_DTYPE",
@@ -269,6 +329,8 @@ __all__ = [
     "PredictorOutput",
     "TrustReadout",
     "Waypoint",
+    "TeacherOutput",
+    "OracleTarget",
     "EpisodeRecord",
     "CacheManifestEntry",
 ]

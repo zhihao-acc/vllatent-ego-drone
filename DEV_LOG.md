@@ -24,7 +24,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.6 — StepSample history_mask + lang padding-mask (M4) | done | 2026-06-08 | `StepSample` gains `history_mask (H,) bool` (block-causal, real vs zero-pad at episode start) + `lang_mask (M,) bool` (== M of lang_tokens); `MASK_DTYPE=np.bool_`; validation + length cross-check; loader-tuple in io-contract §2 updated (9-tuple); 150→155 tests |
 | A5.7 — AuditSummary slice aggregator (M3) | in_progress | 2026-06-09 | CODE done+green: `AuditSummary` + `summarize_episodes` + `--slice/--summary/--split` CLI; the dataset-level checks (all-8-classes UNION, scene-id min..max, splits) computed at SLICE scope (M3 — were mis-scoped per-episode); 162→167 tests. **Real-slice re-run USER-GATED** — command block emitted, awaiting the user's pasted aggregate |
 | A5.8 — investigation: WorldVLN determinism/weights/6-DoF/license | done | 2026-06-09 | USER-verified probe of `EmbodiedCity/WorldVLN`: weights complete (~36.9 GB; InfinityStar 4-shard backbone + 1.06 GB action decoder + 0.74 GB VAE); inference **STOCHASTIC by default** (top_k900/top_p0.97/cfg34, per-segment seed) ⇒ K-rollout disagreement FREE (overturns prior "deterministic"); action head **6-DoF [roll,yaw,pitch,x,y,z]** SE(3)-integrated vs our 4-DoF student ⇒ 6→4 projection (A5.9); ckpt env `INFINITY_CKPT`+`ACTIONHEAD_CKPT`; lang enc T5; **LICENSE SPLIT** code CC BY 4.0 / weights `license:other` (flag pre-publication) |
-| A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | pending | | PURE/AUTO; after A5.8 |
+| A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | done | 2026-06-09 | frozen+validated `TeacherOutput.rollouts_pose6 (K,6)` + `rollout_spread()→(6,)`; `OracleTarget {waypoint_4dof (4,) f32, teacher_pose6 (6,), rollpitch_resid, disagreement, vjepa_surprise}` (user-approved shape; finite/bool/dtype validated); `TEACHER_DOF=6`; TrustConfig placeholders FINALIZED (A5.8: worldvln_rollout, stochastic⇒free); io-contract §0 teacher-seam note; focused adversarial review CLEAN; 167→181 tests |
 | A5.10 — DINOv3 student-encoder wrapper | pending | | TORCH; contract AUTO / real-weight USER-GATED |
 | A5.11 — frozen WorldVLN teacher wrapper | pending | | TORCH; USER-GATED (server); after A5.8 |
 | A5.12 — V-JEPA-2 surprise verifier wrapper | pending | | TORCH; USER-GATED |
@@ -36,6 +36,38 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-09 — A5.9: TeacherOutput/OracleTarget distillation seam + Config finalize (STOP CHECK)
+**Status:** A5.9 pending → done (AUTONOMOUS, pure-tier; user-approved seam shape + license-track decision).
+**What's done.** Typed the teacher→student distillation seam (the contract Phase-B trains against),
+reflecting the A5.8 findings + the user's seam decision ("4-DoF + raw 6-DoF + residual"). `vllatent/schemas.py`:
+`TEACHER_DOF=6`; `TeacherOutput.rollouts_pose6 (K,6) float` (K stochastic WorldVLN rollouts —
+[roll,yaw,pitch,x,y,z]; A5.8: stochastic-by-default ⇒ K-rollout disagreement is free) + `rollout_spread()`
+= per-DoF std `(6,)` (the raw disagreement; A5.14 scalarizes over yaw,x,y,z; Phase-C calibrates);
+`OracleTarget` = per-step target paired 1:1 with `StepSample` = `{waypoint_4dof (4,) f32` [6→4-projected:
+drop roll/pitch + abs→body-delta, executed in A5.14]`, teacher_pose6 (6,)` provenance`, rollpitch_resid`
+[≈0 lossless-projection audit]`, disagreement` [≥0 spread]`, vjepa_surprise` [≥0 independent gate]`}` — all
+scalars finite/bool/dtype-validated (applies the A5.5-review `np.isfinite` lesson). **Config finalized:**
+the A5.3 trust placeholders are no longer provisional — A5.8 confirmed `disagreement_source="worldvln_rollout"`
+(stochastic ⇒ rollout spread free; `airscape_multiseed` kept as contingency); `TrustConfig` + module
+docstrings updated. `docs/io-contract.md` §0 documents the teacher seam. **License decision (user):** build
+seams now / email WorldVLN authors re: the `license:other` weights in parallel (Phase-A plumbing is
+license-agnostic).
+**Tested.** A5.9 step command `pytest tests/test_schemas.py tests/test_config.py` (89) green; full pure
+sweep `make test` 167→**181** (+14: TeacherOutput valid + rollout_spread channel-correctness + bad-input;
+OracleTarget valid + 8 bad-input rejections; Config finalized values); `make import-smoke`/`lint`/`typecheck`
+(mypy, 6) clean; blob-guard OK. A **focused adversarial review** (1 agent, ran the gate + adversarial REPL)
+returned CLEAN — order/index ([roll,yaw,pitch,x,y,z], axis=0), validation completeness (f32+f64 NaN/inf/bool),
+mutation-sensitivity, tier purity, exact 5-field shape all verified.
+**Open / next — STOP CHECK (started_step+3: A5.7/A5.8/A5.9; next step is a tier change + user-gated).**
+Pushing. Still open: **A5.7 real-slice paste** (flips A5.7 done). Next pending = **A5.10** (DINOv3
+student-encoder wrapper) — TORCH tier (lazy import; contract AUTO, real-weight USER-GATED) — a tier
+transition from pure→torch, so it pauses here. Author-clarification email for the weights license drafted
+for the user.
+**Vault.** No new decision (implements the A5.8-informed teacher seam + the user-approved shape per the
+signed-off re-plan).
 
 ---
 

@@ -8,10 +8,11 @@ EMBED_DIM=768; N_ACTIONS / DOF) stay constants in ``vllatent.schemas``; the AirV
 step sizes stay constants in ``vllatent.actions`` — neither is duplicated here.
 
 Dataclass defaults are the source of truth; ``configs/*.yaml`` provide per-experiment
-OVERRIDES (env-expanded, strict unknown-key rejection). The spike-dependent trust knobs
-(``disagreement_source`` / ``k_rollouts`` / ``vjepa_surprise_threshold``) are typed
-PLACEHOLDERS, finalized in A5.9 after the A5.8 disagreement-source investigation. Config
-snapshot / resume is a Phase-B SOP — NOT built here.
+OVERRIDES (env-expanded, strict unknown-key rejection). The trust knobs
+(``disagreement_source`` / ``k_rollouts`` / ``vjepa_surprise_threshold``) are FINALIZED
+(A5.9, after the A5.8 WorldVLN probe): A5.8 confirmed WorldVLN inference is stochastic by
+default, so ``disagreement_source = "worldvln_rollout"`` (rollout spread is free) is the chosen
+source. Config snapshot / resume is a Phase-B SOP — NOT built here.
 
 pyyaml + stdlib + the pure ``schemas`` constants only — CI imports it.
 """
@@ -103,7 +104,13 @@ class DistillConfig:
 
 @dataclass(frozen=True)
 class TrustConfig:
-    """SWEPT trust-oracle knobs. PLACEHOLDERS — finalized in A5.9 after the A5.8 investigation."""
+    """SWEPT trust-oracle knobs — FINALIZED (A5.9, after the A5.8 WorldVLN probe).
+
+    A5.8 confirmed WorldVLN inference is stochastic by default, so the disagreement signal is the
+    spread over K stochastic rollouts (vary the seed; free). ``disagreement_source`` defaults to
+    ``"worldvln_rollout"``; ``airscape_multiseed`` is kept as a contingency value. ``k_rollouts`` is
+    the K used for that estimate; ``vjepa_surprise_threshold`` is the independent V-JEPA-2 gate δ.
+    """
 
     disagreement_source: str = "worldvln_rollout"
     k_rollouts: int = 5

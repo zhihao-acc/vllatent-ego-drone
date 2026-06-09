@@ -26,8 +26,15 @@
 > shape/dtype-validated dataclasses (review H3) so an ablation is a config flag, not code surgery:
 > `ẑ_{t+1..t+T}` → `PredictorOutput.predicted_latents` `(T,196,768)` fp16; trust readout →
 > `TrustReadout {p_commit (T,) ∈ [0,1], k_star ∈ [0,T], sigma ≥ 0}`; waypoint (native) →
-> `Waypoint.delta_4dof (4,)` f32, AirSim-NED body. The loader-input tuple is `StepSample` (§2). The
-> teacher-side `OracleTarget` distillation seam is typed later (A5.9, after the A5.8 investigation).
+> `Waypoint.delta_4dof (4,)` f32, AirSim-NED body. The loader-input tuple is `StepSample` (§2).
+>
+> **Teacher distillation seam (A5.9, post-pivot).** The student distills from a frozen WorldVLN
+> teacher (A5.8: 6-DoF `[roll,yaw,pitch,x,y,z]`, SE(3); inference stochastic by default ⇒ rollout
+> disagreement is free). `TeacherOutput.rollouts_pose6 (K,6)` holds the K stochastic rollouts;
+> `OracleTarget` is the per-step target paired 1:1 with `StepSample`: `{waypoint_4dof (4,) f32`
+> [6→4-projected: drop roll/pitch + abs→body-delta]`, teacher_pose6 (6,)` provenance`, rollpitch_resid`
+> [≈0 audit]`, disagreement` [K-rollout spread]`, vjepa_surprise` [independent gate]`}`. The 6→4
+> projection + disagreement scalarization execute at cache-build (A5.14).
 
 ---
 

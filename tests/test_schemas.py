@@ -22,10 +22,13 @@ from vllatent.schemas import (
     LATENT_DTYPE,
     N_ACTIONS,
     PATCH_TOKENS,
+    TEACHER_DOF,
     CacheManifestEntry,
     EpisodeRecord,
+    OracleTarget,
     PredictorOutput,
     StepSample,
+    TeacherOutput,
     TrustReadout,
     Waypoint,
 )
@@ -192,6 +195,72 @@ def test_waypoint_valid_and_rejects_bad() -> None:
         Waypoint(delta_4dof=np.zeros((DOF,), np.float16))   # wrong dtype (must be f32)
     with pytest.raises((ValueError, TypeError)):
         Waypoint(delta_4dof=np.zeros((3,), DELTA_DTYPE))    # wrong DoF
+
+
+# --- Teacher distillation seam (A5.9) ---
+
+def test_teacher_output_valid_and_rollout_spread() -> None:
+    rolls = np.stack([
+        np.array([0.0, 0.1, 0.0, 1.0, 2.0, 3.0]),  # [roll,yaw,pitch,x,y,z]
+        np.array([0.0, 0.3, 0.0, 1.0, 2.0, 5.0]),  # yaw + z differ across the 2 rollouts
+    ])
+    to = TeacherOutput(rollouts_pose6=rolls)
+    spread = to.rollout_spread()
+    assert spread.shape == (TEACHER_DOF,)
+    assert spread[0] == 0.0 and spread[2] == 0.0   # roll, pitch identical -> 0 spread
+    assert spread[1] > 0.0 and spread[5] > 0.0     # yaw, z vary -> nonzero disagreement
+
+
+@pytest.mark.parametrize(
+    "arr",
+    [
+        np.zeros((0, TEACHER_DOF)),                 # K=0 rollouts
+        np.zeros((3, 4)),                           # wrong DoF width (must be 6)
+        np.zeros((TEACHER_DOF,)),                   # wrong ndim (must be (K,6))
+        np.zeros((3, TEACHER_DOF), dtype=int),      # not float-kind
+    ],
+)
+def test_teacher_output_rejects_bad(arr: np.ndarray) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        TeacherOutput(rollouts_pose6=arr)
+
+
+def _oracle(**over: object) -> OracleTarget:
+    kw: dict[str, object] = dict(
+        waypoint_4dof=np.zeros((DOF,), DELTA_DTYPE),
+        teacher_pose6=np.zeros((TEACHER_DOF,)),
+        rollpitch_resid=0.0,
+        disagreement=0.1,
+        vjepa_surprise=0.2,
+    )
+    kw.update(over)
+    return OracleTarget(**kw)  # type: ignore[arg-type]
+
+
+def test_oracle_target_valid_and_immutable() -> None:
+    ot = _oracle()
+    assert ot.waypoint_4dof.shape == (DOF,) and ot.waypoint_4dof.dtype == DELTA_DTYPE
+    assert ot.teacher_pose6.shape == (TEACHER_DOF,)
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        ot.disagreement = 9.0  # type: ignore[misc]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        dict(waypoint_4dof=np.zeros((DOF,), np.float16)),         # wrong dtype (must be f32)
+        dict(waypoint_4dof=np.zeros((3,), DELTA_DTYPE)),          # wrong student DoF
+        dict(teacher_pose6=np.zeros((4,))),                      # wrong teacher width (must be 6)
+        dict(teacher_pose6=np.zeros((TEACHER_DOF,), dtype=int)),  # not float-kind
+        dict(disagreement=-0.1),                                # spread must be >= 0
+        dict(vjepa_surprise=float("nan")),                      # must be finite
+        dict(rollpitch_resid=float("inf")),                     # must be finite
+        dict(disagreement=True),                                # bool is not a valid float
+    ],
+)
+def test_oracle_target_rejects_bad(bad: dict[str, object]) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        _oracle(**bad)
 
 
 # --- EpisodeRecord ---
