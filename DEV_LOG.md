@@ -17,7 +17,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | 5b — audit on real slice | done | 2026-06-08 | 50/50 ok, ~10198 transitions **0 Δ-mismatches**, all 8 classes, quaternion consistent (34/50 would corrupt yaw w/o reorder) |
 | 7–13 (old DINOv3-latent pipeline) | superseded | 2026-06-08 | **replaced by A5.1–A5.18** per `plans/phase-a5-replan-postpivot.md` (post-WorldVLN-pivot re-plan) |
 | A5.1 — extract public frame/quaternion primitives → frames.py (M1) | done | 2026-06-08 | `frames.py` owns public `yaw_from_xyzw`/`xyzw_from_yaw`/`wrap_pi`/`reorder_wxyz_to_xyzw`; actions.py+audit.py import them; no private cross-module imports; L1 verified (ROW_WIDTH=6); 102 pure tests green |
-| A5.2 — test_frames.py no-flip + NED→FLU→ENU remap math (M2) | pending | | PURE/AUTO; hard CI gate; live fly0 wiring stays Phase D |
+| A5.2 — test_frames.py no-flip + NED→FLU→ENU remap math (M2) | done | 2026-06-08 | `frames.py` R_FLU_FROM_FRD/R_ENU_FROM_NED + ned_frd_to_flu/ned_to_enu/remap_waypoint_ned_body_to_flu; `tests/test_frames.py` (7) pins no-flip basis + det=+1; collected by `make test` (102→109); live fly0 wiring Phase D |
 | A5.3 — frozen typed Config + from_yaml + validation (H1/H2/L2/L3) | pending | | PURE/AUTO; single source-of-truth for swept knobs; full set + placeholders |
 | A5.4 — typed manifest builder fed from Config (M5) | pending | | PURE/AUTO; de-dup 196/768; teacher-provenance fields stubbed |
 | A5.5 — student seams PredictorOutput/TrustReadout/Waypoint (H3) | pending | | PURE/AUTO |
@@ -36,6 +36,25 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-08 (PM) — A5.2: no-flip test + NED→FLU→ENU remap math (M2, hard CI gate)
+**Status:** A5.2 pending → done (AUTONOMOUS, pure-tier).
+**What's done.** Added the body/world remap math to `frames.py` (re-derived vs fly0 `geometry/frames.py`
+SEMANTICS; fly0 NOT imported): `R_FLU_FROM_FRD` (FRD body→FLU body) + `R_ENU_FROM_NED` (NED world→ENU
+world) — both PROPER rotations (det=+1, no handedness flip) — and `ned_frd_to_flu` / `ned_to_enu` /
+`remap_waypoint_ned_body_to_flu` (the 4-DoF seam-(d) stage-1 body remap = `(dx,-dy,-dz,-dyaw)`). Landed
+`tests/test_frames.py` (7 tests) as the **hard CI gate** for the #1 foot-gun: no-flip basis (up→up,
+down→down, forward→forward, right→right-of-forward) for both body and world frames, proper-rotation
+check, waypoint remap sign/involution/magnitude, and an action-semantics survival check (GO_UP stays
++up, MOVE_FORWARD stays +forward) tied to `actions.action_to_delta`. The live closed-loop world-ENU
+`WaypointHandoff` (needs odom) stays **Phase D**.
+**Tested.** `pytest tests/test_frames.py` (7) green; full pure sweep `make test` 102→**109** (confirms
+test_frames is collected by the CI gate); `make lint` (ruff) / `typecheck` (mypy, 6 files) clean.
+**Open / next.** A5.3 — frozen typed `Config` + `from_yaml` + validation (H1/H2/L2/L3), the swept-knob
+single source-of-truth. **A5.3 is the started_step+3 STOP CHECK** for this loop batch.
+**Vault.** No new decision (implements the locked remap math + the M2 guardrail per the re-plan).
 
 ---
 

@@ -17,8 +17,9 @@ This module OWNS the project's quaternion/yaw primitives (``yaw_from_xyzw``,
 ``xyzw_from_yaw``, ``wrap_pi``, ``reorder_wxyz_to_xyzw``); ``actions.py`` and ``audit.py``
 import them from here so the frame/quaternion concern lives in one place — no private
 cross-module imports (A5.1 / review M1). The no-flip unit basis (up->up, down->down,
-right->right-of-forward, forward->forward) and the NED->FLU->ENU remap land with
-``tests/test_frames.py`` (A5.2). See docs/io-contract.md + plans/phase-a5-replan-postpivot.md.
+right->right-of-forward, forward->forward) and the NED->FLU->ENU remap math are
+implemented here and pinned by ``tests/test_frames.py`` (A5.2); the live closed-loop
+world-ENU handoff (needs odom) is Phase D. See docs/io-contract.md + plans/phase-a5-replan-postpivot.md.
 """
 from __future__ import annotations
 
@@ -64,6 +65,53 @@ def reorder_wxyz_to_xyzw(q: np.ndarray) -> np.ndarray:
     return np.array([q[1], q[2], q[3], q[0]], dtype=float)
 
 
+# --- NED -> FLU -> world-ENU remap (the #1 foot-gun) -----------------------------------
+# Re-derived against fly0's geometry/frames.py SEMANTICS; fly0 is NEVER imported (A-C standalone).
+# Body frames:  AirSim NED body = FRD (Forward +x, Right +y, Down +z).
+#               fly0 body       = FLU (Forward +x, Left  +y, Up   +z).
+# World frames: AirSim world = NED (North +x, East +y, Down +z).
+#               fly0  world  = ENU (East  +x, North +y, Up  +z).
+# Both matrices are PROPER rotations (det = +1): no improper flip / handedness change.
+
+R_FLU_FROM_FRD = np.array(
+    [[1.0, 0.0, 0.0],    # FLU forward = FRD forward
+     [0.0, -1.0, 0.0],   # FLU left    = -FRD right   (a body-right command stays right-of-forward)
+     [0.0, 0.0, -1.0]],  # FLU up      = -FRD down
+    dtype=float,
+)
+
+R_ENU_FROM_NED = np.array(
+    [[0.0, 1.0, 0.0],    # ENU east  = NED east  (y)
+     [1.0, 0.0, 0.0],    # ENU north = NED north (x)
+     [0.0, 0.0, -1.0]],  # ENU up    = -NED down
+    dtype=float,
+)
+
+
+def ned_frd_to_flu(vec_frd: np.ndarray) -> np.ndarray:
+    """Rotate a body-frame 3-vector from AirSim NED-body (FRD) to fly0-body (FLU)."""
+    return R_FLU_FROM_FRD @ np.asarray(vec_frd, dtype=float)
+
+
+def ned_to_enu(vec_ned: np.ndarray) -> np.ndarray:
+    """Rotate a world-frame 3-vector from AirSim world NED to fly0 world ENU."""
+    return R_ENU_FROM_NED @ np.asarray(vec_ned, dtype=float)
+
+
+def remap_waypoint_ned_body_to_flu(waypoint_4dof: np.ndarray) -> np.ndarray:
+    """Remap a 4-DoF waypoint delta ``(dx, dy, dz, dyaw)`` from NED-body (FRD) to FLU-body.
+
+    Stage 1 of the io-contract seam (d): the body-frame axis remap = ``(dx, -dy, -dz, -dyaw)``.
+    Forward and magnitude are preserved; right/down/yaw-sense flip with the FRD->FLU axes
+    (yaw negates because the rotation axis flips from +down to +up). The ABSOLUTE world-ENU
+    handoff (``WaypointHandoff.G_world``, which needs the live odom pose) is **Phase D**.
+    """
+    w = np.asarray(waypoint_4dof, dtype=float)
+    dxyz_flu = ned_frd_to_flu(w[0:3])      # in: NED-FRD body delta -> out: FLU body delta
+    dyaw_flu = -float(w[3])                # +down-axis yaw -> +up-axis yaw negates
+    return np.array([dxyz_flu[0], dxyz_flu[1], dxyz_flu[2], dyaw_flu], dtype=float)
+
+
 __all__ = [
     "QUAT_ORDER_START_ROTATION",
     "QUAT_ORDER_CANONICAL",
@@ -74,4 +122,9 @@ __all__ = [
     "xyzw_from_yaw",
     "wrap_pi",
     "reorder_wxyz_to_xyzw",
+    "R_FLU_FROM_FRD",
+    "R_ENU_FROM_NED",
+    "ned_frd_to_flu",
+    "ned_to_enu",
+    "remap_waypoint_ned_body_to_flu",
 ]
