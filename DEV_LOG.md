@@ -30,12 +30,37 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.12 — V-JEPA-2 surprise verifier wrapper | pending | | TORCH; USER-GATED |
 | A5.13 — render harness | pending | | SIM; unit AUTO / live USER-GATED (docker+UE4) |
 | A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED |
-| A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | pending | | TORCH/AUTO |
+| A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
 | A5.16 — loader over real teacher/oracle dump | pending | | USER-GATED |
 | A5.17 — size full render→teacher→cache job | pending | | sizing AUTO / bulk USER-GATED |
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-09 — A5.15: distillation loader (StepSample+OracleTarget over the latent cache) — AUTONOMOUS
+**Status:** A5.15 pending → done (AUTONOMOUS; TORCH tier but numpy-only emission, no user gate). Front-loaded
+per operator choice (autonomous-first; the user-gated WorldVLN/V-JEPA/render/cache block A5.11–A5.14 is batched
+for a later operator session).
+**What's done.** `vllatent/data/loader.py` — `CachedLatentDataset`, a map-style Dataset emitting the A5.9
+per-step distillation pair `(StepSample, OracleTarget)` over a render-once latent cache. It **defines the
+per-episode `.npz` read-contract** (latents (N,196,768) fp16 / actions / deltas / lang_tokens / the 5
+OracleTarget arrays) + `manifest.json` that **A5.14 will write to**. History = a left-zero-padded block-causal
+window ending at t (mask True=real); the terminal STOP (t=N−1, no `z_next`) is excluded → `len = Σ(N_e−1)`.
+H/T read from Config; **H is pinned to the arch-locked schemas `HISTORY`** (StepSample fixes that window) — a
+divergent override fails fast at construction with a clear message rather than a deep StepSample error.
+Numpy-only emission (the typed numpy contract objects, validated per sample) ⇒ imports torch-free; torch enters
+only at DataLoader collation (Phase B). Added `python -m vllatent.data inspect --cache <dir> --n N` (A5.16's
+real-dump inspector).
+**Tested.** `tests/test_data_shapes.py` over a synthetic tiny_dump (tmp, no blobs): len/episode-count, sample
+shapes+dtypes, block-causal padding at episode start (`[F,F,T]`) + full window mid-episode (`[T,T,T]`),
+cross-episode index routing, the H-lock fail-fast, manifest validity, the `inspect` CLI, **and a real
+`torch.utils.data.DataLoader` batch** (`@pytest.mark.torch`). `make test` 182→**190** (+8 pure); `make
+test-torch` 4→**5**; `make import-smoke`/`lint`(ruff)/`typecheck`(mypy, 6 pure files) clean; blob-guard OK.
+**Open / next.** A5.13 (render harness — autonomous mock unit half; live render USER-GATED) next this batch,
+then STOP CHECK → the user-gated A5.11/A5.12/A5.14 infra block.
+**Vault.** No new decision (implements the A5.15 loader + defines the cache read-contract per the signed-off re-plan).
 
 ---
 
