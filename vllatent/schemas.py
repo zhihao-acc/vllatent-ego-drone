@@ -180,16 +180,21 @@ class Waypoint:
 
 @dataclass(frozen=True, eq=False)
 class TeacherOutput:
-    """Raw frozen-WorldVLN inference for one step: K stochastic rollouts of the 6-DoF pose (A5.9).
+    """Raw frozen-WorldVLN inference for one step: K stochastic rollouts of the 6-DoF action (A5.9).
 
-    A5.8 confirmed WorldVLN inference is STOCHASTIC by default (top_k/top_p, per-segment seed), so
-    K rollouts of the same input DIFFER — that spread is the trust-oracle disagreement signal, FREE
-    (no MC-dropout). Pose order is the teacher-native ``[roll,yaw,pitch,x,y,z]`` (SE(3)-integrated,
-    A5.8). The 6->4 projection to the student waypoint + the disagreement scalarization happen at
-    cache-build (A5.14); this seam pins the raw rollouts + how the per-DoF spread is read.
+    A5.8 confirmed WorldVLN inference is STOCHASTIC by default (top_k/top_p sampling), so K rollouts
+    of the same input DIFFER — that spread is the trust-oracle disagreement signal, FREE (no
+    MC-dropout). A5.11 (live-API re-probe) refined two facts: the released config locks the seed
+    across a session's segments, so **K rollouts = K sessions with distinct seeds** (the teacher
+    wrapper owns that); and the wire emits per-step **DELTAS** ``[dx,dy,dz,droll,dyaw,dpitch]``
+    (cm, deg) — the wrapper converts to THIS seam: order ``[roll,yaw,pitch,x,y,z]`` (the A5.8
+    training-stats order), model-native **(m, rad)**, per-step delta (NOT an absolute SE(3) pose —
+    the offline ``predict_pose.py`` integrates these; we keep the raw deltas). The 6->4 projection
+    to the student waypoint (incl. rad->deg yaw to match ``delta_4dof``) + the disagreement
+    scalarization happen at cache-build (A5.14); this seam pins the raw rollouts + the spread read.
     """
 
-    rollouts_pose6: np.ndarray  # (K,6) float — K stochastic teacher poses [roll,yaw,pitch,x,y,z]
+    rollouts_pose6: np.ndarray  # (K,6) float — K stochastic per-step deltas [roll,yaw,pitch,x,y,z] (m, rad)
 
     def __post_init__(self) -> None:
         _check_array("rollouts_pose6", self.rollouts_pose6, (None, TEACHER_DOF), kind="f")

@@ -26,7 +26,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.8 — investigation: WorldVLN determinism/weights/6-DoF/license | done | 2026-06-09 | USER-verified probe of `EmbodiedCity/WorldVLN`: weights complete (~36.9 GB; InfinityStar 4-shard backbone + 1.06 GB action decoder + 0.74 GB VAE); inference **STOCHASTIC by default** (top_k900/top_p0.97/cfg34, per-segment seed) ⇒ K-rollout disagreement FREE (overturns prior "deterministic"); action head **6-DoF [roll,yaw,pitch,x,y,z]** SE(3)-integrated vs our 4-DoF student ⇒ 6→4 projection (A5.9); ckpt env `INFINITY_CKPT`+`ACTIONHEAD_CKPT`; lang enc T5; **LICENSE SPLIT** code CC BY 4.0 / weights `license:other` (flag pre-publication) |
 | A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | done | 2026-06-09 | frozen+validated `TeacherOutput.rollouts_pose6 (K,6)` + `rollout_spread()→(6,)`; `OracleTarget {waypoint_4dof (4,) f32, teacher_pose6 (6,), rollpitch_resid, disagreement, vjepa_surprise}` (user-approved shape; finite/bool/dtype validated); `TEACHER_DOF=6`; TrustConfig placeholders FINALIZED (A5.8: worldvln_rollout, stochastic⇒free); io-contract §0 teacher-seam note; focused adversarial review CLEAN; 167→181 tests |
 | A5.10 — DINOv3 student-encoder wrapper | done | 2026-06-09 | TORCH; contract (4) + real-weight **encode-smoke GREEN** `(196,768) fp16 cuda`, run live this session (user = operator). **Encoder swapped to timm's NON-GATED `vit_base_patch16_dinov3.lvd1689m`** (same LVD-1689M ViT-B/16 weights; Meta gated repo rejected access) — loader = `timm.create_model`+manual-normalize (pure-torch, no PIL); config model_id + manifest provenance + Makefile + test_config updated; new env `vllatent-ego-drone` (Py3.10). ⚠ `[torch]` extra pulled transformers 5.10/torch 2.12+cu130 (drift vs spec 4.56/2.8-cu12x — pin before A5.14) |
-| A5.11 — frozen WorldVLN teacher wrapper | pending | | TORCH; USER-GATED (server); after A5.8 |
+| A5.11 — frozen WorldVLN teacher wrapper | in_progress | 2026-06-10 | **client half done** (`vllatent/teacher/worldvln.py`: FastAPI `POST /v1/predict_delta_actions` client; K-rollout = K sessions × distinct seeds stride 65537 (released config locks seed/session); **wire = `[dx,dy,dz,droll,dyaw,dpitch]` cm/deg position-FIRST — corrects A5.8's order note**; wire→seam (m,rad) conversion + per-step `TeacherOutput`; 13 mocked-transport tests in the pure gate 199→212) — live K-rollout smoke USER-GATED (server stand-up, GPU + ~36.9 GB weights) |
 | A5.12 — V-JEPA-2 surprise verifier wrapper | pending | | TORCH; USER-GATED |
 | A5.13 — render harness | in_progress | 2026-06-09 | SIM; **mock unit half done** (teleport+capture; yaw→xyzw quat (foot-gun#1); BGRA→BGR→RGB (foot-gun#2); EVERY client call Lock-wrapped (foot-gun#3); 9 unit tests in the pure gate, airsim+cv2-free import) — API copied from fly0 `sim/airsim_client.py`+AirVLN; live render USER-GATED (fly0-m1 docker + UE4 scene on :41451) — command block emitted |
 | A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED |
@@ -36,6 +36,50 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-10 — A5.11: WorldVLN teacher CLIENT done (wire-format CORRECTION); live smoke USER-GATED
+**Status:** A5.11 pending → in_progress (client/contract half AUTONOMOUS; the live K-rollout smoke is
+USER-GATED — server stand-up command block emitted). **Phase 1 (user) delivered:** the rollout-API dump from
+the A5.8 clone (`/tmp/worldvln_code` @ `3409b82`, dump `/tmp/worldvln_rollout_api_dump.txt`) — all facts below
+re-verified FIRST-HAND against the clone before coding.
+**Load-bearing findings (3, from the live API — they refine A5.8/A5.9 notes).**
+(1) **Wire action format CORRECTION:** rows are ``[dx_cm,dy_cm,dz_cm,droll_deg,dyaw_deg,dpitch_deg]`` —
+position-FIRST, (cm, deg), per-step **DELTAS** (`_to_cm_deg` server.py:349 converts FROM model-native (m,rad)).
+The A5.8 note's ``[roll,yaw,pitch,x,y,z]`` is the training-stats/seam order, NOT the wire; and the seam now
+carries deltas, not SE(3)-integrated absolutes (offline `predict_pose.py` integrates; we keep raw deltas) ⇒
+**A5.14's abs→body-delta projection step simplifies to: drop roll/pitch + rad→deg yaw** (to match the student's
+``delta_4dof`` m/deg). `TeacherOutput` docstring updated (shape/validation UNCHANGED — seam not relitigated).
+(2) **Seed semantics:** `local_seed = seed + segment_index` UNLESS `lock_seed_across_steps` — and the released
+`infer/config.json` sets it **true** ⇒ one session is seed-stable; **K-rollout disagreement = K sessions with
+distinct session_id + seed**, spaced by upstream's own `--candidate_seed_stride 65537` (GRPO tool). Stochasticity
+itself (cfg34/top_k900/top_p0.97/tau_video0.4) confirmed unchanged.
+(3) **Serving:** FastAPI `infer/run_server.sh` → uvicorn :8001; `POST /v1/predict_delta_actions` (1 segment max
+per call; `segment_index=-1` = warmup/no segment; `allow_future_segments=true` = strict closed loop: 1 frame+
+instruction → 16 actions, +16 real frames → next 16; released 49/16 → points [1,17,33,49] → 3 segments);
+`GET /health`; env `INFINITY_CKPT` (server.py:314) + `STAGE2_LATENT2ACTION_CKPT`; single global async lock.
+**What's done.** `vllatent/teacher/worldvln.py` — `WorldVLNTeacherClient` (stdlib urllib + numpy; PNG-b64 frame
+encode lazily imports cv2/PIL; transport injectable): `health()`, `predict_segment()` (validates response, raises
+actionably on warmup/-1, malformed, unreachable-server), `k_rollout_segment()` (K sessions × stride-65537 seeds,
+`reset_session=True`, consistent-shape check) → `(K,T,6)` seam (m,rad); `wire_actions_to_pose6` (order remap
+(3,4,5,0,1,2) + deg→rad + cm→m); `teacher_outputs_from_rollouts` → per-step `TeacherOutput`. **Three-unit-system
+foot-gun documented** (wire cm/deg · seam m/rad · student m/deg-yaw). Live CLI `python -m vllatent.teacher.worldvln
+--episode … --rollouts K --server …` (health + K-rollout + spread + identical-rollouts FAIL check). Upstream clone
+never imported/modified. Py3.9-pure-box gotcha fixed (runtime `X | None` in a type alias → TYPE_CHECKING).
+**Tested.** `tests/test_teacher_contract.py` (12 tests, MOCKED transport, pure gate): wire→seam order+units
+(hand-computed expectations), payload/route fidelity, K distinct sessions+seeds+instruction+reset, (K,T,6)
+stacking + per-step spread channel-correctness (dx-varies ⇒ seam[3]>0, yaw 0), warmup −1 raise, malformed raise,
+inconsistent-shape raise, Config-default K, health GET, heavy-free AST+sys.modules guard. A **3-skeptic
+adversarial panel** (protocol-fidelity vs the clone / conversion-math hand-recomputed / robustness+mutation)
+returned 2 holds + 1 holds-with-caveat; the caveat (frame validation unreachable behind the mocked encoder) is
+fixed with an unmocked bad-input test. `make test` 199→**212**; `make test-torch` 5;
+import-smoke/lint/typecheck(pure)/blob clean.
+**Open / next — STOP CHECK (A5.11 live smoke is USER-GATED).** Phase-2 command block emitted (weights download →
+`run_server.sh` on the GPU box → `GET /health` → the CLI smoke; paste output to flip A5.11 done). Then A5.12
+(V-JEPA-2 verifier). [torch]-extra pin still queued for A5.14.
+**Vault.** Wire-format correction + seed-locking recorded in memory (`project_latent_pred_arch_locked`); vault
+arch-design update deferred to the A5.14 cache-contract freeze (no schema change today).
 
 ---
 
