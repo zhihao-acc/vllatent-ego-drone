@@ -26,7 +26,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.8 — investigation: WorldVLN determinism/weights/6-DoF/license | done | 2026-06-09 | USER-verified probe of `EmbodiedCity/WorldVLN`: weights complete (~36.9 GB; InfinityStar 4-shard backbone + 1.06 GB action decoder + 0.74 GB VAE); inference **STOCHASTIC by default** (top_k900/top_p0.97/cfg34, per-segment seed) ⇒ K-rollout disagreement FREE (overturns prior "deterministic"); action head **6-DoF [roll,yaw,pitch,x,y,z]** SE(3)-integrated vs our 4-DoF student ⇒ 6→4 projection (A5.9); ckpt env `INFINITY_CKPT`+`ACTIONHEAD_CKPT`; lang enc T5; **LICENSE SPLIT** code CC BY 4.0 / weights `license:other` (flag pre-publication) |
 | A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | done | 2026-06-09 | frozen+validated `TeacherOutput.rollouts_pose6 (K,6)` + `rollout_spread()→(6,)`; `OracleTarget {waypoint_4dof (4,) f32, teacher_pose6 (6,), rollpitch_resid, disagreement, vjepa_surprise}` (user-approved shape; finite/bool/dtype validated); `TEACHER_DOF=6`; TrustConfig placeholders FINALIZED (A5.8: worldvln_rollout, stochastic⇒free); io-contract §0 teacher-seam note; focused adversarial review CLEAN; 167→181 tests |
 | A5.10 — DINOv3 student-encoder wrapper | done | 2026-06-09 | TORCH; contract (4) + real-weight **encode-smoke GREEN** `(196,768) fp16 cuda`, run live this session (user = operator). **Encoder swapped to timm's NON-GATED `vit_base_patch16_dinov3.lvd1689m`** (same LVD-1689M ViT-B/16 weights; Meta gated repo rejected access) — loader = `timm.create_model`+manual-normalize (pure-torch, no PIL); config model_id + manifest provenance + Makefile + test_config updated; new env `vllatent-ego-drone` (Py3.10). ⚠ `[torch]` extra pulled transformers 5.10/torch 2.12+cu130 (drift vs spec 4.56/2.8-cu12x — pin before A5.14) |
-| A5.11 — frozen WorldVLN teacher wrapper | in_progress | 2026-06-10 | **client half done** (`vllatent/teacher/worldvln.py`: FastAPI `POST /v1/predict_delta_actions` client; K-rollout = K sessions × distinct seeds stride 65537 (released config locks seed/session); **wire = `[dx,dy,dz,droll,dyaw,dpitch]` cm/deg position-FIRST — corrects A5.8's order note**; wire→seam (m,rad) conversion + per-step `TeacherOutput`; 13 mocked-transport tests in the pure gate 199→212) — live K-rollout smoke USER-GATED (server stand-up, GPU + ~36.9 GB weights) |
+| A5.11 — frozen WorldVLN teacher wrapper | done | 2026-06-11 | client (`vllatent/teacher/worldvln.py`) + **live K-rollout smoke GREEN (user-pasted, H20)**: K=5×T=16 (segment 0), 5 DISTINCT rollouts (seeds 0/65537/…/262148), step-0 spread (6,) all >0 (0.027–0.091), `[teacher-smoke] OK`; health `infinity_loaded=true, points [1,17,33,49]` (`ts_ckpt_loaded` false until first call — stage2 loads lazily). **Wire correction locked:** `[dx,dy,dz,droll,dyaw,dpitch]` cm/deg position-FIRST deltas; K-rollout = K sessions × seed stride 65537. HF layout (actual): `$W/WorldVLN_backbone/{backbone(4-shard),vae}` + `WorldVLN_action_decoder.pt`; T5 separate. 13 contract tests, pure 199→212 |
 | A5.12 — V-JEPA-2 surprise verifier wrapper | pending | | TORCH; USER-GATED |
 | A5.13 — render harness | in_progress | 2026-06-09 | SIM; **mock unit half done** (teleport+capture; yaw→xyzw quat (foot-gun#1); BGRA→BGR→RGB (foot-gun#2); EVERY client call Lock-wrapped (foot-gun#3); 9 unit tests in the pure gate, airsim+cv2-free import) — API copied from fly0 `sim/airsim_client.py`+AirVLN; live render USER-GATED (fly0-m1 docker + UE4 scene on :41451) — command block emitted |
 | A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED |
@@ -36,6 +36,32 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-11 — A5.11 COMPLETE: live K-rollout smoke GREEN on the H20 (user-verified)
+**Status:** A5.11 in_progress → **done** (the USER ran the Phase-2 stand-up + smoke and pasted the output —
+not an agent-fabricated pass).
+**Live evidence (user-pasted).** Server up on the H20 AutoDL container (`autodl-container-9ef943a6c4`), env
+`worldvln`; weights at `/root/autodl-tmp/WorldVLN` — **actual HF layout:** `WorldVLN_backbone/backbone/`
+(4-shard safetensors + index), `WorldVLN_backbone/vae/model.safetensors`, `WorldVLN_action_decoder.pt`
+(NOT the `gpt/`+`vae/` hf_repo naming the upstream resolver special-cases — the flat shard dir /
+torch_shard path is what matched); T5 at `/root/autodl-tmp/flan-t5-xl`. Health: `infinity_loaded=true`,
+`points [1,17,33,49]`, 640×640 tgt — note `ts_ckpt_loaded=false` until the first predict call (stage2
+action head initializes LAZILY per mode; expected, not a failure). Smoke (dev box → ssh tunnel :8001):
+**K=5 × T=16 actions (segment 0); 5 DISTINCT step-0 rows** (seeds 0, 65537, 131074, 196611, 262148);
+step-0 `rollout_spread (6,)` = [0.068, 0.027, 0.050, 0.055, 0.033, 0.091] — **all six channels > 0**;
+`rollouts identical across K: False`; `[teacher-smoke] OK`. The trust-oracle disagreement signal is
+**live-confirmed end-to-end** (wire → seam (m,rad) → `TeacherOutput.rollout_spread`).
+**Cleanup in this commit.** A5.11 → done; committed the A5.8 probe scripts (`scripts/a5_8_worldvln_meta.sh`,
+`scripts/a5_8b_worldvln_probe.sh` — referenced by the A5.8 entry, were untracked); deleted the stale,
+superseded `plans/handoff-2026-06-08-resume-ralph-A5.4.md` (self-described disposable; A5.4 long done);
+new cold-start brief `plans/handoff-2026-06-11-resume-ralph-A5.12.md`.
+**Open / next.** Lowest pending = **A5.12** (V-JEPA-2 surprise verifier — contract half autonomous,
+real-weight USER-GATED). Then the remaining operator block: A5.13-live (sim) + A5.14 (cache build; pin the
+`[torch]` extra there; can reuse this H20 server — weights persist on `/root/autodl-tmp`). A5.16–A5.18 follow.
+**Vault/memory.** A5.11-done + H20 server-reuse facts recorded in memory (`project_latent_pred_arch_locked`
++ equipment note); vault arch-design banner update still deferred to the A5.14 cache-contract freeze.
 
 ---
 
