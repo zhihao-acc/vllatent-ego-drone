@@ -17,7 +17,7 @@ def _main(argv: list[str] | None = None) -> int:  # pragma: no cover - USER-GATE
     import numpy as np
 
     from vllatent.audit import parse_episode
-    from vllatent.render.harness import RenderHarness, VEHICLE_NAME
+    from vllatent.render.harness import VEHICLE_NAME, RenderHarness
 
     parser = argparse.ArgumentParser(prog="python -m vllatent.render", description="live render smoke")
     parser.add_argument("--episode", required=True, help="AerialVLN episode JSON")
