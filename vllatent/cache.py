@@ -55,16 +55,16 @@ if TYPE_CHECKING:
     from vllatent.teacher.worldvln import WorldVLNTeacherClient
     from vllatent.verify.vjepa2 import VJEPA2SurpriseVerifier
 
-TARGET_HW = 224
+DINOV3_HW = 224
 
 
-def center_crop_and_resize(frame: np.ndarray, target_hw: int = TARGET_HW) -> np.ndarray:
-    """Center-crop an ``(H,W,3)`` uint8 frame to square, then resize to ``target_hw²``.
+def center_crop_to_square(frame: np.ndarray) -> np.ndarray:
+    """Center-crop an ``(H,W,3)`` uint8 frame to a square ``(min(H,W), min(H,W), 3)``.
 
-    Ensures DINOv3 and V-JEPA-2 see identical pixels from the same render (avoids the
-    aspect-distortion foot-gun when encoders silently resize differently).
-    Pure numpy + lazy cv2 (the resize needs interpolation; cv2 is already in the [torch]
-    extra via opencv-python).
+    No resize — returns the native-resolution square crop. Callers resize per-encoder:
+    DINOv3 wants 224², the WorldVLN server resizes to 640² internally, V-JEPA-2's
+    processor resizes to 256² internally. Decoupling avoids the 224²-bottleneck for
+    encoders that operate at higher resolution.
     """
     if not isinstance(frame, np.ndarray) or frame.ndim != 3 or frame.shape[2] != 3:
         raise ValueError(f"frame: expected (H,W,3), got {getattr(frame, 'shape', type(frame))}")
@@ -72,12 +72,16 @@ def center_crop_and_resize(frame: np.ndarray, target_hw: int = TARGET_HW) -> np.
     side = min(h, w)
     y0 = (h - side) // 2
     x0 = (w - side) // 2
-    cropped = frame[y0 : y0 + side, x0 : x0 + side]
-    if cropped.shape[0] == target_hw and cropped.shape[1] == target_hw:
-        return np.ascontiguousarray(cropped)
+    return np.ascontiguousarray(frame[y0 : y0 + side, x0 : x0 + side])
+
+
+def resize_square(frame: np.ndarray, target_hw: int) -> np.ndarray:
+    """Resize a square ``(S,S,3)`` uint8 frame to ``(target_hw, target_hw, 3)``."""
+    if frame.shape[0] == target_hw and frame.shape[1] == target_hw:
+        return frame
     import cv2  # lazy (SIM tier only; the [torch] extra ships opencv-python)
 
-    resized = cv2.resize(cropped, (target_hw, target_hw), interpolation=cv2.INTER_AREA)
+    resized = cv2.resize(frame, (target_hw, target_hw), interpolation=cv2.INTER_AREA)
     return np.ascontiguousarray(resized)
 
 
@@ -108,9 +112,9 @@ def _disagreement_scalar(spread: np.ndarray) -> float:
     return float(np.mean(spread[[1, 3, 4, 5]]))
 
 
-def _render_transform_hash(target_hw: int) -> str:
+def _render_transform_hash(dinov3_hw: int) -> str:
     """A short deterministic hash of the render→encode normalization, for the manifest."""
-    desc = f"center_crop_to_square+resize_area_{target_hw}x{target_hw}"
+    desc = f"center_crop_to_square_native+dinov3_resize_area_{dinov3_hw}x{dinov3_hw}+teacher_native+vjepa2_native"
     return hashlib.sha256(desc.encode()).hexdigest()[:16]
 
 
@@ -123,12 +127,17 @@ def build_episode_cache(
     teacher_client: WorldVLNTeacherClient,
     verifier: VJEPA2SurpriseVerifier,
     config: Config,
-    target_hw: int = TARGET_HW,
+    dinov3_hw: int = DINOV3_HW,
 ) -> dict[str, np.ndarray]:
     """Build all cache arrays for one episode. Returns the dict ready for ``np.savez``.
 
     Callers own parsing the episode JSON (``vllatent.audit.parse_episode``) and writing the
     ``.npz``; this function owns the render→encode→teacher→verifier pipeline.
+
+    Per-encoder resolution decoupling: render once at native → center-crop to square at
+    native res → DINOv3 gets ``dinov3_hw²`` (224²); teacher and V-JEPA-2 get the
+    native-square crop (480² from 480×640), letting the server (640²) and processor (256²)
+    resize from the best available source.
     """
     from vllatent.audit import parse_episode
     from vllatent.teacher.worldvln import teacher_outputs_from_rollouts
@@ -137,30 +146,33 @@ def build_episode_cache(
     ref = ep.reference_path  # (N, 6) Euler [x,y,z,pitch,roll,yaw]
     n = ref.shape[0]
 
-    # --- 1. Render + normalize --------------------------------------------------
-    frames_224: list[np.ndarray] = []
+    # --- 1. Render + center-crop (native-res square) ----------------------------
+    frames_native: list[np.ndarray] = []
+    frames_dinov3: list[np.ndarray] = []
     for i in range(n):
         raw_rgb = renderer.render_reference_row(ref[i])
-        frames_224.append(center_crop_and_resize(raw_rgb, target_hw))
+        sq = center_crop_to_square(raw_rgb)
+        frames_native.append(sq)
+        frames_dinov3.append(resize_square(sq, dinov3_hw))
 
-    # --- 2. DINOv3 encode --------------------------------------------------------
-    latents = np.stack([vision_encoder.encode_rgb(f) for f in frames_224])  # (N, 196, 768) fp16
+    # --- 2. DINOv3 encode (224²) ------------------------------------------------
+    latents = np.stack([vision_encoder.encode_rgb(f) for f in frames_dinov3])  # (N, 196, 768) fp16
 
     # --- 3. CLIP text encode (once per episode) ----------------------------------
     lang_tokens = text_encoder.encode(ep.instruction_text)  # (M, 768) fp16
 
-    # --- 4. WorldVLN K-rollout teacher -------------------------------------------
+    # --- 4. WorldVLN K-rollout teacher (native-square, server resizes to 640²) ---
     rollouts_seam, _ = teacher_client.k_rollout_segment(
-        [frames_224[0]], ep.instruction_text, config=config,
+        [frames_native[0]], ep.instruction_text, config=config,
     )
     per_step_teachers = teacher_outputs_from_rollouts(rollouts_seam)  # list of T TeacherOutput
     t_segment = len(per_step_teachers)
 
-    # --- 5. V-JEPA-2 surprise (per transition, context=current, future=next) -----
+    # --- 5. V-JEPA-2 surprise (native-square, processor resizes to 256²) --------
     surprises: list[float] = []
     for i in range(n - 1):
-        ctx = frames_224[i][np.newaxis]   # (1, 224, 224, 3)
-        fut = frames_224[i + 1][np.newaxis]
+        ctx = frames_native[i][np.newaxis]   # (1, S, S, 3) native-square
+        fut = frames_native[i + 1][np.newaxis]
         surprises.append(verifier.scalar_surprise(ctx, fut))
     surprises.append(0.0)  # terminal STOP slot (t=N-1): unused by the loader
 
@@ -215,7 +227,7 @@ def build_cache(
     teacher_client: WorldVLNTeacherClient,
     verifier: VJEPA2SurpriseVerifier,
     config: Config | None = None,
-    target_hw: int = TARGET_HW,
+    dinov3_hw: int = DINOV3_HW,
     split: str = "",
     limit: int | None = None,
 ) -> dict[str, Any]:
@@ -247,7 +259,7 @@ def build_cache(
                 teacher_client=teacher_client,
                 verifier=verifier,
                 config=cfg,
-                target_hw=target_hw,
+                dinov3_hw=dinov3_hw,
             )
             np.savez(out / latent_path, **arrays)
             n_frames = arrays["latents"].shape[0]
@@ -265,7 +277,7 @@ def build_cache(
     manifest = build_manifest(cfg, split=split, entries=entries)
     manifest["teacher"]["worldvln_model_id"] = "EmbodiedCity/WorldVLN"
     manifest["teacher"]["worldvln_revision"] = "main"
-    manifest["teacher"]["render_config_hash"] = _render_transform_hash(target_hw)
+    manifest["teacher"]["render_config_hash"] = _render_transform_hash(dinov3_hw)
     write_manifest(manifest, out)
     return manifest
 
@@ -273,8 +285,9 @@ def build_cache(
 __all__ = [
     "build_cache",
     "build_episode_cache",
-    "center_crop_and_resize",
-    "TARGET_HW",
+    "center_crop_to_square",
+    "resize_square",
+    "DINOV3_HW",
 ]
 
 

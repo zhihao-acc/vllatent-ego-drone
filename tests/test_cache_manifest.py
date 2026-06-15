@@ -16,7 +16,8 @@ import pytest
 
 from vllatent.cache import (
     build_cache,
-    center_crop_and_resize,
+    center_crop_to_square,
+    resize_square,
 )
 from vllatent.config import Config
 from vllatent.data.loader import CachedLatentDataset
@@ -106,28 +107,42 @@ def _mock_verifier():
 
 # --- Tests --------------------------------------------------------------------------
 
-def test_center_crop_and_resize_480x640() -> None:
-    """480x640 → 480x480 center-crop → 224x224 resize."""
+def test_center_crop_to_square_480x640() -> None:
+    """480x640 → 480x480 center-crop (native res, no resize)."""
     frame = np.zeros((480, 640, 3), dtype=np.uint8)
-    out = center_crop_and_resize(frame, 224)
+    out = center_crop_to_square(frame)
+    assert out.shape == (480, 480, 3) and out.dtype == np.uint8
+
+
+def test_center_crop_to_square_already_square() -> None:
+    frame = np.zeros((224, 224, 3), dtype=np.uint8)
+    out = center_crop_to_square(frame)
+    assert out.shape == (224, 224, 3)
+
+
+def test_center_crop_to_square_tall() -> None:
+    frame = np.zeros((640, 480, 3), dtype=np.uint8)
+    out = center_crop_to_square(frame)
+    assert out.shape == (480, 480, 3)
+
+
+def test_center_crop_rejects_bad_input() -> None:
+    with pytest.raises(ValueError, match="expected"):
+        center_crop_to_square(np.zeros((224, 224), dtype=np.uint8))
+
+
+def test_resize_square_480_to_224() -> None:
+    """480x480 native-square → 224x224 for DINOv3."""
+    frame = np.zeros((480, 480, 3), dtype=np.uint8)
+    out = resize_square(frame, 224)
     assert out.shape == (224, 224, 3) and out.dtype == np.uint8
 
 
-def test_center_crop_and_resize_already_square() -> None:
+def test_resize_square_noop() -> None:
+    """Already at target size → no resize, same array."""
     frame = np.zeros((224, 224, 3), dtype=np.uint8)
-    out = center_crop_and_resize(frame, 224)
+    out = resize_square(frame, 224)
     assert out.shape == (224, 224, 3)
-
-
-def test_center_crop_and_resize_tall() -> None:
-    frame = np.zeros((640, 480, 3), dtype=np.uint8)
-    out = center_crop_and_resize(frame, 224)
-    assert out.shape == (224, 224, 3)
-
-
-def test_center_crop_and_resize_rejects_bad_input() -> None:
-    with pytest.raises(ValueError, match="expected"):
-        center_crop_and_resize(np.zeros((224, 224), dtype=np.uint8))
 
 
 @pytest.fixture()

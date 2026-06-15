@@ -40,7 +40,29 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 ---
 
-## 2026-06-15 — A5.18 DONE: Phase-A complete (code review settled)
+## 2026-06-15 — A5.18: second review H1 fixed (224² bottleneck decoupled)
+**Second independent code review** found 1 HIGH + 4 MEDIUM + 2 LOW. H1 fixed; MEDIUMs accepted as
+Phase B/C gates.
+- **H1 (FIXED): 224² bottleneck to teacher/V-JEPA-2.** All frames were center-crop+resized to 224²
+  (correct for DINOv3), then the same 224² sent to the WorldVLN server (which upscales to 640²) and
+  V-JEPA-2 (which resizes to 256²). Fix: decouple — render once at native → center-crop to square at
+  native res (480²) → DINOv3 gets `resize_square(sq, 224)`, teacher and V-JEPA-2 get the native-square
+  crop (their processors resize internally from better source). `center_crop_and_resize` split into
+  `center_crop_to_square` + `resize_square`. Manifest hash updated. +2 tests (253 total).
+  ⚠ **Existing 6-episode .npz files are STALE** (built with 224² teacher/verifier input) — must
+  regenerate before Phase B training. Data is gitignored so no commit conflict.
+- **M1 (Phase C):** T/H sweep not wired through seam validators (constants lock the current values;
+  Phase C explicitly owns the sweep).
+- **M2 (Phase B gate):** teacher waypoint frame vs GT body-delta frame unverified. Add a correlation
+  check early in Phase B (compare teacher waypoint direction against known GT deltas).
+- **M3 (Phase C):** V-JEPA-2 1+1 degenerate mode (shape-correct ≠ discriminative). Phase C GO/NO-GO.
+- **M4 (Phase B design):** open-loop teacher targets paired with real observations — inherent to
+  world-model distillation; Phase B decides (step-weighting or early-segment-only).
+- **L1, L2:** minor guards, won't bite on AerialVLN data.
+
+---
+
+## 2026-06-15 — A5.18 DONE: Phase-A complete (first code review settled)
 **Status:** A5.18 in_progress → **done**. **PHASE A COMPLETE.**
 **Code review verdict:** WARNING (0 CRITICAL, 4 HIGH, 4 MEDIUM, 3 LOW). All 4 HIGHs fixed:
 - HIGH-1: `wrap_pi` docstring `(-pi, pi]` → `[-pi, pi)` (matched implementation).
@@ -52,7 +74,7 @@ M2 per-call npz reload (Phase B restructure); M3 uint dtype edge case (not reach
 path (defaults in production YAML).
 **Phase-A DoD met:** (1) typed Config SoT + student+teacher seams + io-contract.md; (2) AuditSummary
 clean on real slice (50/50, 10,198 transitions); (3) valid `(StepSample, OracleTarget)` tuples from 6
-real cached episodes. 251 pure / 5 torch / lint / mypy / blob — all green. Hand-off → **Phase B
+real cached episodes. 253 pure / 5 torch / lint / mypy / blob — all green. Hand-off → **Phase B
 (distillation training).**
 
 ---
