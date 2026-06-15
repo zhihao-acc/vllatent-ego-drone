@@ -320,6 +320,7 @@ def test_build_manifest_from_config_is_valid_and_dedups_shapes() -> None:
     assert validate_manifest(m) == []
     # De-dup: encoder identity + shapes come from Config / schemas constants, not re-hardcoded.
     assert m["encoder"]["model_id"] == cfg.encoder.model_id
+    assert m["encoder"]["text_model_id"] == cfg.encoder.text_model_id == "openai/clip-vit-base-patch32"
     assert m["encoder"]["dtype"] == cfg.encoder.dtype
     assert m["encoder"]["patch_tokens"] == PATCH_TOKENS
     assert m["encoder"]["dim"] == EMBED_DIM

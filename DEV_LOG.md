@@ -29,13 +29,41 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.11 — frozen WorldVLN teacher wrapper | done | 2026-06-11 | client (`vllatent/teacher/worldvln.py`) + **live K-rollout smoke GREEN (user-pasted, H20)**: K=5×T=16 (segment 0), 5 DISTINCT rollouts (seeds 0/65537/…/262148), step-0 spread (6,) all >0 (0.027–0.091), `[teacher-smoke] OK`; health `infinity_loaded=true, points [1,17,33,49]` (`ts_ckpt_loaded` false until first call — stage2 loads lazily). **Wire correction locked:** `[dx,dy,dz,droll,dyaw,dpitch]` cm/deg position-FIRST deltas; K-rollout = K sessions × seed stride 65537. HF layout (actual): `$W/WorldVLN_backbone/{backbone(4-shard),vae}` + `WorldVLN_action_decoder.pt`; T5 separate. 13 contract tests, pure 199→212 |
 | A5.12 — V-JEPA-2 surprise verifier wrapper | done | 2026-06-14 | TORCH; `vllatent/verify/vjepa2.py` — frozen V-JEPA-2 ViT-L; surprise `s_j=1−cos(ẑ_j,z_j)` per GT future frame → feeds `OracleTarget.vjepa_surprise`; lazy torch/transformers. **Weights NON-GATED** (`facebook/vjepa2-vitl-fpc64-256`, gated:false, MIT, ~1.30 GB — no DINOv3-style re-host); id single-sourced from `Config.trust.vjepa2_model_id` (+ `build_manifest` records it). 16 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** 587 tensors loaded, `surprise [0.174, 0.208]` (mean 0.191), finite ∈[0,2], `[vjepa-smoke] OK` |
 | A5.13 — render harness | in_progress | 2026-06-09 | SIM; **mock unit half done** (teleport+capture; yaw→xyzw quat (foot-gun#1); BGRA→BGR→RGB (foot-gun#2); EVERY client call Lock-wrapped (foot-gun#3); 9 unit tests in the pure gate, airsim+cv2-free import) — API copied from fly0 `sim/airsim_client.py`+AirVLN; **`scripts/render_aerialvln.sh` promoted from stub → real wrapper (2026-06-14)** around `python -m vllatent.render` (arg passthrough + scene-launch reminder; `bash -n`/`--help`/bad-arg checked); live render USER-GATED (fly0-m1 docker + UE4 scene on :41451) — command block emitted |
-| A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED |
+| A5.13b — frozen CLIP text tower → lang_tokens | in_progress | 2026-06-14 | TORCH; **contract done** (`vllatent/encode/text.py` — frozen CLIP ViT-B/32, instruction→`(M,768)` fp16; native 512→768 zero-pad lift; lazy; id in `Config.encoder.text_model_id` + manifest provenance). **Weights NON-GATED** (`openai/clip-vit-base-patch32`, gated:false, 15M dls). 10 pure contract tests; real-weight smoke USER-GATED (`make text-smoke`). Added 2026-06-14 to UNBLOCK A5.14's lang_tokens (no text-tower step existed) |
+| A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED. Now unblocked once A5.13(live)+A5.13b(smoke) land |
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
 | A5.16 — loader over real teacher/oracle dump | pending | | USER-GATED |
 | A5.17 — size full render→teacher→cache job | pending | | sizing AUTO / bulk USER-GATED |
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-14 — A5.13b (NEW): frozen CLIP text tower → lang_tokens — contract done; smoke USER-GATED
+**Status:** new sub-step added + in_progress (contract AUTONOMOUS; real-weight smoke USER-GATED). **Why it
+exists:** wiring A5.14 surfaced a gap — the cache contract (A5.15 loader) needs `lang_tokens (M,768) fp16`
+from a "frozen text tower (default SigLIP/CLIP-ViT-B, 512→768)" (io-contract §b), but NO A5.x step built
+one, so A5.14 could not produce the cache. User chose **CLIP ViT-B/32**; added A5.13b to the plan.
+**Gating researched first (DINOv3 lesson).** `openai/clip-vit-base-patch32` is **NON-GATED** (`gated:false`,
+15.3M downloads; probed hf-mirror 2026-06-14) ⇒ no token, no re-host fallback.
+**What's done.** `vllatent/encode/text.py` — `ClipTextEncoder(model_id,device,dtype).encode(text) → (M,768)
+fp16` (M = real tokens, no padding; the loader sets lang_mask all-True so padding would poison M). CLIP
+text width is **512**; `_lift_to_embed_dim` zero-pads 512→768 (documented: the meaningful 512→768 map is
+the student's LEARNED cross-attention K/V in Phase B; the frozen cache lift is a reproducible placeholder,
+trivially swappable). Frozen (eval/no_grad/requires_grad False), lazy torch/transformers in
+`_load_backbone`, `--smoke` CLI + `make text-smoke`. `Config.encoder` gains `text_model_id` (non-empty
+validated); `build_manifest` records it in the encoder provenance (audit trail, like the DINOv3 model_id).
+Recipe validated on a random-weight CLIPTextModel + the production `encode` path (M=real tokens, zero-pad
+tail, fp16, frozen).
+**Tested.** `tests/test_text_contract.py` (10, PURE — mocked `_load_backbone` seam, no torch/transformers):
+zero-pad lift (first 512 = CLIP, rest 0) + pass-through-at-768 + reject-wider/non-2D; encode shape/dtype/
+token-count; **feeds `StepSample.lang_tokens`** (constructs a real StepSample); bad-text raises; model-id
+single-source; AST heavy-free. `make test` 229→**239**; `make test-torch` 5; ruff/mypy(pure)/import-smoke/
+blob clean.
+**Open / next — STOP CHECK (real-weight smoke USER-GATED).** `make text-smoke` command emitted. With
+A5.13(live) + A5.13b(smoke) both green, **A5.14 is unblocked** (render→[DINOv3+CLIP-text+WorldVLN+V-JEPA-2]
+→cache; pin the `[torch]` extra there).
 
 ---
 

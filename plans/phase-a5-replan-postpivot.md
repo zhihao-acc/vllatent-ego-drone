@@ -225,6 +225,16 @@ DoD: AirSim teleport+capture, BGR→RGB, quaternion reorder, **every client call
 `$PY -m vllatent.render --episode fixtures/episodes/tiny_episode.json --scene 1 --out /tmp/render_smoke/`
 (in `fly0-m1` docker; user launches UE4 scene, waits port 41451). Blocks A5.14.
 
+**A5.13b (added 2026-06-14) — Frozen CLIP text tower → `lang_tokens`.** Tier TORCH (lazy) · contract
+AUTO / real-weight USER-GATED. **Why:** the cache contract (A5.15 loader) needs `lang_tokens (M,768)
+fp16` from a frozen text tower, but no A5.x step built one — A5.14 cannot produce the cache without it.
+DoD: `vllatent/encode/text.py`, frozen CLIP ViT-B/32 text tower (NON-GATED `openai/clip-vit-base-patch32`),
+instruction → `(M,768)` fp16 per-token tokens (M real tokens; native 512 → 768 zero-pad lift, the real
+512→768 map being the student's learned cross-attn in Phase B); lazy import; id single-sourced in
+`Config.encoder.text_model_id` + recorded in `build_manifest` encoder provenance. Test:
+`$PY -m pytest -q tests/test_text_contract.py` (monkeypatched); real-weight:
+`HF_ENDPOINT=https://hf-mirror.com make text-smoke`. Blocks A5.14.
+
 **A5.14 (was 9) — Render → [DINOv3 + WorldVLN + V-JEPA-2] → cache teacher/oracle dataset +
 extended provenance manifest (M5 completes here).** Tier SIM+TORCH · manifest AUTO /
 small-slice USER-GATED. DoD: orchestrate episode → render → encode → run teacher + verifier →

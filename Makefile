@@ -7,7 +7,7 @@ SHELL := /bin/bash
 # PURE tier (numpy/pyyaml only; CI-importable). The HARD mypy + import gate scopes here.
 PURE_TIER := vllatent/schemas.py vllatent/actions.py vllatent/frames.py vllatent/config.py vllatent/manifest.py vllatent/audit.py
 
-.PHONY: help setup setup-torch lint typecheck typecheck-all import-smoke test test-torch encode-smoke vjepa-smoke audit blob ralph
+.PHONY: help setup setup-torch lint typecheck typecheck-all import-smoke test test-torch encode-smoke vjepa-smoke text-smoke audit blob ralph
 
 help:
 	@echo "vllatent-ego-drone dev targets:"
@@ -21,6 +21,7 @@ help:
 	@echo "  make test-torch   - torch-tier tests (needs the torch extra)"
 	@echo "  make encode-smoke - real-weight DINOv3 forward (downloads ~330MB non-gated timm weights; no token)"
 	@echo "  make vjepa-smoke  - real-weight V-JEPA-2 surprise (downloads ~1.30GB non-gated ViT-L; no token)"
+	@echo "  make text-smoke   - real-weight CLIP text tower -> (M,768) lang_tokens (downloads CLIP; no token)"
 	@echo "  make audit        - run the AerialVLN audit parser on the fixture episode (after step 5)"
 	@echo "  make blob         - pre-commit blob guard"
 	@echo "  make ralph        - print the /ralph-loop launch command"
@@ -59,6 +60,11 @@ encode-smoke:
 # From CN, HF_ENDPOINT=https://hf-mirror.com speeds the download: HF_ENDPOINT=... make vjepa-smoke
 vjepa-smoke:
 	$(PY) -m vllatent.verify.vjepa2 --smoke
+
+# Downloads the NON-GATED CLIP ViT-B/32 text tower (no token) + runs a real text encode -> (M,768).
+# From CN, HF_ENDPOINT=https://hf-mirror.com speeds the download: HF_ENDPOINT=... make text-smoke
+text-smoke:
+	$(PY) -m vllatent.encode.text --smoke
 
 audit:
 	$(PY) -m vllatent.audit --episode fixtures/episodes/tiny_episode.json
