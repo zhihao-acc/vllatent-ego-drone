@@ -44,5 +44,5 @@ cat >&2 <<EOF
   Then this replays ${EPISODE} (scene ${SCENE}) -> per-pose uint8 RGB .npy in ${OUT}.
 EOF
 
-exec "${PY}" -m vllatent.render \
+exec env PYTHONNOUSERSITE=1 "${PY}" -s -m vllatent.render \
   --episode "${EPISODE}" --scene "${SCENE}" --out "${OUT}" --host "${HOST}" --port "${PORT}"

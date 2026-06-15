@@ -17,7 +17,7 @@ def _main(argv: list[str] | None = None) -> int:  # pragma: no cover - USER-GATE
     import numpy as np
 
     from vllatent.audit import parse_episode
-    from vllatent.render.harness import RenderHarness
+    from vllatent.render.harness import RenderHarness, VEHICLE_NAME
 
     parser = argparse.ArgumentParser(prog="python -m vllatent.render", description="live render smoke")
     parser.add_argument("--episode", required=True, help="AerialVLN episode JSON")
@@ -25,12 +25,13 @@ def _main(argv: list[str] | None = None) -> int:  # pragma: no cover - USER-GATE
     parser.add_argument("--out", required=True, help="output dir for per-pose .npy RGB frames")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=41451)
+    parser.add_argument("--vehicle", default=VEHICLE_NAME, help=f"vehicle name (default {VEHICLE_NAME})")
     args = parser.parse_args(argv)
 
     episode = parse_episode(json.loads(Path(args.episode).read_text()))
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    harness = RenderHarness(host=args.host, port=args.port)
+    harness = RenderHarness(host=args.host, port=args.port, vehicle_name=args.vehicle)
     n = 0
     for t, row in enumerate(episode.reference_path):
         rgb = harness.render_reference_row(np.asarray(row))

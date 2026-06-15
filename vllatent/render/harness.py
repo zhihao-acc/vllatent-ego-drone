@@ -27,6 +27,7 @@ See plans/phase-a5-replan-postpivot.md A5.13.
 from __future__ import annotations
 
 import threading
+import time
 from typing import Any
 
 import numpy as np
@@ -34,8 +35,9 @@ import numpy as np
 from vllatent.frames import REFERENCE_PATH_ROW_WIDTH, REFERENCE_PATH_YAW_INDEX, xyzw_from_yaw
 
 # airsim is imported LAZILY inside _connect (SIM tier); access at runtime is via self._airsim (Any).
-CAMERA_NAME = "front_0"
-VEHICLE_NAME = "Drone_1"
+CAMERA_NAME = "front_center"
+VEHICLE_NAME = "drone_1"
+_SETTLE_S = 0.2
 RGB_HW = (224, 224)              # the DINOv3 encoder target (sim settings.json CaptureSettings)
 DEPTH_HW = (256, 256)
 DEPTH_VIS_SCENES = (1, 7)        # use DepthVis; all others use DepthPerspective (Phase C, if needed)
@@ -47,7 +49,7 @@ def _connect(host: str, port: int, lock: threading.Lock) -> tuple[Any, Any]:
 
     client = airsim.MultirotorClient(ip=host, port=port)
     with lock:
-        client.confirmConnection()  # teleport+capture needs no enableApiControl/arm/takeoff
+        client.confirmConnection()
     return airsim, client
 
 
@@ -84,15 +86,28 @@ class RenderHarness:
         self._lock = threading.Lock()
         self.vehicle_name = vehicle_name
         self.camera_name = camera_name
+        self._armed = False
         if _client is not None:
-            # Injected (tests): skip the real connect; use the supplied client + airsim module.
             self._airsim = _airsim
             self._client = _client
+            self._armed = True
         else:
             self._airsim, self._client = _connect(host, port, self._lock)
 
+    def _ensure_armed(self) -> None:
+        """Arm + takeoff once (fly0 pattern). Required before simSetVehiclePose / simGetImages."""
+        if self._armed:
+            return
+        with self._lock:
+            self._client.enableApiControl(True, vehicle_name=self.vehicle_name)
+            self._client.armDisarm(True, vehicle_name=self.vehicle_name)
+            self._client.takeoffAsync(vehicle_name=self.vehicle_name).join()
+        time.sleep(0.5)
+        self._armed = True
+
     def teleport(self, position_ned: np.ndarray, yaw: float) -> None:
         """Set the vehicle pose to ``position_ned`` (NED x,y,z) + yaw-only orientation (xyzw)."""
+        self._ensure_armed()
         x, y, z, w = (float(v) for v in xyzw_from_yaw(float(yaw)))  # canonical xyzw (foot-gun #1)
         pose = self._airsim.Pose(
             self._airsim.Vector3r(float(position_ned[0]), float(position_ned[1]), float(position_ned[2])),
@@ -100,6 +115,7 @@ class RenderHarness:
         )
         with self._lock:  # foot-gun #3
             self._client.simSetVehiclePose(pose, True, self.vehicle_name)
+        time.sleep(_SETTLE_S)
 
     def capture_rgb(self) -> np.ndarray:
         """Capture the ``Scene`` camera and return an ``(H,W,3)`` uint8 RGB frame."""
