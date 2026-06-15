@@ -30,13 +30,34 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.12 — V-JEPA-2 surprise verifier wrapper | done | 2026-06-14 | TORCH; `vllatent/verify/vjepa2.py` — frozen V-JEPA-2 ViT-L; surprise `s_j=1−cos(ẑ_j,z_j)` per GT future frame → feeds `OracleTarget.vjepa_surprise`; lazy torch/transformers. **Weights NON-GATED** (`facebook/vjepa2-vitl-fpc64-256`, gated:false, MIT, ~1.30 GB — no DINOv3-style re-host); id single-sourced from `Config.trust.vjepa2_model_id` (+ `build_manifest` records it). 16 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** 587 tensors loaded, `surprise [0.174, 0.208]` (mean 0.191), finite ∈[0,2], `[vjepa-smoke] OK` |
 | A5.13 — render harness | done | 2026-06-14 | SIM; teleport+capture, 3 foot-guns (xyzw quat / BGRA→RGB / Lock); 9 unit tests; `scripts/render_aerialvln.sh` real wrapper. **Live render GREEN (user-pasted, fly0-m1):** Connected, 8 RGB frames `(480,640,3)` from `tiny-0001`. **User's 3 smoke fixes (`7e31bf3`):** camera `front_0`→`front_center`, vehicle `Drone_1`→`drone_1`, arm+takeoff+200ms settle (fly0 pattern); script `PYTHONNOUSERSITE=1 -s` (avoid user-site Colosseum airsim shadow); `--vehicle` flag. ⚠ **frames are sim-native `(480,640)` NOT `224²` — A5.14 must square-crop+resize at the render→encode boundary (or set settings.json CaptureSettings=224²) to avoid DINOv3 aspect distortion** |
 | A5.13b — frozen CLIP text tower → lang_tokens | done | 2026-06-14 | TORCH; `vllatent/encode/text.py` — frozen CLIP ViT-B/32, instruction→`(M,768)` fp16; native 512→768 zero-pad lift; lazy; id in `Config.encoder.text_model_id` + manifest provenance. **Weights NON-GATED** (`openai/clip-vit-base-patch32`, gated:false, 15M dls). 10 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** `lang_tokens (10,768) float16`, `[text-smoke] OK` (the `UNEXPECTED vision_model.*` keys are benign — CLIPTextModel ignoring the vision tower). Added 2026-06-14 to unblock A5.14's lang_tokens (no text-tower step existed) |
-| A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | in_progress | 2026-06-15 | SIM+TORCH; orchestration code + mocked test DONE (AUTO); small-slice USER-GATED (command block below). `[torch]` extra PINNED. 251 pure / 5 torch / lint / typecheck / blob green |
+| A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | done | 2026-06-15 | SIM+TORCH; orchestration + mocked test + **small-slice build VERIFIED (user-ran, 5 eps, K=5 WorldVLN rollouts, manifest OK)**. `[torch]` extra PINNED. 251 pure / 5 torch / lint / typecheck / blob green |
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
 | A5.16 — loader over real teacher/oracle dump | pending | | USER-GATED |
 | A5.17 — size full render→teacher→cache job | pending | | sizing AUTO / bulk USER-GATED |
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-15 — A5.14 DONE: cache pipeline end-to-end verified (small-slice build GREEN)
+**Status:** A5.14 in_progress → **done**. The USER ran the small-slice build in fly0-m1 docker with H20
+WorldVLN server and pasted the output — not agent-fabricated.
+**Small-slice build (user-pasted).** `python -m vllatent.cache build --slice … --limit 5 --out
+data/latent_cache/ --teacher-server http://127.0.0.1:8001 --device cuda` → `Connected!`,
+`[cache] wrote 5 episodes to data/latent_cache/`, `[cache] manifest OK (teacher provenance populated)`.
+WorldVLN server logs show K=5 rollouts per episode (vllatent-k0 through vllatent-k4), each with distinct
+seeds (timestamps differ), 160/160 denoising steps per rollout at ~3.48 it/s. Five different instructions
+processed across 4 distinct episodes (MSBuild2018 + AirSimNH scenes). All 200 OK from the teacher
+server. DINOv3 encode + CLIP text + V-JEPA-2 surprise all ran implicitly (the cache wrote successfully
+with the full .npz contract).
+**End-to-end pipeline confirmed:** AirSim render (480×640) → center-crop+resize (224²) → DINOv3 latents
+(196,768 fp16) + CLIP lang_tokens + WorldVLN K=5 rollout → 6→4 projection → V-JEPA-2 surprise → .npz
+write per episode + manifest.json with teacher provenance.
+**All Phase-A data seams (5/5) now LIVE-verified:** DINOv3 (A5.10) · WorldVLN teacher (A5.11) · V-JEPA-2
+verifier (A5.12) · CLIP text (A5.13b) · AirSim render (A5.13) · **cache orchestration (A5.14)**.
+**Remaining:** A5.16 (loader inspect over real cache, USER-GATED) → A5.17 (size full job, USER-GATED) →
+A5.18 (Phase-A DoD sign-off, USER-GATED).
 
 ---
 
