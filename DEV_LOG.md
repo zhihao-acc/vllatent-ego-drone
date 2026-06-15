@@ -27,7 +27,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.9 — TeacherOutput/OracleTarget seam + finalize Config placeholders | done | 2026-06-09 | frozen+validated `TeacherOutput.rollouts_pose6 (K,6)` + `rollout_spread()→(6,)`; `OracleTarget {waypoint_4dof (4,) f32, teacher_pose6 (6,), rollpitch_resid, disagreement, vjepa_surprise}` (user-approved shape; finite/bool/dtype validated); `TEACHER_DOF=6`; TrustConfig placeholders FINALIZED (A5.8: worldvln_rollout, stochastic⇒free); io-contract §0 teacher-seam note; focused adversarial review CLEAN; 167→181 tests |
 | A5.10 — DINOv3 student-encoder wrapper | done | 2026-06-09 | TORCH; contract (4) + real-weight **encode-smoke GREEN** `(196,768) fp16 cuda`, run live this session (user = operator). **Encoder swapped to timm's NON-GATED `vit_base_patch16_dinov3.lvd1689m`** (same LVD-1689M ViT-B/16 weights; Meta gated repo rejected access) — loader = `timm.create_model`+manual-normalize (pure-torch, no PIL); config model_id + manifest provenance + Makefile + test_config updated; new env `vllatent-ego-drone` (Py3.10). ⚠ `[torch]` extra pulled transformers 5.10/torch 2.12+cu130 (drift vs spec 4.56/2.8-cu12x — pin before A5.14) |
 | A5.11 — frozen WorldVLN teacher wrapper | done | 2026-06-11 | client (`vllatent/teacher/worldvln.py`) + **live K-rollout smoke GREEN (user-pasted, H20)**: K=5×T=16 (segment 0), 5 DISTINCT rollouts (seeds 0/65537/…/262148), step-0 spread (6,) all >0 (0.027–0.091), `[teacher-smoke] OK`; health `infinity_loaded=true, points [1,17,33,49]` (`ts_ckpt_loaded` false until first call — stage2 loads lazily). **Wire correction locked:** `[dx,dy,dz,droll,dyaw,dpitch]` cm/deg position-FIRST deltas; K-rollout = K sessions × seed stride 65537. HF layout (actual): `$W/WorldVLN_backbone/{backbone(4-shard),vae}` + `WorldVLN_action_decoder.pt`; T5 separate. 13 contract tests, pure 199→212 |
-| A5.12 — V-JEPA-2 surprise verifier wrapper | in_progress | 2026-06-14 | TORCH; **contract half done** (`vllatent/verify/vjepa2.py` — frozen V-JEPA-2 ViT-L; surprise `s_j=1−cos(ẑ_j,z_j)` per GT future frame → feeds `OracleTarget.vjepa_surprise`; lazy torch/transformers; real `_forward` recipe validated end-to-end on a tiny random-weight model). **Weights NON-GATED** (`facebook/vjepa2-vitl-fpc64-256`, gated:false, MIT, ~1.30 GB — no DINOv3-style re-host needed); id single-sourced from `Config.trust.vjepa2_model_id` (+ `build_manifest` records it now). 16 pure contract tests; real-weight smoke USER-GATED (`make vjepa-smoke`) — command block emitted |
+| A5.12 — V-JEPA-2 surprise verifier wrapper | done | 2026-06-14 | TORCH; `vllatent/verify/vjepa2.py` — frozen V-JEPA-2 ViT-L; surprise `s_j=1−cos(ẑ_j,z_j)` per GT future frame → feeds `OracleTarget.vjepa_surprise`; lazy torch/transformers. **Weights NON-GATED** (`facebook/vjepa2-vitl-fpc64-256`, gated:false, MIT, ~1.30 GB — no DINOv3-style re-host); id single-sourced from `Config.trust.vjepa2_model_id` (+ `build_manifest` records it). 16 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** 587 tensors loaded, `surprise [0.174, 0.208]` (mean 0.191), finite ∈[0,2], `[vjepa-smoke] OK` |
 | A5.13 — render harness | in_progress | 2026-06-09 | SIM; **mock unit half done** (teleport+capture; yaw→xyzw quat (foot-gun#1); BGRA→BGR→RGB (foot-gun#2); EVERY client call Lock-wrapped (foot-gun#3); 9 unit tests in the pure gate, airsim+cv2-free import) — API copied from fly0 `sim/airsim_client.py`+AirVLN; live render USER-GATED (fly0-m1 docker + UE4 scene on :41451) — command block emitted |
 | A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED |
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
@@ -39,10 +39,16 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 ---
 
-## 2026-06-14 — A5.12: V-JEPA-2 surprise verifier — contract half done; real-weight smoke USER-GATED (STOP CHECK)
-**Status:** A5.12 pending → in_progress (contract half AUTONOMOUS; the real-weight smoke is USER-GATED per
-ralph-rules — command block emitted). The independent SECOND trust gate (the first is the A5.11 WorldVLN
-K-rollout disagreement).
+## 2026-06-14 — A5.12: V-JEPA-2 surprise verifier — DONE (real-weight smoke GREEN, user-verified)
+**Status:** A5.12 pending → in_progress → **done** (contract half AUTONOMOUS; the real-weight smoke was
+USER-GATED and the USER ran it — not an agent-fabricated pass). The independent SECOND trust gate (the
+first is the A5.11 WorldVLN K-rollout disagreement).
+**Live evidence (user-pasted, 2026-06-14).** `python -m vllatent.verify.vjepa2 --smoke --device cuda
+--model-id /tmp/vjepa2-weights` (weights pre-downloaded to a local path): **587 tensors loaded**, real
+V-JEPA-2 ViT-L encoder→predictor forward on cuda → `surprise [0.17445292, 0.20802556]` (2 future frames,
+mean 0.1912) — finite, ∈[0,2], `[vjepa-smoke] OK`. The moderate (not 0, not 2) values on random RGB are
+the expected sanity: random context poorly predicts random future, but their encoder reps aren't fully
+orthogonal. The full ẑ-vs-z cosine-surprise pipeline is **live-confirmed end-to-end on real weights.**
 **Gating researched FIRST (DINOv3 lesson).** Probed hf-mirror + HF API: `facebook/vjepa2-vitl-fpc64-256`
 (ViT-L) is **fully NON-GATED** — `gated:false`, `private:false`, **MIT** license, `model.safetensors`
 **1.30 GB** (153k downloads). So — unlike DINOv3, where Meta's gated repo rejected us and timm's re-host
@@ -86,10 +92,11 @@ source). Fixed: both HIGHs (upper-bound test assertions) + the manifest-provenan
 the float-boundary MED. **Declined (with reason):** tightening `OracleTarget.vjepa_surprise` to `<= 2` —
 it's the LOCKED user-approved seam and the bound can't live in the shared `>= 0` loop (`disagreement` is an
 unbounded std-spread); the [0,2] bound is enforced at the verifier (which clips), not the generic seam.
-**Open / next — STOP CHECK (A5.12 real smoke is USER-GATED; also `started_step+3` boundary).** Command
-block emitted (`HF_ENDPOINT=https://hf-mirror.com $PY -m vllatent.verify.vjepa2 --smoke` on a torch+GPU box;
-paste output to flip A5.12 done). Then the operator block: A5.13-live (sim), A5.14 (cache build — **pin the
-`[torch]` extra there**; reuse the H20 server). A5.16–A5.18 follow.
+**Open / next.** A5.12 done. Remaining Phase-A.5 is the operator block: **A5.13-live** (fly0-m1 docker +
+UE4 render on :41451) and **A5.14** (render → [DINOv3 + WorldVLN + V-JEPA-2] → cache + provenance manifest;
+**pin the `[torch]` extra THERE** — the drift flagged in A5.10; reuse the H20 WorldVLN server from A5.11).
+A5.16–A5.18 follow. The three model wrappers (DINOv3 A5.10 / WorldVLN A5.11 / V-JEPA-2 A5.12) are now all
+real-weight-verified, so A5.14 is pure orchestration over verified parts.
 **Vault/memory.** V-JEPA-2 NON-GATED + the predictor-recipe facts to be recorded in memory
 (`project_latent_pred_arch_locked`); vault arch-design banner update still deferred to the A5.14
 cache-contract freeze (no schema change today).
