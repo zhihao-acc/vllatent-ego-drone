@@ -32,11 +32,40 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.13b — frozen CLIP text tower → lang_tokens | done | 2026-06-14 | TORCH; `vllatent/encode/text.py` — frozen CLIP ViT-B/32, instruction→`(M,768)` fp16; native 512→768 zero-pad lift; lazy; id in `Config.encoder.text_model_id` + manifest provenance. **Weights NON-GATED** (`openai/clip-vit-base-patch32`, gated:false, 15M dls). 10 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** `lang_tokens (10,768) float16`, `[text-smoke] OK` (the `UNEXPECTED vision_model.*` keys are benign — CLIPTextModel ignoring the vision tower). Added 2026-06-14 to unblock A5.14's lang_tokens (no text-tower step existed) |
 | A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | done | 2026-06-15 | SIM+TORCH; orchestration + mocked test + **small-slice build VERIFIED (user-ran, 5 eps, K=5 WorldVLN rollouts, manifest OK)**. `[torch]` extra PINNED. 251 pure / 5 torch / lint / typecheck / blob green |
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
-| A5.16 — loader over real teacher/oracle dump | pending | | USER-GATED |
-| A5.17 — size full render→teacher→cache job | pending | | sizing AUTO / bulk USER-GATED |
+| A5.16 — loader over real teacher/oracle dump | done | 2026-06-15 | USER-GATED: inspect over real 5-episode cache GREEN — 987 transitions (H=3), block-causal masks correct, all (StepSample,OracleTarget) tuples well-formed |
+| A5.17 — size full render→teacher→cache job | in_progress | 2026-06-15 | sizing AUTO done (`docs/full-run-sizing.md` + `scripts/run_full_cache.sh` guard); bulk build USER-GATED |
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-15 — A5.17 AUTO: sizing doc + guard script (bulk build USER-GATED)
+**Status:** A5.17 pending → **in_progress** (sizing AUTO done; bulk USER-GATED).
+**What's done (AUTO).** `docs/full-run-sizing.md` — full dataset scope (50 eps, 10,248 poses, 10,198
+trainable transitions), per-episode disk (~62 MB, latents dominate at >99.8%), full cache estimate
+**~3 GB** compressed, wall-clock **~11–14 hours** (WorldVLN teacher >90% of time: K=5 × ~3 segments ×
+160 denoising steps @ 3.5 it/s per rollout), GPU memory budget (local ~2 GB, H20 ~24 GB), prerequisites
+checklist. `scripts/run_full_cache.sh` — guard script, exits non-zero without `--i-have-signed-off`,
+wraps `python -m vllatent.cache build` with full-slice defaults, resumable.
+**Tested (AUTO).** `test -f docs/full-run-sizing.md && grep -q "GB"` PASS; `bash scripts/run_full_cache.sh`
+exits 1 without flag; 251 pure / lint / typecheck / blob green.
+**Next — USER-GATED:** the full 50-episode bulk build (see command in the sizing doc). This is a
+~11–14 hour GPU job. After the user runs it and pastes the output, A5.17 flips to `done`. Then A5.18
+(Phase-A DoD sign-off).
+
+---
+
+## 2026-06-15 — A5.16 DONE: loader inspect over real cache GREEN (user-pasted)
+**Status:** A5.16 pending → **done**. The USER ran `python -m vllatent.data inspect --cache
+data/latent_cache/ --n 4` inside fly0-m1 docker and pasted the output — not agent-fabricated.
+**Inspect output (user-pasted).** `cache data/latent_cache/: 5 episodes, 987 transitions (H=3)`.
+4 samples: `z_t (196,768) float16` (correct DINOv3 shape/dtype), `action=` valid ints (4,4,3,3),
+`hist_mask` block-causal ramp-up correct (`[F,F,T]→[F,T,T]→[T,T,T]`), `lang=(77,768)` (CLIP max-seq
+tokens), `waypoint=` 4-float teacher targets in m/deg, `disagree=0.0155–0.0309` (positive, K-rollout
+spread), `surprise=0.2086–0.2411` (positive, V-JEPA-2 cosine). All `(StepSample, OracleTarget)` tuples
+well-formed. The full distillation-loader round-trip is verified: real .npz → `CachedLatentDataset` →
+typed contract objects.
 
 ---
 
