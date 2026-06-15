@@ -28,8 +28,8 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.10 — DINOv3 student-encoder wrapper | done | 2026-06-09 | TORCH; contract (4) + real-weight **encode-smoke GREEN** `(196,768) fp16 cuda`, run live this session (user = operator). **Encoder swapped to timm's NON-GATED `vit_base_patch16_dinov3.lvd1689m`** (same LVD-1689M ViT-B/16 weights; Meta gated repo rejected access) — loader = `timm.create_model`+manual-normalize (pure-torch, no PIL); config model_id + manifest provenance + Makefile + test_config updated; new env `vllatent-ego-drone` (Py3.10). ⚠ `[torch]` extra pulled transformers 5.10/torch 2.12+cu130 (drift vs spec 4.56/2.8-cu12x — pin before A5.14) |
 | A5.11 — frozen WorldVLN teacher wrapper | done | 2026-06-11 | client (`vllatent/teacher/worldvln.py`) + **live K-rollout smoke GREEN (user-pasted, H20)**: K=5×T=16 (segment 0), 5 DISTINCT rollouts (seeds 0/65537/…/262148), step-0 spread (6,) all >0 (0.027–0.091), `[teacher-smoke] OK`; health `infinity_loaded=true, points [1,17,33,49]` (`ts_ckpt_loaded` false until first call — stage2 loads lazily). **Wire correction locked:** `[dx,dy,dz,droll,dyaw,dpitch]` cm/deg position-FIRST deltas; K-rollout = K sessions × seed stride 65537. HF layout (actual): `$W/WorldVLN_backbone/{backbone(4-shard),vae}` + `WorldVLN_action_decoder.pt`; T5 separate. 13 contract tests, pure 199→212 |
 | A5.12 — V-JEPA-2 surprise verifier wrapper | done | 2026-06-14 | TORCH; `vllatent/verify/vjepa2.py` — frozen V-JEPA-2 ViT-L; surprise `s_j=1−cos(ẑ_j,z_j)` per GT future frame → feeds `OracleTarget.vjepa_surprise`; lazy torch/transformers. **Weights NON-GATED** (`facebook/vjepa2-vitl-fpc64-256`, gated:false, MIT, ~1.30 GB — no DINOv3-style re-host); id single-sourced from `Config.trust.vjepa2_model_id` (+ `build_manifest` records it). 16 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** 587 tensors loaded, `surprise [0.174, 0.208]` (mean 0.191), finite ∈[0,2], `[vjepa-smoke] OK` |
-| A5.13 — render harness | in_progress | 2026-06-09 | SIM; **mock unit half done** (teleport+capture; yaw→xyzw quat (foot-gun#1); BGRA→BGR→RGB (foot-gun#2); EVERY client call Lock-wrapped (foot-gun#3); 9 unit tests in the pure gate, airsim+cv2-free import) — API copied from fly0 `sim/airsim_client.py`+AirVLN; **`scripts/render_aerialvln.sh` promoted from stub → real wrapper (2026-06-14)** around `python -m vllatent.render` (arg passthrough + scene-launch reminder; `bash -n`/`--help`/bad-arg checked); live render USER-GATED (fly0-m1 docker + UE4 scene on :41451) — command block emitted |
-| A5.13b — frozen CLIP text tower → lang_tokens | in_progress | 2026-06-14 | TORCH; **contract done** (`vllatent/encode/text.py` — frozen CLIP ViT-B/32, instruction→`(M,768)` fp16; native 512→768 zero-pad lift; lazy; id in `Config.encoder.text_model_id` + manifest provenance). **Weights NON-GATED** (`openai/clip-vit-base-patch32`, gated:false, 15M dls). 10 pure contract tests; real-weight smoke USER-GATED (`make text-smoke`). Added 2026-06-14 to UNBLOCK A5.14's lang_tokens (no text-tower step existed) |
+| A5.13 — render harness | done | 2026-06-14 | SIM; teleport+capture, 3 foot-guns (xyzw quat / BGRA→RGB / Lock); 9 unit tests; `scripts/render_aerialvln.sh` real wrapper. **Live render GREEN (user-pasted, fly0-m1):** Connected, 8 RGB frames `(480,640,3)` from `tiny-0001`. **User's 3 smoke fixes (`7e31bf3`):** camera `front_0`→`front_center`, vehicle `Drone_1`→`drone_1`, arm+takeoff+200ms settle (fly0 pattern); script `PYTHONNOUSERSITE=1 -s` (avoid user-site Colosseum airsim shadow); `--vehicle` flag. ⚠ **frames are sim-native `(480,640)` NOT `224²` — A5.14 must square-crop+resize at the render→encode boundary (or set settings.json CaptureSettings=224²) to avoid DINOv3 aspect distortion** |
+| A5.13b — frozen CLIP text tower → lang_tokens | done | 2026-06-14 | TORCH; `vllatent/encode/text.py` — frozen CLIP ViT-B/32, instruction→`(M,768)` fp16; native 512→768 zero-pad lift; lazy; id in `Config.encoder.text_model_id` + manifest provenance. **Weights NON-GATED** (`openai/clip-vit-base-patch32`, gated:false, 15M dls). 10 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** `lang_tokens (10,768) float16`, `[text-smoke] OK` (the `UNEXPECTED vision_model.*` keys are benign — CLIPTextModel ignoring the vision tower). Added 2026-06-14 to unblock A5.14's lang_tokens (no text-tower step existed) |
 | A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED. Now unblocked once A5.13(live)+A5.13b(smoke) land |
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
 | A5.16 — loader over real teacher/oracle dump | pending | | USER-GATED |
@@ -37,6 +37,39 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-14 — A5.13 + A5.13b DONE: both real-weight smokes GREEN (user-verified)
+**Status:** A5.13 in_progress → **done**; A5.13b in_progress → **done** (the USER ran both smokes and
+pasted output — not agent-fabricated). All 5 model/render components of the cache pipeline are now
+real-verified: DINOv3 (A5.10) · WorldVLN teacher (A5.11) · V-JEPA-2 verifier (A5.12) · CLIP text (A5.13b)
+· AirSim render (A5.13).
+**A5.13b text-smoke (cuda, user-pasted).** `python -m vllatent.encode.text --smoke` →
+`lang_tokens (10,768) float16`, `[text-smoke] OK`. The 10-token count = BOS + 8 words + EOS for the test
+instruction. The `[transformers] ... UNEXPECTED vual_model.*` load report is **benign** — `CLIPTextModel`
+loads the full CLIP checkpoint and ignores the vision tower (the report says so). Frozen CLIP text tower
+confirmed end-to-end.
+**A5.13 live render (fly0-m1, user-pasted).** `bash scripts/render_aerialvln.sh --episode tiny_episode
+--scene 1` → `Connected!`, `[render] scene=1 episode=tiny-0001: 8 RGB frames (480,640,3)`. Teleport →
+capture → decode confirmed against a real UE4 scene; foot-guns held. **User landed 3 fixes from the smoke
+(`7e31bf3`):** (1) camera `front_0`→**`front_center`** (the real name), (2) vehicle `Drone_1`→**`drone_1`**
+(case), (3) **arm+takeoff before first teleport + 200 ms settle after each `simSetVehiclePose`** (fly0
+pattern; injected-client tests set `_armed=True` so they skip it). Plus the render script now runs
+`env PYTHONNOUSERSITE=1 "$PY" -s` to stop a user-site Colosseum `airsim` from shadowing the conda env, and
+the CLI gained `--vehicle`. Gates re-confirmed green after these (239 pure / 5 torch).
+**⚠ LOAD-BEARING for A5.14 — render resolution.** Frames came back **`(480,640,3)`** (sim-native), NOT the
+`224²` the A5.13 DoD assumed. The container's AirSim `settings.json` CaptureSettings weren't 224². DINOv3's
+`encode_rgb` would force-`interpolate` 480×640→224² and **distort aspect ratio** (V-JEPA-2's processor
+instead resize-shortest-edge + center-crops). So A5.14 MUST normalize at the render→encode boundary —
+**center-crop to square then resize to 224²** (consistent for DINOv3 AND V-JEPA-2), or have the operator
+set `settings.json` CaptureSettings=224². Record the chosen transform in the provenance manifest
+(training-playbook foot-gun #1: log frame transforms). Do NOT let the encoder silently distort.
+**Open / next — A5.14 (now UNBLOCKED, pure orchestration).** render→[square-crop+resize→DINOv3 vision +
+CLIP text + WorldVLN teacher + V-JEPA-2 verifier]→`.npz` (the A5.15 read-contract) + provenance manifest;
+**pin the `[torch]` extra** (drift flagged in A5.10). Autonomous half = orchestration + mocked
+`tests/test_cache_manifest.py`; small-slice build USER-GATED. New cold-start handoff written:
+`plans/handoff-2026-06-14-resume-ralph-A5.14.md`.
 
 ---
 
