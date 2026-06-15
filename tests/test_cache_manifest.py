@@ -32,6 +32,13 @@ from vllatent.schemas import (
     TEACHER_DOF,
 )
 
+try:
+    import cv2 as _cv2  # noqa: F401
+
+    _HAS_CV2 = True
+except ModuleNotFoundError:
+    _HAS_CV2 = False
+
 # --- Tiny episode fixtures (2 episodes, N=4 and N=3 poses) -----------------------
 
 _INSTRUCTION = "fly forward and turn right at the building"
@@ -131,6 +138,7 @@ def test_center_crop_rejects_bad_input() -> None:
         center_crop_to_square(np.zeros((224, 224), dtype=np.uint8))
 
 
+@pytest.mark.skipif(not _HAS_CV2, reason="cv2 not installed (pure CI)")
 def test_resize_square_480_to_224() -> None:
     """480x480 native-square → 224x224 for DINOv3."""
     frame = np.zeros((480, 480, 3), dtype=np.uint8)
@@ -145,9 +153,19 @@ def test_resize_square_noop() -> None:
     assert out.shape == (224, 224, 3)
 
 
+def _numpy_resize_square(frame: np.ndarray, target_hw: int) -> np.ndarray:
+    """Pure-numpy nearest-neighbor resize (no cv2) for CI."""
+    if frame.shape[0] == target_hw and frame.shape[1] == target_hw:
+        return frame
+    idx = np.linspace(0, frame.shape[0] - 1, target_hw).astype(int)
+    return frame[np.ix_(idx, idx)]
+
+
 @pytest.fixture()
-def tiny_cache(tmp_path):
+def tiny_cache(tmp_path, monkeypatch):
     """Build a 2-episode mocked cache and return the cache dir path."""
+    if not _HAS_CV2:
+        monkeypatch.setattr("vllatent.cache.resize_square", _numpy_resize_square)
     episodes = [
         _make_episode("ep0", n_poses=4, scene_id=1),
         _make_episode("ep1", n_poses=3, scene_id=2),
@@ -244,8 +262,10 @@ def test_roundtrip_through_cached_latent_dataset(tiny_cache) -> None:
         assert oracle.rollpitch_resid >= 0.0
 
 
-def test_resumable_skip_existing(tmp_path) -> None:
+def test_resumable_skip_existing(tmp_path, monkeypatch) -> None:
     """If the .npz already exists, build_cache skips re-rendering."""
+    if not _HAS_CV2:
+        monkeypatch.setattr("vllatent.cache.resize_square", _numpy_resize_square)
     episodes = [_make_episode("ep0", n_poses=3, scene_id=1)]
     cache_dir = tmp_path / "cache"
     build_cache(
