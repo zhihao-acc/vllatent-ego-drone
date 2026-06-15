@@ -236,8 +236,8 @@ def build_cache(
         latent_path = f"{ep_id}.npz"
 
         if (out / latent_path).exists():
-            npz = dict(np.load(out / latent_path))
-            n_frames = npz["latents"].shape[0]
+            with np.load(out / latent_path) as npz_data:
+                n_frames = npz_data["latents"].shape[0]
         else:
             arrays = build_episode_cache(
                 ep_raw,

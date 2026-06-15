@@ -34,17 +34,26 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
 | A5.16 — loader over real teacher/oracle dump | done | 2026-06-15 | USER-GATED: inspect over real 5-episode cache GREEN — 987 transitions (H=3), block-causal masks correct, all (StepSample,OracleTarget) tuples well-formed |
 | A5.17 — size full render→teacher→cache job | done | 2026-06-15 | sizing doc + guard script (AUTO); build verified (6 episodes total: 5 from A5.14 + 1 incremental). Full 50-ep run deferred to Phase B start |
-| A5.18 — Phase-A DoD verification | in_progress | 2026-06-15 | all 3 DoD items assembled; code review pending before sign-off |
+| A5.18 — Phase-A DoD verification | done | 2026-06-15 | all 3 DoD items verified; code review WARNING→4 HIGHs fixed (wrap_pi docstring, data_audit.yaml stale ref_path+camera+vehicle, np.load fd leak); 0 CRITICAL; **PHASE A COMPLETE** |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 ---
 
-## 2026-06-15 — A5.18: Phase-A DoD assembled, code review launched
-**Status:** A5.18 pending → **in_progress**. A5.17 flipped to done (6 episodes verified, sizing doc +
-guard script landed). All 3 DoD items assembled: (1) io-contract.md + typed student/teacher seams,
-(2) AuditSummary clean on real slice, (3) valid distillation tuples from real cache. Code review
-launched before final sign-off.
+## 2026-06-15 — A5.18 DONE: Phase-A complete (code review settled)
+**Status:** A5.18 in_progress → **done**. **PHASE A COMPLETE.**
+**Code review verdict:** WARNING (0 CRITICAL, 4 HIGH, 4 MEDIUM, 3 LOW). All 4 HIGHs fixed:
+- HIGH-1: `wrap_pi` docstring `(-pi, pi]` → `[-pi, pi)` (matched implementation).
+- HIGH-2: `data_audit.yaml` `reference_path` stale 7-wide quaternion → corrected to 6-wide Euler.
+- HIGH-3: `data_audit.yaml` `camera_name`/`vehicle_name` stale (`front_0`/`Drone_1`) → `front_center`/`drone_1`.
+- HIGH-4: `cache.py` resume branch `np.load` fd leak → context manager (`with np.load(...) as npz_data`).
+**MEDIUMs accepted (no fix needed for Phase A):** M1 zero-padding beyond segment 0 (documented, Phase B);
+M2 per-call npz reload (Phase B restructure); M3 uint dtype edge case (not reachable); M4 empty env-var
+path (defaults in production YAML).
+**Phase-A DoD met:** (1) typed Config SoT + student+teacher seams + io-contract.md; (2) AuditSummary
+clean on real slice (50/50, 10,198 transitions); (3) valid `(StepSample, OracleTarget)` tuples from 6
+real cached episodes. 251 pure / 5 torch / lint / mypy / blob — all green. Hand-off → **Phase B
+(distillation training).**
 
 ---
 

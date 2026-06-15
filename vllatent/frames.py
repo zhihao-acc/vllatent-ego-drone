@@ -51,7 +51,7 @@ def xyzw_from_yaw(yaw: float) -> np.ndarray:
 
 
 def wrap_pi(angle: float) -> float:
-    """Wrap a radian angle to (-pi, pi]."""
+    """Wrap a radian angle to [-pi, pi)."""
     return (angle + math.pi) % (2.0 * math.pi) - math.pi
 
 
