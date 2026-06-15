@@ -33,10 +33,25 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | done | 2026-06-15 | SIM+TORCH; orchestration + mocked test + **small-slice build VERIFIED (user-ran, 5 eps, K=5 WorldVLN rollouts, manifest OK)**. `[torch]` extra PINNED. 251 pure / 5 torch / lint / typecheck / blob green |
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
 | A5.16 — loader over real teacher/oracle dump | done | 2026-06-15 | USER-GATED: inspect over real 5-episode cache GREEN — 987 transitions (H=3), block-causal masks correct, all (StepSample,OracleTarget) tuples well-formed |
-| A5.17 — size full render→teacher→cache job | in_progress | 2026-06-15 | sizing AUTO done (`docs/full-run-sizing.md` + `scripts/run_full_cache.sh` guard); bulk build USER-GATED |
-| A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
+| A5.17 — size full render→teacher→cache job | done | 2026-06-15 | sizing doc + guard script (AUTO); build verified (6 episodes total: 5 from A5.14 + 1 incremental). Full 50-ep run deferred to Phase B start |
+| A5.18 — Phase-A DoD verification | in_progress | 2026-06-15 | all 3 DoD items assembled; code review pending before sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-15 — A5.18: Phase-A DoD assembled, code review launched
+**Status:** A5.18 pending → **in_progress**. A5.17 flipped to done (6 episodes verified, sizing doc +
+guard script landed). All 3 DoD items assembled: (1) io-contract.md + typed student/teacher seams,
+(2) AuditSummary clean on real slice, (3) valid distillation tuples from real cache. Code review
+launched before final sign-off.
+
+---
+
+## 2026-06-15 — A5.17 DONE: sizing doc + guard script + build verified
+**Status:** A5.17 in_progress → **done**. Sizing doc (`docs/full-run-sizing.md`) + guard script
+(`scripts/run_full_cache.sh`) landed (AUTO). User verified incremental build (limit-1, 6th episode
+added to existing 5-episode cache). Full 50-episode bulk run deferred to Phase B start.
 
 ---
 
