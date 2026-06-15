@@ -30,13 +30,59 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.12 — V-JEPA-2 surprise verifier wrapper | done | 2026-06-14 | TORCH; `vllatent/verify/vjepa2.py` — frozen V-JEPA-2 ViT-L; surprise `s_j=1−cos(ẑ_j,z_j)` per GT future frame → feeds `OracleTarget.vjepa_surprise`; lazy torch/transformers. **Weights NON-GATED** (`facebook/vjepa2-vitl-fpc64-256`, gated:false, MIT, ~1.30 GB — no DINOv3-style re-host); id single-sourced from `Config.trust.vjepa2_model_id` (+ `build_manifest` records it). 16 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** 587 tensors loaded, `surprise [0.174, 0.208]` (mean 0.191), finite ∈[0,2], `[vjepa-smoke] OK` |
 | A5.13 — render harness | done | 2026-06-14 | SIM; teleport+capture, 3 foot-guns (xyzw quat / BGRA→RGB / Lock); 9 unit tests; `scripts/render_aerialvln.sh` real wrapper. **Live render GREEN (user-pasted, fly0-m1):** Connected, 8 RGB frames `(480,640,3)` from `tiny-0001`. **User's 3 smoke fixes (`7e31bf3`):** camera `front_0`→`front_center`, vehicle `Drone_1`→`drone_1`, arm+takeoff+200ms settle (fly0 pattern); script `PYTHONNOUSERSITE=1 -s` (avoid user-site Colosseum airsim shadow); `--vehicle` flag. ⚠ **frames are sim-native `(480,640)` NOT `224²` — A5.14 must square-crop+resize at the render→encode boundary (or set settings.json CaptureSettings=224²) to avoid DINOv3 aspect distortion** |
 | A5.13b — frozen CLIP text tower → lang_tokens | done | 2026-06-14 | TORCH; `vllatent/encode/text.py` — frozen CLIP ViT-B/32, instruction→`(M,768)` fp16; native 512→768 zero-pad lift; lazy; id in `Config.encoder.text_model_id` + manifest provenance. **Weights NON-GATED** (`openai/clip-vit-base-patch32`, gated:false, 15M dls). 10 pure contract tests. **Real-weight smoke GREEN (user-pasted, cuda):** `lang_tokens (10,768) float16`, `[text-smoke] OK` (the `UNEXPECTED vision_model.*` keys are benign — CLIPTextModel ignoring the vision tower). Added 2026-06-14 to unblock A5.14's lang_tokens (no text-tower step existed) |
-| A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | pending | | SIM+TORCH; manifest AUTO / small-slice USER-GATED. Now unblocked once A5.13(live)+A5.13b(smoke) land |
+| A5.14 — render→[DINOv3+WorldVLN+V-JEPA-2]→cache + provenance manifest | in_progress | 2026-06-15 | SIM+TORCH; orchestration code + mocked test DONE (AUTO); small-slice USER-GATED (command block below). `[torch]` extra PINNED. 251 pure / 5 torch / lint / typecheck / blob green |
 | A5.15 — distillation loader (StepSample+OracleTarget, masks, H/T from Config) | done | 2026-06-09 | numpy map-Dataset emits (StepSample,OracleTarget) over the render-once cache; block-causal H-window (H pinned to schemas HISTORY, fail-fast on divergent override), terminal-STOP excluded (len=Σ(N−1)); DEFINES the .npz cache read-contract A5.14 writes + `inspect` CLI (A5.16); torch-free emission (torch only at DataLoader collation); pure 182→190 + torch DataLoader test (4→5) |
 | A5.16 — loader over real teacher/oracle dump | pending | | USER-GATED |
 | A5.17 — size full render→teacher→cache job | pending | | sizing AUTO / bulk USER-GATED |
 | A5.18 — Phase-A DoD verification | pending | | USER-GATED final sign-off |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-15 — A5.14: cache orchestration code + mocked test DONE; small-slice USER-GATED (STOP CHECK)
+**Status:** A5.14 pending → **in_progress** (orchestration code + mocked `tests/test_cache_manifest.py`
+AUTONOMOUS; the small-slice real build is USER-GATED — command block below).
+**What's done.** `vllatent/cache.py` — full render→[DINOv3+CLIP-text+WorldVLN+V-JEPA-2]→cache
+orchestration:
+- **`center_crop_and_resize`** — center-crop to square + resize to 224² via cv2 `INTER_AREA` (lazy cv2);
+  normalizes the sim-native `(480,640)` so DINOv3 and V-JEPA-2 see identical pixels (the render-resolution
+  foot-gun from A5.13).
+- **`build_episode_cache`** — per episode: render all `reference_path` poses → square-crop+resize →
+  DINOv3 `encode_rgb` → CLIP `encode` (once) → WorldVLN `k_rollout_segment` → V-JEPA-2
+  `scalar_surprise` per transition → assemble the .npz arrays EXACTLY per the A5.15 read-contract.
+- **`build_cache`** — multi-episode: writes per-episode `.npz` + `manifest.json` with teacher/render
+  provenance fully populated (`worldvln_model_id`, `worldvln_revision`, `render_config_hash`). Resumable:
+  skips episodes whose `.npz` already exists.
+- **`_teacher_6to4`** — the 6→4 projection: drop roll/pitch, keep x/y/z (m), convert yaw rad→deg; returns
+  `(waypoint_4dof, rollpitch_resid)`.
+- **`_disagreement_scalar`** — scalarize the `(6,)` rollout spread over the 4 student-relevant channels
+  (yaw,x,y,z) via mean.
+- CLI `python -m vllatent.cache build --slice ... --out ...` (USER-GATED; full lazy import of all 5 seams).
+All heavy imports lazy (`from __future__ import annotations` + `TYPE_CHECKING` for type hints; seam classes
+imported inside functions). Pure import-smoke verified.
+**`[torch]` extra PINNED** (A5.10 drift resolved): `torch>=2.8,<2.13`, `transformers>=4.56,<6`,
+`timm>=1.0.20,<2` in `pyproject.toml`.
+**Tested.** `tests/test_cache_manifest.py` (12 tests, PURE — all 5 seams mocked via `MagicMock`):
+center-crop-and-resize (480×640 / already-square / tall / bad-input); 2-episode cache build; manifest
+valid + teacher provenance populated + correct entry count; per-episode `.npz` keys/shapes/dtypes match
+the A5.15 read-contract EXACTLY (latents/actions/deltas/lang_tokens/waypoint_4dof/teacher_pose6/
+rollpitch_resid/disagreement/vjepa_surprise); **round-trip through `CachedLatentDataset`** (all 5
+transitions access and construct valid `(StepSample, OracleTarget)` pairs); resumable skip-existing;
+oracle target non-negativity. `make test` 239→**251** (+12); `make test-torch` 5; ruff/mypy(pure)/
+import-smoke/blob clean.
+**Open / next — STOP CHECK (small-slice USER-GATED).** The mocked half is done; the real small-slice
+build command block:
+```bash
+# In fly0-m1 docker (UE4 scene hot on :41451) + ssh tunnel to H20 WorldVLN :8001
+HF_ENDPOINT=https://hf-mirror.com \
+python -m vllatent.cache build \
+  --slice data/aerialvln_json/train.slice.json --limit 5 \
+  --scenes-root /opt/aerialvln --out data/latent_cache/ \
+  --teacher-server http://127.0.0.1:8001 --device cuda
+```
+Needs: fly0-m1 docker + UE4 scene running + GPU for DINOv3/CLIP/V-JEPA-2 + H20 WorldVLN server (reuse
+from A5.11). After the user pastes back, A5.14 flips to `done`. Then A5.16–A5.18 (all USER-GATED).
 
 ---
 
