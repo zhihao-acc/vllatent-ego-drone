@@ -90,13 +90,14 @@ def build_manifest(
             "frame": cache.frame,
         },
         "teacher": {
-            # Distillation/oracle provenance. STUBS — populated by the cache build (A5.14);
-            # disagreement_source is the only field known from Config today (finalized A5.9).
-            "worldvln_model_id": "",
-            "worldvln_revision": "",
-            "disagreement_source": config.trust.disagreement_source,
-            "vjepa2_model_id": "",
-            "render_config_hash": "",
+            # Distillation/oracle provenance. The Config-known fields are recorded NOW for a complete
+            # audit trail (which models a cache was built against); the genuinely build-time fields
+            # (worldvln revision pinned at load, render hash) STAY stubbed until the cache build (A5.14).
+            "worldvln_model_id": "",        # build-time (pinned when the teacher server loads)
+            "worldvln_revision": "",        # build-time
+            "disagreement_source": config.trust.disagreement_source,  # Config (finalized A5.9)
+            "vjepa2_model_id": config.trust.vjepa2_model_id,           # Config (fixed id, A5.12)
+            "render_config_hash": "",       # build-time (render settings hash)
         },
         "entries": list(entries) if entries is not None else [],
     }

@@ -32,6 +32,8 @@ def test_defaults_construct_and_match_schemas_constants() -> None:
     assert cfg.trust.disagreement_source == "worldvln_rollout"
     assert cfg.trust.k_rollouts == 5
     assert 0.0 <= cfg.trust.vjepa_surprise_threshold <= 1.0
+    # V-JEPA-2 verifier checkpoint (A5.12) — Meta's NON-GATED ViT-L (gated:false, MIT; unlike DINOv3).
+    assert cfg.trust.vjepa2_model_id == "facebook/vjepa2-vitl-fpc64-256"
 
 
 def test_from_yaml_default_builds() -> None:
@@ -89,6 +91,7 @@ def test_from_yaml_rejects_unknown_key(tmp_path) -> None:
         lambda: TrustConfig(disagreement_source="nope"),
         lambda: TrustConfig(k_rollouts=0),
         lambda: TrustConfig(vjepa_surprise_threshold=1.5),
+        lambda: TrustConfig(vjepa2_model_id=""),  # must be a non-empty model id
         lambda: EncoderConfig(dtype="float64"),
         lambda: EncoderConfig(input_hw=0),
     ],

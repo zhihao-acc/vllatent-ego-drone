@@ -341,10 +341,11 @@ def test_build_manifest_teacher_provenance_is_stubbed() -> None:
         "vjepa2_model_id",
         "render_config_hash",
     }
-    # Stubs now (populated by the cache build in A5.14), except disagreement_source from Config.
-    assert t["worldvln_model_id"] == "" and t["worldvln_revision"] == ""
-    assert t["vjepa2_model_id"] == "" and t["render_config_hash"] == ""
+    # Build-time fields stay stubbed until the cache build (A5.14); the Config-known fields
+    # (disagreement_source A5.9, vjepa2_model_id A5.12) are recorded now for a complete audit trail.
+    assert t["worldvln_model_id"] == "" and t["worldvln_revision"] == "" and t["render_config_hash"] == ""
     assert t["disagreement_source"] in DISAGREEMENT_SOURCES
+    assert t["vjepa2_model_id"] == Config().trust.vjepa2_model_id == "facebook/vjepa2-vitl-fpc64-256"
 
 
 def test_build_manifest_reflects_config_sweep_no_code_surgery() -> None:

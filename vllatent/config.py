@@ -113,11 +113,18 @@ class TrustConfig:
     spread over K stochastic rollouts (vary the seed; free). ``disagreement_source`` defaults to
     ``"worldvln_rollout"``; ``airscape_multiseed`` is kept as a contingency value. ``k_rollouts`` is
     the K used for that estimate; ``vjepa_surprise_threshold`` is the independent V-JEPA-2 gate δ.
+
+    ``vjepa2_model_id`` is the frozen V-JEPA-2 verifier checkpoint (A5.12) — Meta's official HF
+    repo, verified NON-GATED (``gated: False``, MIT, served by hf-mirror; probed 2026-06-11 — unlike
+    DINOv3 no re-host fallback is needed). The verifier wrapper and the manifest provenance both
+    read it from here (single source, same pattern as ``EncoderConfig.model_id``) — ``build_manifest``
+    records it immediately for a complete audit trail.
     """
 
     disagreement_source: str = "worldvln_rollout"
     k_rollouts: int = 5
     vjepa_surprise_threshold: float = 0.5
+    vjepa2_model_id: str = "facebook/vjepa2-vitl-fpc64-256"
 
     def __post_init__(self) -> None:
         if self.disagreement_source not in DISAGREEMENT_SOURCES:
@@ -130,6 +137,10 @@ class TrustConfig:
         if not 0.0 <= self.vjepa_surprise_threshold <= 1.0:
             raise ValueError(
                 f"trust.vjepa_surprise_threshold must be in [0, 1], got {self.vjepa_surprise_threshold}"
+            )
+        if not isinstance(self.vjepa2_model_id, str) or not self.vjepa2_model_id:
+            raise ValueError(
+                f"trust.vjepa2_model_id must be a non-empty str, got {self.vjepa2_model_id!r}"
             )
 
 
