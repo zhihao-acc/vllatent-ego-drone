@@ -86,13 +86,15 @@ def process_clip(
     skip_download: bool = False,
     skip_megasam: bool = False,
     device: str = "cuda",
+    camera_K: np.ndarray | None = None,
+    camera_D: np.ndarray | None = None,
 ) -> ClipPipelineResult:
     """Process a single clip end-to-end."""
     from vllatent.encode.batch import encode_frames
     from vllatent.ingest.acquire import download_clip, validate_clip
     from vllatent.ingest.ego_motion import normalize_scale, se3_sequence_to_deltas
     from vllatent.ingest.megasam import parse_megasam_output, run_megasam
-    from vllatent.ingest.preprocess import extract_frames
+    from vllatent.ingest.preprocess import batch_undistort, extract_frames
     from vllatent.ingest.quality import composite_quality, filter_frames
 
     errors: list[str] = []
@@ -145,6 +147,20 @@ def process_clip(
             clip_id=clip_id, n_frames=n_frames_on_disk, n_accepted=0,
             latent_path="", stages_skipped=skipped, errors=errors,
         )
+
+    # --- Stage 2b: Fisheye undistortion (optional) ---
+    if cfg.undistort_model != "pinhole" and camera_K is not None and camera_D is not None:
+        undistort_dir = Path(cfg.frames_dir) / f"{clip_id}_undistorted"
+        if undistort_dir.exists() and list(undistort_dir.glob("*.jpg")):
+            skipped.append("undistort")
+            _log(f"undistorted frames already exist for {clip_id}")
+        else:
+            _log(f"undistorting frames ({cfg.undistort_model})")
+            batch_undistort(frames_dir, undistort_dir, camera_K, camera_D)
+        frames_dir = undistort_dir
+    elif cfg.undistort_model != "pinhole":
+        skipped.append("undistort")
+        _log("undistort_model != pinhole but no K/D provided, skipping undistortion")
 
     # --- Stage 3: Quality scoring ---
     _log("scoring frame quality")

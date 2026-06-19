@@ -12,6 +12,8 @@ normalization. GPS/IMU alignment is stubbed for future implementation.
 """
 from __future__ import annotations
 
+from dataclasses import dataclass
+
 import numpy as np
 
 from vllatent.frames import wrap_pi
@@ -107,6 +109,40 @@ def normalize_scale(
     return result
 
 
+@dataclass(frozen=True)
+class AlignmentResult:
+    """Result of aligning VO poses to a GPS track via Sim(3)."""
+
+    aligned_poses: np.ndarray  # (N, 4, 4) f64 — Sim(3)-aligned SE(3) poses
+    scale: float               # recovered metric scale
+    rotation: np.ndarray       # (3, 3) f64 — Sim(3) rotation component
+    translation: np.ndarray    # (3,) f64 — Sim(3) translation component
+    rmse: float                # alignment RMSE in meters
+
+
+def align_to_gps(
+    poses: np.ndarray,
+    gps_track: np.ndarray,
+) -> AlignmentResult:
+    """Align monocular VO poses to a GPS track via Umeyama Sim(3) alignment.
+
+    Uses the Umeyama (1991) closed-form solution to find the optimal
+    similarity transform (scale + rotation + translation) that aligns
+    the VO trajectory to GPS world coordinates.
+
+    Args:
+        poses: (N, 4, 4) f64 SE(3) camera-to-world from MegaSaM.
+        gps_track: (N, 3) f64 GPS positions in a local ENU frame (meters).
+
+    Returns:
+        AlignmentResult with Sim(3)-transformed poses and recovered scale.
+    """
+    raise NotImplementedError(
+        "GPS Sim(3) alignment deferred to custom GoPro+IMU data phase (B-3). "
+        "Use normalize_scale(mode='median_speed') for YouTube + CosFly data."
+    )
+
+
 def validate_scale_consistency(deltas: np.ndarray) -> dict[str, float]:
     """Compute statistics on displacement magnitudes for quality assessment."""
     if deltas.ndim != 2 or deltas.shape[1] != 4:
@@ -131,7 +167,9 @@ def validate_scale_consistency(deltas: np.ndarray) -> dict[str, float]:
 
 
 __all__ = [
+    "AlignmentResult",
     "R_BODY_FROM_CAM",
+    "align_to_gps",
     "rotation_to_yaw",
     "camera_to_drone_body",
     "se3_to_body_delta",

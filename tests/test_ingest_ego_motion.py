@@ -5,7 +5,9 @@ import numpy as np
 import pytest
 
 from vllatent.ingest.ego_motion import (
+    AlignmentResult,
     R_BODY_FROM_CAM,
+    align_to_gps,
     camera_to_drone_body,
     normalize_scale,
     rotation_to_yaw,
@@ -125,6 +127,25 @@ class TestNormalizeScale:
     def test_bad_shape(self) -> None:
         with pytest.raises(ValueError, match="expected"):
             normalize_scale(np.zeros((2, 3), dtype=np.float32))
+
+
+class TestAlignToGps:
+    def test_raises_not_implemented(self) -> None:
+        poses = np.stack([np.eye(4)] * 3)
+        gps = np.zeros((3, 3))
+        with pytest.raises(NotImplementedError, match="GPS Sim"):
+            align_to_gps(poses, gps)
+
+    def test_alignment_result_fields(self) -> None:
+        r = AlignmentResult(
+            aligned_poses=np.stack([np.eye(4)] * 2),
+            scale=1.5,
+            rotation=np.eye(3),
+            translation=np.zeros(3),
+            rmse=0.1,
+        )
+        assert r.scale == 1.5
+        assert r.rmse == 0.1
 
 
 class TestValidateScaleConsistency:

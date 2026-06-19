@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from vllatent.ingest.megasam import (
+    CONFIDENCE_SOURCES,
     MegaSamResult,
     parse_megasam_output,
     validate_megasam_result,
@@ -30,6 +31,29 @@ class TestMegaSamResult:
             intrinsics=np.eye(3, dtype=np.float64),
         )
         assert r.poses.shape == (3, 4, 4)
+        assert r.confidence_source == "real"
+
+    def test_valid_with_default_confidence(self) -> None:
+        r = MegaSamResult(
+            poses=_valid_poses(3),
+            confidences=np.ones(3, dtype=np.float64),
+            intrinsics=np.eye(3, dtype=np.float64),
+            confidence_source="default",
+        )
+        assert r.confidence_source == "default"
+
+    def test_rejects_bad_confidence_source(self) -> None:
+        with pytest.raises(ValueError, match="confidence_source"):
+            MegaSamResult(
+                poses=_valid_poses(3),
+                confidences=np.ones(3, dtype=np.float64),
+                intrinsics=np.eye(3, dtype=np.float64),
+                confidence_source="bogus",
+            )
+
+    def test_confidence_sources_enum(self) -> None:
+        assert "real" in CONFIDENCE_SOURCES
+        assert "default" in CONFIDENCE_SOURCES
 
     def test_rejects_bad_poses(self) -> None:
         with pytest.raises(ValueError, match="expected"):
@@ -86,6 +110,33 @@ class TestParseMegasamOutput:
         np.save(str(tmp_path / "poses.npy"), _valid_poses(3))
         result = parse_megasam_output(tmp_path)
         assert np.allclose(result.confidences, 1.0)
+        assert result.confidence_source == "default"
+
+    def test_npy_with_confidences_is_real(self, tmp_path: Path) -> None:
+        np.save(str(tmp_path / "poses.npy"), _valid_poses(3))
+        np.save(str(tmp_path / "confidences.npy"), np.array([0.9, 0.8, 0.7]))
+        result = parse_megasam_output(tmp_path)
+        assert result.confidence_source == "real"
+        assert not np.allclose(result.confidences, 1.0)
+
+    def test_npz_without_confidences_is_default(self, tmp_path: Path) -> None:
+        np.savez(str(tmp_path / "cameras.npz"), poses=_valid_poses(3))
+        result = parse_megasam_output(tmp_path)
+        assert result.confidence_source == "default"
+
+    def test_json_without_confidences_is_default(self, tmp_path: Path) -> None:
+        import json as json_mod
+        data = {"poses": _valid_poses(2).tolist()}
+        (tmp_path / "results.json").write_text(json_mod.dumps(data))
+        result = parse_megasam_output(tmp_path)
+        assert result.confidence_source == "default"
+
+    def test_json_with_confidences_is_real(self, tmp_path: Path) -> None:
+        import json as json_mod
+        data = {"poses": _valid_poses(2).tolist(), "confidences": [0.95, 0.85]}
+        (tmp_path / "results.json").write_text(json_mod.dumps(data))
+        result = parse_megasam_output(tmp_path)
+        assert result.confidence_source == "real"
 
 
 class TestValidateMegasamResult:

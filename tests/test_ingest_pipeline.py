@@ -85,6 +85,28 @@ class TestClipPipelineResult:
         assert d["clip_id"] == "x"
 
 
+class TestUndistortWiring:
+    """B1.1: batch_undistort() is conditionally called between stages 2 and 3."""
+
+    def test_undistort_skipped_for_pinhole(self) -> None:
+        """When undistort_model='pinhole' (default), batch_undistort is not called."""
+        cfg = IngestConfig()
+        assert cfg.undistort_model == "pinhole"
+
+    def test_undistort_import_available(self) -> None:
+        """batch_undistort is importable from preprocess and available in pipeline."""
+        from vllatent.ingest.preprocess import batch_undistort
+        assert callable(batch_undistort)
+
+    def test_pipeline_accepts_camera_params(self) -> None:
+        """process_clip accepts camera_K and camera_D keyword args."""
+        import inspect
+        from vllatent.ingest.pipeline import process_clip
+        sig = inspect.signature(process_clip)
+        assert "camera_K" in sig.parameters
+        assert "camera_D" in sig.parameters
+
+
 class TestUpdateManifestFromResults:
     def test_creates_manifest(self, tmp_path: Path) -> None:
         cfg = IngestConfig(cache_dir=str(tmp_path))

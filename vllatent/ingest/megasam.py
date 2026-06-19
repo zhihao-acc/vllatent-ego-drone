@@ -18,6 +18,9 @@ from typing import Any
 import numpy as np
 
 
+CONFIDENCE_SOURCES = ("real", "default")
+
+
 @dataclass(frozen=True, eq=False)
 class MegaSamResult:
     """Parsed MegaSaM output: camera trajectory + per-frame confidence."""
@@ -25,6 +28,7 @@ class MegaSamResult:
     poses: np.ndarray          # (N, 4, 4) f64 — SE(3) camera-to-world
     confidences: np.ndarray    # (N,) f64 — per-frame VO confidence in [0, 1]
     intrinsics: np.ndarray     # (3, 3) f64 — estimated camera intrinsics
+    confidence_source: str = "real"  # "real" = from MegaSaM output, "default" = np.ones fallback
 
     def __post_init__(self) -> None:
         if self.poses.ndim != 3 or self.poses.shape[1:] != (4, 4):
@@ -37,6 +41,11 @@ class MegaSamResult:
         if self.intrinsics.shape != (3, 3):
             raise ValueError(
                 f"intrinsics: expected (3, 3), got {self.intrinsics.shape}"
+            )
+        if self.confidence_source not in CONFIDENCE_SOURCES:
+            raise ValueError(
+                f"confidence_source must be one of {CONFIDENCE_SOURCES}, "
+                f"got {self.confidence_source!r}"
             )
 
 
@@ -94,36 +103,63 @@ def _find_megasam() -> Path:
 
 def parse_megasam_output(out_dir: str | Path) -> MegaSamResult:
     """Parse MegaSaM output directory into a structured result."""
+    import logging
+    log = logging.getLogger(__name__)
     odir = Path(out_dir)
 
     poses_path = odir / "poses.npy"
     if poses_path.exists():
         poses = np.load(str(poses_path))
         conf_path = odir / "confidences.npy"
-        confidences = np.load(str(conf_path)) if conf_path.exists() else np.ones(poses.shape[0])
+        if conf_path.exists():
+            confidences = np.load(str(conf_path))
+            conf_source = "real"
+        else:
+            log.warning("MegaSaM confidences.npy missing in %s — using np.ones fallback", odir)
+            confidences = np.ones(poses.shape[0])
+            conf_source = "default"
         intr_path = odir / "intrinsics.npy"
         intrinsics = np.load(str(intr_path)) if intr_path.exists() else _default_intrinsics()
         return MegaSamResult(
             poses=poses.astype(np.float64),
             confidences=confidences.astype(np.float64),
             intrinsics=intrinsics.astype(np.float64),
+            confidence_source=conf_source,
         )
 
     npz_path = odir / "cameras.npz"
     if npz_path.exists():
         with np.load(str(npz_path)) as data:
             poses = data["poses"].astype(np.float64)
-            confidences = data.get("confidences", np.ones(poses.shape[0])).astype(np.float64)
+            if "confidences" in data:
+                confidences = data["confidences"].astype(np.float64)
+                conf_source = "real"
+            else:
+                log.warning("MegaSaM cameras.npz missing 'confidences' key in %s — using np.ones fallback", odir)
+                confidences = np.ones(poses.shape[0], dtype=np.float64)
+                conf_source = "default"
             intrinsics = data.get("intrinsics", _default_intrinsics()).astype(np.float64)
-        return MegaSamResult(poses=poses, confidences=confidences, intrinsics=intrinsics)
+        return MegaSamResult(
+            poses=poses, confidences=confidences, intrinsics=intrinsics,
+            confidence_source=conf_source,
+        )
 
     json_path = odir / "results.json"
     if json_path.exists():
         raw = json.loads(json_path.read_text())
         poses = np.array(raw["poses"], dtype=np.float64)
-        confidences = np.array(raw.get("confidences", [1.0] * len(poses)), dtype=np.float64)
+        if "confidences" in raw:
+            confidences = np.array(raw["confidences"], dtype=np.float64)
+            conf_source = "real"
+        else:
+            log.warning("MegaSaM results.json missing 'confidences' key in %s — using np.ones fallback", odir)
+            confidences = np.ones(len(poses), dtype=np.float64)
+            conf_source = "default"
         intrinsics = np.array(raw.get("intrinsics", _default_intrinsics().tolist()), dtype=np.float64)
-        return MegaSamResult(poses=poses, confidences=confidences, intrinsics=intrinsics)
+        return MegaSamResult(
+            poses=poses, confidences=confidences, intrinsics=intrinsics,
+            confidence_source=conf_source,
+        )
 
     raise FileNotFoundError(
         f"No recognized MegaSaM output in {odir}. "
@@ -174,6 +210,7 @@ def validate_megasam_result(result: MegaSamResult) -> list[str]:
 
 
 __all__ = [
+    "CONFIDENCE_SOURCES",
     "MegaSamResult",
     "run_megasam",
     "parse_megasam_output",
