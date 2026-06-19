@@ -31,8 +31,8 @@ def test_defaults_construct_and_match_schemas_constants() -> None:
     assert cfg.encoder.model_id == "vit_base_patch16_dinov3.lvd1689m"
     # Frozen CLIP ViT-B/32 text tower for lang_tokens (A5.13b) — NON-GATED.
     assert cfg.encoder.text_model_id == "openai/clip-vit-base-patch32"
-    # Trust knobs FINALIZED in A5.9 (A5.8 proved WorldVLN is stochastic-by-default).
-    assert cfg.trust.disagreement_source == "worldvln_rollout"
+    # Trust: sports-following pivot default (WorldVLN retired 2026-06-19).
+    assert cfg.trust.disagreement_source == "vjepa_only"
     assert cfg.trust.k_rollouts == 5
     assert 0.0 <= cfg.trust.vjepa_surprise_threshold <= 1.0
     # V-JEPA-2 verifier checkpoint (A5.12) — Meta's NON-GATED ViT-L (gated:false, MIT; unlike DINOv3).

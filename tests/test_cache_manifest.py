@@ -196,7 +196,7 @@ def test_manifest_teacher_provenance_populated(tiny_cache) -> None:
     assert teacher["worldvln_model_id"] != ""
     assert teacher["worldvln_revision"] != ""
     assert teacher["render_config_hash"] != ""
-    assert teacher["disagreement_source"] == "worldvln_rollout"
+    assert teacher["disagreement_source"] == "vjepa_only"
     assert teacher["vjepa2_model_id"] != ""
 
 

@@ -102,6 +102,36 @@ def load_frames(frame_dir: str | Path) -> np.ndarray:
     return np.stack(frames)
 
 
+def cut_fixed_clips(
+    frame_paths: list[Path],
+    clip_length_frames: int,
+    min_usable_frames: int = 7,
+) -> list[list[Path]]:
+    """Split frame paths into non-overlapping segments of fixed length.
+
+    Trailing segments shorter than ``min_usable_frames`` (default = H+T = 7) are discarded.
+
+    Args:
+        frame_paths: Sorted list of frame file paths.
+        clip_length_frames: Number of frames per segment (= clip_length_seconds * fps).
+        min_usable_frames: Minimum frames for a segment to be kept.
+
+    Returns:
+        List of frame-path lists, one per usable segment.
+    """
+    if clip_length_frames < min_usable_frames:
+        raise ValueError(
+            f"clip_length_frames ({clip_length_frames}) must be >= "
+            f"min_usable_frames ({min_usable_frames})"
+        )
+    segments: list[list[Path]] = []
+    for start in range(0, len(frame_paths), clip_length_frames):
+        seg = frame_paths[start:start + clip_length_frames]
+        if len(seg) >= min_usable_frames:
+            segments.append(seg)
+    return segments
+
+
 def undistort_fisheye(
     frame: np.ndarray,
     K: np.ndarray,
@@ -147,6 +177,7 @@ def batch_undistort(
 
 __all__ = [
     "FrameExtraction",
+    "cut_fixed_clips",
     "extract_frames",
     "load_frame",
     "load_frames",

@@ -1,11 +1,18 @@
 # Sports-following pipeline config override (Phase B1).
-# Activates the sports section in Config; AerialVLN sections keep defaults.
-sports:
+# Activates ingest for sports FPV data. Override trust for sports pivot.
+ingest:
   name: sports_following
   sport: skiing
   target_fps: 5.0
+  clip_length_seconds: 10.0
   min_clip_seconds: 10.0
   max_clip_seconds: 120.0
   resolution_h: 720
   resolution_w: 1280
   quality_threshold: 0.3
+
+trust:
+  disagreement_source: vjepa_only
+
+distill:
+  lambda_trust: 0.0

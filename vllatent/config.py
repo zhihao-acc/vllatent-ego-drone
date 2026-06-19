@@ -33,7 +33,7 @@ _DEFAULT_CONFIG = _REPO_ROOT / "configs" / "default.yaml"
 _ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.*?))?\}")
 
 # Allowed enum values (validated at the boundary).
-DISAGREEMENT_SOURCES = ("worldvln_rollout", "airscape_multiseed", "mc_dropout", "vjepa_only")
+DISAGREEMENT_SOURCES = ("worldvln_rollout", "airscape_multiseed", "mc_dropout", "megasam_vo", "vjepa_only")
 ENCODER_DTYPES = ("float16", "float32")
 
 
@@ -82,13 +82,13 @@ class EncoderConfig:
 
 @dataclass(frozen=True)
 class PredictorConfig:
-    """SWEPT student-transformer structure. ``EMBED_DIM`` (768) is fixed (matches the encoder)."""
+    """SWEPT student-transformer structure. D = ``EMBED_DIM`` from schemas (768 default, 384 if ViT-S/16)."""
 
     history: int = HISTORY      # H — history frames (single literal in schemas)
     horizon: int = HORIZON      # T — prediction horizon (single literal in schemas)
     depth: int = 12             # swept (8-vs-12 in Phase B)
-    heads: int = 12             # swept
-    mlp_ratio: int = 4          # FFN ratio (4 * 768 = 3072)
+    heads: int = 12             # swept (must divide EMBED_DIM; 6 for D=384)
+    mlp_ratio: int = 4          # FFN ratio (4 * D)
 
     def __post_init__(self) -> None:
         for name in ("history", "horizon", "depth", "heads", "mlp_ratio"):
@@ -101,15 +101,16 @@ class PredictorConfig:
 
 @dataclass(frozen=True)
 class DistillConfig:
-    """SWEPT distillation losses (student <- frozen WorldVLN teacher)."""
+    """SWEPT training losses."""
 
     lambda_latent: float = 1.0
     lambda_waypoint: float = 1.0
     lambda_horizon: float = 0.0   # Phase C (horizon-distillation)
+    lambda_trust: float = 0.0     # Phase C (trust head)
     temperature: float = 1.0
 
     def __post_init__(self) -> None:
-        for name in ("lambda_latent", "lambda_waypoint", "lambda_horizon"):
+        for name in ("lambda_latent", "lambda_waypoint", "lambda_horizon", "lambda_trust"):
             if getattr(self, name) < 0:
                 raise ValueError(f"distill.{name} must be >= 0, got {getattr(self, name)}")
         if self.temperature <= 0:
@@ -118,21 +119,19 @@ class DistillConfig:
 
 @dataclass(frozen=True)
 class TrustConfig:
-    """SWEPT trust-oracle knobs — FINALIZED (A5.9, after the A5.8 WorldVLN probe).
+    """SWEPT trust-oracle knobs.
 
-    A5.8 confirmed WorldVLN inference is stochastic by default, so the disagreement signal is the
-    spread over K stochastic rollouts (vary the seed; free). ``disagreement_source`` defaults to
-    ``"worldvln_rollout"``; ``airscape_multiseed`` is kept as a contingency value. ``k_rollouts`` is
-    the K used for that estimate; ``vjepa_surprise_threshold`` is the independent V-JEPA-2 gate δ.
+    ``disagreement_source`` defaults to ``"vjepa_only"`` (sports-following pivot 2026-06-19;
+    WorldVLN retired). ``"megasam_vo"`` is available for MegaSaM-based confidence.
+    ``k_rollouts`` is the K for multi-rollout estimates (Phase C). ``vjepa_surprise_threshold``
+    is the independent V-JEPA-2 gate.
 
     ``vjepa2_model_id`` is the frozen V-JEPA-2 verifier checkpoint (A5.12) — Meta's official HF
-    repo, verified NON-GATED (``gated: False``, MIT, served by hf-mirror; probed 2026-06-11 — unlike
-    DINOv3 no re-host fallback is needed). The verifier wrapper and the manifest provenance both
-    read it from here (single source, same pattern as ``EncoderConfig.model_id``) — ``build_manifest``
-    records it immediately for a complete audit trail.
+    repo, verified NON-GATED (``gated: False``, MIT, served by hf-mirror). The verifier wrapper
+    and the manifest provenance both read it from here (single source).
     """
 
-    disagreement_source: str = "worldvln_rollout"
+    disagreement_source: str = "vjepa_only"
     k_rollouts: int = 5
     vjepa_surprise_threshold: float = 0.5
     vjepa2_model_id: str = "facebook/vjepa2-vitl-fpc64-256"
@@ -194,6 +193,7 @@ class IngestConfig:
     cache_dir: str = "ingest_data/latent_cache"
     clips_yaml: str = "configs/ingest_clips.yaml"
     target_fps: float = 5.0
+    clip_length_seconds: float = 10.0
     min_clip_seconds: float = 10.0
     max_clip_seconds: float = 120.0
     resolution_h: int = 720
@@ -207,6 +207,8 @@ class IngestConfig:
             raise ValueError(f"ingest.name must be a non-empty str, got {self.name!r}")
         if self.target_fps <= 0:
             raise ValueError(f"ingest.target_fps must be > 0, got {self.target_fps}")
+        if self.clip_length_seconds <= 0:
+            raise ValueError(f"ingest.clip_length_seconds must be > 0, got {self.clip_length_seconds}")
         if self.min_clip_seconds <= 0:
             raise ValueError(f"ingest.min_clip_seconds must be > 0, got {self.min_clip_seconds}")
         if self.max_clip_seconds <= self.min_clip_seconds:
