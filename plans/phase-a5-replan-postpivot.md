@@ -1,3 +1,7 @@
+> **SUPERSEDED 2026-06-19** by `plans/phase-b-sports-training.md` (sports-following pivot).
+> Phase A is complete. This document is retained as a historical record of the WorldVLN-centric
+> plan and Phase A step definitions. Do not execute steps from this plan.
+
 # Phase-A re-plan (post-WorldVLN-pivot + code review)
 
 > **Created 2026-06-08 (PM) by the planning agent.** Supersedes steps 7–13 of

@@ -4,38 +4,46 @@ This file is loaded automatically by Claude Code. Read it before doing any work 
 
 ## Project at a glance
 
-A **compact latent world-action model for aerial VLN**; the contribution is **trust-aware
+> **⚠ PIVOT 2026-06-19 — SPORTS-FOLLOWING.** The project has pivoted from indoor AerialVLN VLN to
+> **autonomous sports-following drone** (skiing primary). AerialVLN is retired as primary data source
+> (historical Phase A work). WorldVLN teacher is retired (wrong task domain). Training data = sports FPV
+> video only (YouTube + custom GoPro+IMU). See vault
+> `[[advisory-sports-following-drift-2026-06-18]]` for the authoritative direction.
+
+A **compact latent world-action model for sports-following drone**; the contribution is **trust-aware
 commitment**. One frozen perception backbone, a small latent predictor, and a trust layer that
 decides how far ahead to commit.
 
 ```
-RGB 224² ─► [DINOv3 ViT-B/16, FROZEN, CACHED] ─► z_t (196×768 fp16)
-                                                   │  + discrete action (FiLM) + language (cross-attn)
-                                          [latent predictor ~120M, block-causal, D=768 d12]
-                                                   │  rollout (H=3 history, T=4 horizon)
-                          ┌────────────────────────┼─────────────────────────┐
-                          ▼                         ▼                         ▼
-              4-DoF waypoint head        single-pass horizon head     (Phase C) K=5 ensemble
-              [768→512→256→4]            (trust: how far to commit)    + V-JEPA-2 surprise gate
+RGB 224² ─► [DINOv3 ViT-B/16*, FROZEN, CACHED] ─► z_t (196×D fp16)    *D=768 default; 384 if B1.11 gate
+                                                │  + continuous action (FiLM) + language (cross-attn, B-2)
+                                       [latent predictor, block-causal, D from PredictorConfig]
+                                                │  rollout (H=3 history, T=4 horizon)
+                          ┌─────────────────────┼──────────────────────────┐
+                          ▼                      ▼                          ▼
+              4-DoF waypoint head       single-pass horizon head     (Phase C) TrackVLA teacher
+              [D→256→128→4]             (trust: how far to commit)    + V-JEPA-2 surprise gate
 ```
 
-Action is **discrete-in** (AerialVLN 8-way) / **continuous-4DoF-out** (Δx,Δy,Δz,Δψ). Frozen+cached
-encoder ⇒ **no EMA / no VICReg**. **Phase A is plumbing + data, not research.**
+Action is **continuous-4DoF** from MegaSaM ego-motion extraction (dx,dy,dz,dyaw). Frozen+cached
+encoder => **no EMA / no VICReg**. Training data = sports FPV video (YouTube + CosFly-Track + custom GoPro+IMU).
 
 ## Architecture — LOCKED vs OPEN
 
-**LOCKED — do NOT relitigate. See vault `[[arch-design-2026-06-08-latent-pred]]` (authoritative).**
-Encoder DINOv3 ViT-B/16 frozen+cached (RGB-only, 224², 196×768 fp16; **loaded via timm's NON-GATED
-re-host `vit_base_patch16_dinov3.lvd1689m` — same LVD-1689M weights, no token; Meta's gated
-`facebook/dinov3-vitb16-pretrain-lvd1689m` rejected our access 2026-06-09**) · predictor block-causal ViT
-D=768 depth 12 heads 12 MLP 3072 · discrete-codebook→per-step FiLM action · frozen-text (SigLIP/CLIP
-text tower 512→768)→cross-attention language · H=3 / T=4 · trust = deployed single-pass horizon head;
-offline K=5 ensemble teacher + V-JEPA-2 surprise = **Phase C** · continuous 4-DoF waypoint head ·
-**no EMA / no VICReg** (frozen cached encoder = fixed target).
+**LOCKED — do NOT relitigate. See vault `[[advisory-sports-following-drift-2026-06-18]]` (authoritative).**
+Encoder **DINOv3 ViT-B/16** is the working default (D=768, frozen+cached, RGB-only, 224², 196x768 fp16).
+**Encoder gate (B1.11):** if Orin NX benchmark shows ViT-B/16 TRT FP16 > 20ms, switch to ViT-S/16
+(D=384); otherwise keep ViT-B/16. No CosPress distillation training needed either way. ·
+predictor block-causal ViT (depth/heads from PredictorConfig, D=EMBED_DIM) · continuous-action FiLM ·
+frozen-text (CLIP text tower 512->D)→cross-attention language (B-2) · H=3 / T=4 · trust = deployed
+single-pass horizon head; offline **TrackVLA** teacher + V-JEPA-2 surprise = **Phase C** · continuous
+4-DoF waypoint head · **no EMA / no VICReg** (frozen cached encoder = fixed target).
+**WorldVLN teacher pipeline is RETIRED** (wrong task domain — language-conditioned navigation, not
+person-following). TrackVLA (CoRL 2025, visual tracking) replaces it. Action extraction = MegaSaM from
+real sports FPV video (not simulator oracle).
 
-**OPEN — keep the lean, do not resolve in Phase A:** predictor depth/FiLM-vs-interleave (Phase B);
-ensemble K + ε/δ + horizon sweep + calibration (Phase C); the EGO-Planner `WaypointHandoff` yaw-field
-extension + closed-loop seam (Phase D).
+**OPEN — keep the lean:** predictor depth/FiLM-vs-interleave (Phase B);
+TrackVLA teacher K + trust thresholds + calibration (Phase C); closed-loop seam (Phase D).
 
 ## The reused repo (reuse, do NOT fork) — Phase D only
 
@@ -72,10 +80,12 @@ GitHub mirror chain, `HF_ENDPOINT=https://hf-mirror.com`. Full map: `docs/TOPOLO
 Vault root for this project: `/home/zh/Documents/Obsidian Vault/projects/vln-ego-drone/latent-pred-pipeline/`.
 Read in cheap→expensive order:
 
+0. `[[advisory-sports-following-drift-2026-06-18]]` — **the authoritative direction document** for the
+   sports-following pivot. Read this FIRST. Everything else is historical or partially superseded.
 1. `[[dev-decision-2026-07-latent-pred-pipeline]]` (file `dev-decision-2026-06-07-latent-pred-pipeline.md`)
-   — phases A–E, DoDs, locked implementation decisions, §8 repo + EGO z/yaw-unfixed. **Read first.**
-2. `[[arch-design-2026-06-08-latent-pred]]` — the LOCKED network spec + I/O contract + data-audit spec
-   (§6) + render finding. **Authoritative; do NOT relitigate the locked architecture.**
+   — phases A–E, DoDs, locked implementation decisions. **Has a PIVOT 2026-06-19 banner.**
+2. `[[arch-design-2026-06-08-latent-pred]]` — the network spec (partially superseded by the advisory).
+   **Has a PIVOT 2026-06-19 banner.**
 3. `[[environment-and-equipment]]` — hardware, docker, conda, build/sim, network, the MANUAL-ops list.
 4. `[[training-playbook]]` — first-training SOPs (overfit-tiny-batch, scene-split, frame-logging) —
    apply in Phase B.
@@ -86,8 +96,10 @@ skills, not in source comments.
 
 ## The plan & dev log
 
-- `plans/phase-a-data-and-io-contract.md` (repo-root `plans/`, **not** `.claude/plans/`) — the Phase-A
-  steps with DoDs + exact test commands + ralph status.
+- **`plans/phase-b-sports-training.md`** — the **authoritative Phase B plan** (sports-following pivot,
+  2026-06-19). Steps B1.1–B1.24, dependency graph, locked/open decisions.
+- `plans/phase-a-data-and-io-contract.md` — Phase-A steps (historical, complete).
+- `plans/phase-a5-replan-postpivot.md` — Phase-A5 re-plan (historical, **SUPERSEDED** by Phase B).
 - `DEV_LOG.md` at repo root tracks which step is in progress. **Read it first** to find the position,
   then re-read the relevant plan step.
 
@@ -106,10 +118,10 @@ verification — **never auto-mark them done**.
   NED→FLU→**world ENU** before any `WaypointHandoff`/`PoseStamped` (Phase D). **Never hand-roll a
   parallel frame conversion** — re-derive against fly0's `geometry/frames.py` semantics and keep
   `tests/test_frames.py` (no-flip: up→up, down→down, right→right-of-forward, forward→forward) green.
-- **Cached latents are render-once.** RGB is NOT in the AerialVLN JSON — it renders from the sim at
-  each GT pose, then DINOv3-encodes → fp16 latents on disk. Phases B+ train on cached latents, no sim.
-  Every cache build writes/updates the **provenance manifest** (encoder id+revision, dataset slice,
-  quaternion order, BGR→RGB flag, render config hash).
+- **Cached latents are render-once.** For sports FPV data, frames are extracted from video and
+  DINOv3-encoded → fp16 latents on disk. (Historical: AerialVLN rendered from sim at GT poses.)
+  Phases B+ train on cached latents. Every cache build writes/updates the **provenance manifest**
+  (encoder id+revision, dataset slice, BGR→RGB flag, render config hash).
 - **AirSim msgpack-RPC is single-threaded → wrap every `client.X()` in a Lock** (tornado IOLoop is not
   re-entrant).
 - **BGR→RGB + quaternion-order data foot-guns.** AirSim `Scene` is BGR; DINOv3 expects RGB — convert at

@@ -35,8 +35,50 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.16 — loader over real teacher/oracle dump | done | 2026-06-15 | USER-GATED: inspect over real 5-episode cache GREEN — 987 transitions (H=3), block-causal masks correct, all (StepSample,OracleTarget) tuples well-formed |
 | A5.17 — size full render→teacher→cache job | done | 2026-06-15 | sizing doc + guard script (AUTO); build verified (6 episodes total: 5 from A5.14 + 1 incremental). Full 50-ep run deferred to Phase B start |
 | A5.18 — Phase-A DoD verification | done | 2026-06-15 | all 3 DoD items verified; code review WARNING→4 HIGHs fixed (wrap_pi docstring, data_audit.yaml stale ref_path+camera+vehicle, np.load fd leak); 0 CRITICAL; **PHASE A COMPLETE** |
+| **B1.1 — Wire batch_undistort() into pipeline.py** | **pending** | — | Phase B-1 Group 0: pipeline bug fix |
+| B1.2 — Fix MegaSaM confidence np.ones() fallback | pending | — | Phase B-1 Group 0: pipeline bug fix |
+| B1.3 — Stub GPS Sim(3) alignment | pending | — | Phase B-1 Group 0: interface stub |
+| B1.4 — Add fixed-clip-length cutting | pending | — | Phase B-1 Group 0: IngestConfig + preprocess |
+| B1.5 — Revise Config for sports pivot | pending | — | Phase B-1 Group 0: config/schema revision |
+| B1.6 — Create SportsTarget in schemas.py | pending | — | Phase B-1 Group 0: slim OracleTarget |
+| B1.7 — YouTube pilot: curate + ingest | pending | — | Phase B-1 Group 1: USER-GATED |
+| B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
+| B1.9 — Data quality report script | pending | — | Phase B-1 Group 2 |
+| B1.10 — MegaSaM VO validation on pilot clips | pending | — | Phase B-1 Group 2: USER-GATED |
+| B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
+| B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |
+| B1.13 — Sports sliding-window loader | pending | — | Phase B-1 Group 4 |
+| B1.14 — Collate function for batched training | pending | — | Phase B-1 Group 4 |
+| B1.15 — Block-causal ViT predictor + FiLM | pending | — | Phase B-1 Group 5 |
+| B1.16 — Waypoint head + trust head stub | pending | — | Phase B-1 Group 5 |
+| B1.17 — Full model assembly | pending | — | Phase B-1 Group 5 |
+| B1.18 — Loss functions: L_latent + L_wp | pending | — | Phase B-1 Group 6 |
+| B1.19 — Checkpoint save/load + config snapshot | pending | — | Phase B-1 Group 6 |
+| B1.20 — Training script: overfit-tiny-batch | pending | — | Phase B-1 Group 6: USER-GATED |
+| B1.21 — Pre-train sanity check + viz | pending | — | Phase B-1 Group 7 |
+| B1.22 — Full training run | pending | — | Phase B-1 Group 8: USER-GATED (H20) |
+| B1.23 — Jetson inference speed check | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
+| B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-19 — Phase B start: sports-following training plan
+
+**Status:** Phase A complete. Phase B plan written (`plans/phase-b-sports-training.md`).
+**Pivot.** Project pivoted from indoor AerialVLN to autonomous sports-following drone (skiing
+primary). WorldVLN teacher retired. Training data = sports FPV video (YouTube + CosFly-Track).
+Three blockers identified from research reports: (1) no teacher for L_kd (TrackVLA unreleased),
+(2) YouTube skiing FPV 3-5x smaller than assumed, (3) pipeline bugs (undistort unwired, GPS
+stubbed, MegaSaM confidence np.ones). Two simplifications: (4) ViT-B/16 may be fast enough on
+Orin NX (skip CosPress), (5) language cross-attention is cheap.
+**Plan.** 24 steps (B1.1-B1.24) across 8 groups. Critical path: B1.11 (Orin NX benchmark) ->
+B1.12 -> B1.15 -> B1.17 -> B1.18 -> B1.20 -> B1.22 -> B1.24. Three parallel tracks before the
+encoder gate. User-gated: B1.7/B1.8/B1.10/B1.11/B1.20/B1.22/B1.23/B1.24.
+**Superseded plans.** `phase-a5-replan-postpivot.md` (SUPERSEDED banner added).
+**Decisions locked:** clip length 10s, encoder working default ViT-B/16 (D=768), GPS Sim(3) stub only.
+**Next.** Ralph loop starts at B1.1 (pipeline bug fix, pure-tier cheap-win).
 
 ---
 
