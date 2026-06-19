@@ -27,6 +27,7 @@ from typing import Any
 import yaml
 
 from vllatent.schemas import EMBED_DIM, HISTORY, HORIZON
+from vllatent.sports.config import SportsDataConfig
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_CONFIG = _REPO_ROOT / "configs" / "default.yaml"
@@ -191,6 +192,10 @@ _SECTIONS: dict[str, type] = {
     "data": DataConfig,
     "cache": CacheConfig,
 }
+# Optional sections: present in YAML → populated; absent → None.
+_OPTIONAL_SECTIONS: dict[str, type] = {
+    "sports": SportsDataConfig,
+}
 
 
 @dataclass(frozen=True)
@@ -203,6 +208,7 @@ class Config:
     trust: TrustConfig = field(default_factory=TrustConfig)
     data: DataConfig = field(default_factory=DataConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
+    sports: SportsDataConfig | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path | None = None) -> Config:
@@ -212,10 +218,15 @@ class Config:
         if not isinstance(raw, dict):
             raise ValueError(f"config root must be a mapping, got {type(raw).__name__}")
         raw = _expand_env(raw)
-        unknown = set(raw) - set(_SECTIONS)
+        unknown = set(raw) - set(_SECTIONS) - set(_OPTIONAL_SECTIONS)
         if unknown:
             raise ValueError(f"unknown config section(s): {sorted(unknown)}")
-        built = {name: _build_section(scls, raw.get(name, {})) for name, scls in _SECTIONS.items()}
+        built: dict[str, Any] = {
+            name: _build_section(scls, raw.get(name, {})) for name, scls in _SECTIONS.items()
+        }
+        for name, scls in _OPTIONAL_SECTIONS.items():
+            if name in raw:
+                built[name] = _build_section(scls, raw[name])
         return cls(**built)
 
 
@@ -239,6 +250,7 @@ __all__ = [
     "TrustConfig",
     "DataConfig",
     "CacheConfig",
+    "SportsDataConfig",
     "DISAGREEMENT_SOURCES",
     "ENCODER_DTYPES",
 ]

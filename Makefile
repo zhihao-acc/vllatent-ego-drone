@@ -5,9 +5,9 @@ PY ?= python
 SHELL := /bin/bash
 
 # PURE tier (numpy/pyyaml only; CI-importable). The HARD mypy + import gate scopes here.
-PURE_TIER := vllatent/schemas.py vllatent/actions.py vllatent/frames.py vllatent/config.py vllatent/manifest.py vllatent/audit.py
+PURE_TIER := vllatent/schemas.py vllatent/actions.py vllatent/frames.py vllatent/config.py vllatent/manifest.py vllatent/audit.py vllatent/sports/schemas.py vllatent/sports/config.py vllatent/sports/quality.py vllatent/sports/ego_motion.py vllatent/sports/cache.py vllatent/sports/loader.py
 
-.PHONY: help setup setup-torch lint typecheck typecheck-all import-smoke test test-torch encode-smoke vjepa-smoke text-smoke audit blob ralph
+.PHONY: help setup setup-torch lint typecheck typecheck-all import-smoke test test-torch test-sports-pure test-sports-tool encode-smoke vjepa-smoke text-smoke audit blob ralph
 
 help:
 	@echo "vllatent-ego-drone dev targets:"
@@ -50,6 +50,12 @@ test:
 
 test-torch:
 	$(PY) -m pytest -q -m torch
+
+test-sports-pure:
+	$(PY) -m pytest -q tests/test_sports_*.py -m "not torch and not sim and not tool"
+
+test-sports-tool:
+	$(PY) -m pytest -q tests/test_sports_*.py -m tool
 
 # Downloads timm's NON-GATED DINOv3 ViT-B/16 re-host (~330MB, no token) + runs a real forward.
 # From CN, HF_ENDPOINT=https://hf-mirror.com speeds the download: HF_ENDPOINT=... make encode-smoke

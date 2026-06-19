@@ -49,5 +49,6 @@ markers = [
   "torch: needs the [torch] extra (DINOv3 / loader); auto-skipped where torch is absent",
   "sim: needs AirSim + the fly0-m1 sim (auto-skipped off-container)",
   "siblings: needs the fly0 sibling on PYTHONPATH (Phase D only; auto-skipped in A-C)",
+  "tool: needs external tools (yt-dlp, ffmpeg, megasam); auto-skipped if not installed",
 ]
 testpaths = ["tests"]

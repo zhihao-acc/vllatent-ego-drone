@@ -1,0 +1,10 @@
+# Curated sports FPV clips for the seed dataset (Phase B1).
+# Populate with YouTube URLs of drone-following-skier footage.
+#
+# clips:
+#   - url: "https://youtube.com/watch?v=XXXXX"
+#     clip_id: ski01
+#     sport: skiing
+#     notes: "GoPro Hero12, helmet mount, Chamonix"
+#     camera_model: pinhole_undistorted
+clips: []
