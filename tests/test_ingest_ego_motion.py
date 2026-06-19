@@ -11,7 +11,6 @@ from vllatent.ingest.ego_motion import (
     rotation_to_yaw,
     se3_sequence_to_deltas,
     se3_to_body_delta,
-    sim3_align,
     validate_scale_consistency,
 )
 from vllatent.schemas import DELTA_DTYPE
@@ -135,7 +134,3 @@ class TestValidateScaleConsistency:
         assert "mean" in stats and "n_outliers" in stats
 
 
-class TestSim3Align:
-    def test_not_implemented(self) -> None:
-        with pytest.raises(NotImplementedError):
-            sim3_align(np.zeros((5, 4, 4)), np.zeros((5, 3)))

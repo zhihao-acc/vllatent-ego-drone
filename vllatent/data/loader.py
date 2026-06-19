@@ -205,6 +205,7 @@ class CachedLatentDataset(LatentDatasetBase):
             frame_quality=fq,
             dt_seconds=dt,
         )
+        # Wild-video has no teacher — zeros are placeholders, not real oracle data.
         oracle = OracleTarget(
             waypoint_4dof=delta.copy(),
             teacher_pose6=np.zeros(TEACHER_DOF, dtype=np.float32),

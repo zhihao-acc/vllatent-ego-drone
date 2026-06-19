@@ -130,17 +130,6 @@ def validate_scale_consistency(deltas: np.ndarray) -> dict[str, float]:
     }
 
 
-def sim3_align(
-    poses_vo: np.ndarray,
-    trajectory_metric: np.ndarray,
-) -> tuple[float, np.ndarray, np.ndarray]:
-    """Sim(3) alignment of VO trajectory to metric trajectory (stub)."""
-    raise NotImplementedError(
-        "Sim(3) alignment requires GPS or IMU metric trajectory. "
-        "For the seed dataset, use normalize_scale(mode='median_speed') instead."
-    )
-
-
 __all__ = [
     "R_BODY_FROM_CAM",
     "rotation_to_yaw",
@@ -149,5 +138,4 @@ __all__ = [
     "se3_sequence_to_deltas",
     "normalize_scale",
     "validate_scale_consistency",
-    "sim3_align",
 ]
