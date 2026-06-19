@@ -1,4 +1,4 @@
-"""SE(3) to body-frame delta conversion (PURE tier) — Phase B1 step 3.
+"""SE(3) to body-frame delta conversion (PURE tier).
 
 Converts MegaSaM camera trajectory (SE(3) 4x4 matrices, OpenCV convention) to
 body-frame deltas ``(dx, dy, dz, dyaw)`` matching the ``delta_4dof`` format.
@@ -17,9 +17,6 @@ import numpy as np
 from vllatent.frames import wrap_pi
 from vllatent.schemas import DELTA_DTYPE
 
-# OpenCV camera to drone body (NED/FRD) rotation.
-# Camera: X-right, Y-down, Z-forward → Body: X-forward, Y-right, Z-down.
-# body_x = cam_z, body_y = cam_x, body_z = cam_y.
 R_BODY_FROM_CAM = np.array([
     [0.0, 0.0, 1.0],
     [1.0, 0.0, 0.0],
@@ -28,11 +25,7 @@ R_BODY_FROM_CAM = np.array([
 
 
 def rotation_to_yaw(R: np.ndarray) -> float:
-    """Extract yaw angle (radians) from a 3x3 rotation matrix.
-
-    Assumes the rotation is predominantly yaw (pitch/roll ≈ 0), consistent
-    with the 4-DoF model. Uses atan2 on the body-frame XY projection.
-    """
+    """Extract yaw angle (radians) from a 3x3 rotation matrix."""
     return float(np.arctan2(R[1, 0], R[0, 0]))
 
 
@@ -40,17 +33,7 @@ def camera_to_drone_body(
     R_cam: np.ndarray,
     t_cam: np.ndarray,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Convert camera-frame rotation + translation to drone body frame (NED).
-
-    Parameters
-    ----------
-    R_cam : (3,3) rotation matrix in camera convention
-    t_cam : (3,) translation in camera convention
-
-    Returns
-    -------
-    R_body, t_body : rotation and translation in body (NED) convention
-    """
+    """Convert camera-frame rotation + translation to drone body frame (NED)."""
     R_body = R_BODY_FROM_CAM @ R_cam @ R_BODY_FROM_CAM.T
     t_body = R_BODY_FROM_CAM @ t_cam
     return R_body, t_body
@@ -62,13 +45,7 @@ def se3_to_body_delta(
 ) -> np.ndarray:
     """Compute body-frame delta from two consecutive SE(3) camera poses.
 
-    Parameters
-    ----------
-    T_prev, T_curr : (4,4) SE(3) camera-to-world transforms
-
-    Returns
-    -------
-    delta : (4,) f32 — (dx, dy, dz, dyaw_deg) in body frame
+    Returns (4,) f32 — (dx, dy, dz, dyaw_deg) in body frame.
     """
     T_rel = np.linalg.inv(T_prev) @ T_curr
     R_rel_cam = T_rel[:3, :3]
@@ -90,14 +67,7 @@ def se3_sequence_to_deltas(
 ) -> np.ndarray:
     """Convert a sequence of SE(3) poses to body-frame deltas.
 
-    Parameters
-    ----------
-    poses : (N, 4, 4) SE(3) camera-to-world transforms
-    fps : optional, not used in computation but validated
-
-    Returns
-    -------
-    deltas : (N-1, 4) f32 — per-transition body-frame deltas
+    Returns (N-1, 4) f32 — per-transition body-frame deltas.
     """
     if poses.ndim != 3 or poses.shape[1:] != (4, 4):
         raise ValueError(f"poses: expected (N, 4, 4), got shape {poses.shape}")
@@ -115,18 +85,7 @@ def normalize_scale(
     deltas: np.ndarray,
     mode: str = "median_speed",
 ) -> np.ndarray:
-    """Normalize the scale of body-frame deltas.
-
-    Parameters
-    ----------
-    deltas : (N, 4) f32 — body-frame deltas
-    mode : "median_speed" (default) — normalize so median displacement = 1.0
-           "unit_max" — normalize so max displacement = 1.0
-
-    Returns
-    -------
-    normalized : (N, 4) f32 — new array, input not mutated
-    """
+    """Normalize the scale of body-frame deltas. Returns a new array."""
     if deltas.ndim != 2 or deltas.shape[1] != 4:
         raise ValueError(f"deltas: expected (N, 4), got shape {deltas.shape}")
 
@@ -175,22 +134,7 @@ def sim3_align(
     poses_vo: np.ndarray,
     trajectory_metric: np.ndarray,
 ) -> tuple[float, np.ndarray, np.ndarray]:
-    """Sim(3) alignment of VO trajectory to metric trajectory (stub).
-
-    Parameters
-    ----------
-    poses_vo : (N, 4, 4) VO camera poses (up-to-scale)
-    trajectory_metric : (N, 3) metric positions (e.g., from GPS)
-
-    Returns
-    -------
-    scale, R, t : Sim(3) parameters (scale, rotation, translation)
-
-    Raises
-    ------
-    NotImplementedError
-        Always — GPS/IMU alignment is a future capability.
-    """
+    """Sim(3) alignment of VO trajectory to metric trajectory (stub)."""
     raise NotImplementedError(
         "Sim(3) alignment requires GPS or IMU metric trajectory. "
         "For the seed dataset, use normalize_scale(mode='median_speed') instead."

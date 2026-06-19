@@ -1,4 +1,4 @@
-"""Frame extraction and preprocessing (TOOL tier) — Phase B1 step 6.
+"""Frame extraction and preprocessing (TOOL tier).
 
 ffmpeg subprocess for frame extraction at uniform FPS. Optional fisheye
 undistortion via cv2 (lazy import — not required for pinhole cameras).
@@ -30,19 +30,7 @@ def extract_frames(
     target_fps: float = 5.0,
     resolution_hw: tuple[int, int] | None = None,
 ) -> FrameExtraction:
-    """Extract frames from a video at uniform FPS via ffmpeg.
-
-    Parameters
-    ----------
-    video_path : path to the input video
-    out_dir : directory for extracted JPEG frames (created if absent)
-    target_fps : frames per second to extract
-    resolution_hw : optional (height, width) to resize
-
-    Returns
-    -------
-    FrameExtraction with frame count and output directory
-    """
+    """Extract frames from a video at uniform FPS via ffmpeg."""
     vpath = Path(video_path)
     odir = Path(out_dir)
     odir.mkdir(parents=True, exist_ok=True)
@@ -100,21 +88,9 @@ def _probe_frame_size(frame_path: Path) -> tuple[int, int]:
 
 
 def load_frame(path: str | Path) -> np.ndarray:
-    """Load a JPEG frame as RGB uint8 numpy array.
-
-    Uses cv2 (lazy import) for robustness, falls back to a simple JPEG reader.
-    """
-    try:
-        import cv2
-        bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if bgr is None:
-            raise RuntimeError(f"cv2 failed to read {path}")
-        return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    except ImportError:
-        pass
-
-    from PIL import Image
-    return np.array(Image.open(str(path)).convert("RGB"))
+    """Load a JPEG frame as RGB uint8 numpy array."""
+    from vllatent.io import load_rgb
+    return load_rgb(path)
 
 
 def load_frames(frame_dir: str | Path) -> np.ndarray:
@@ -132,15 +108,7 @@ def undistort_fisheye(
     D: np.ndarray,
     new_K: np.ndarray | None = None,
 ) -> np.ndarray:
-    """Undistort a fisheye frame using OpenCV's fisheye model.
-
-    Parameters
-    ----------
-    frame : (H, W, 3) uint8 RGB
-    K : (3, 3) camera intrinsic matrix
-    D : (4,) distortion coefficients
-    new_K : optional new camera matrix (defaults to K)
-    """
+    """Undistort a fisheye frame using OpenCV's fisheye model."""
     import cv2
 
     if new_K is None:

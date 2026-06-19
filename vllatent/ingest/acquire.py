@@ -1,4 +1,4 @@
-"""Video acquisition via yt-dlp (TOOL tier) — Phase B1 step 5.
+"""Video acquisition via yt-dlp (TOOL tier).
 
 Subprocess wrapper for yt-dlp. No yt-dlp Python API import — subprocess only,
 which avoids version coupling and is more robust for long-running downloads.
@@ -59,19 +59,7 @@ def download_clip(
     clip_id: str = "",
     max_height: int = 1080,
 ) -> ClipMetadata:
-    """Download a single video clip via yt-dlp.
-
-    Parameters
-    ----------
-    url : YouTube URL
-    out_dir : directory for the downloaded file
-    clip_id : optional identifier (used in filename if set)
-    max_height : max video height (default 1080p)
-
-    Returns
-    -------
-    ClipMetadata with the downloaded file path and video properties
-    """
+    """Download a single video clip via yt-dlp."""
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 

@@ -63,8 +63,8 @@ logs/
 *.key
 secrets/
 
-# === Sports-following pipeline raw/intermediate data (B1) ===
-/sports_data/
+# === Wild-video ingestion pipeline raw/intermediate data ===
+/ingest_data/
 
 # === codegraph project-scoped index (DB lives here; never commit) ===
 .codegraph/

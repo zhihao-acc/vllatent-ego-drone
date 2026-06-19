@@ -414,3 +414,62 @@ def test_validate_manifest_rejects_missing_teacher_key() -> None:
     m = empty_manifest()
     del m["teacher"]["vjepa2_model_id"]
     assert any("teacher missing keys" in e for e in validate_manifest(m))
+
+
+# --- StepSample optional ingest metadata ---
+
+def test_stepsample_optional_ingest_metadata_none_by_default() -> None:
+    s = _step_sample()
+    assert s.vo_confidence is None
+    assert s.frame_quality is None
+    assert s.dt_seconds is None
+
+
+def test_stepsample_optional_ingest_metadata_valid() -> None:
+    s = _step_sample(vo_confidence=0.95, frame_quality=0.7, dt_seconds=0.2)
+    assert s.vo_confidence == 0.95
+    assert s.frame_quality == 0.7
+    assert s.dt_seconds == 0.2
+
+
+@pytest.mark.parametrize("field,bad_val,err_type", [
+    ("vo_confidence", 1.5, ValueError),
+    ("vo_confidence", -0.1, ValueError),
+    ("vo_confidence", "nope", TypeError),
+    ("frame_quality", 2.0, ValueError),
+    ("frame_quality", -0.5, ValueError),
+    ("dt_seconds", 0.0, ValueError),
+    ("dt_seconds", -1.0, ValueError),
+])
+def test_stepsample_ingest_metadata_rejects_bad(field, bad_val, err_type) -> None:
+    with pytest.raises(err_type):
+        _step_sample(**{field: bad_val})
+
+
+# --- Wild-video manifest ---
+
+def test_validate_manifest_wild_video_valid() -> None:
+    from vllatent.manifest import build_manifest_wild_video
+    m = build_manifest_wild_video(
+        encoder_model_id="vit_base_patch16_dinov3.lvd1689m",
+        entries=[{"clip_id": "c1", "n_frames": 10, "latent_path": "c1.npz"}],
+    )
+    assert validate_manifest(m) == []
+
+
+def test_validate_manifest_wild_video_missing_motion_source() -> None:
+    from vllatent.manifest import build_manifest_wild_video
+    m = build_manifest_wild_video(encoder_model_id="test")
+    del m["motion_source"]
+    errors = validate_manifest(m)
+    assert any("motion_source" in e for e in errors)
+
+
+def test_validate_manifest_wild_video_entry_keys() -> None:
+    from vllatent.manifest import build_manifest_wild_video
+    m = build_manifest_wild_video(
+        encoder_model_id="test",
+        entries=[{"clip_id": "c1"}],
+    )
+    errors = validate_manifest(m)
+    assert any("n_frames" in e for e in errors)

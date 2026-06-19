@@ -109,10 +109,22 @@ def empty_manifest() -> dict[str, Any]:
     return build_manifest(Config())
 
 
+_REQUIRED_ENCODER_WILD_VIDEO = {"model_id", "dtype", "patch_tokens", "dim"}
+
+
 def validate_manifest(data: dict[str, Any]) -> list[str]:
     """Return a list of validation errors (empty == valid)."""
     errors: list[str] = []
-    for key, typ in _REQUIRED.items():
+
+    source_type = ""
+    if isinstance(data.get("dataset"), dict):
+        source_type = data["dataset"].get("source_type", "aerialvln")
+    is_wild = source_type == "wild_video"
+
+    required_top = _REQUIRED if not is_wild else {
+        k: v for k, v in _REQUIRED.items() if k != "teacher"
+    }
+    for key, typ in required_top.items():
         if key not in data:
             errors.append(f"missing key: {key}")
         elif not isinstance(data[key], typ):
@@ -120,7 +132,8 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
 
     enc = data.get("encoder")
     if isinstance(enc, dict):
-        missing = _REQUIRED_ENCODER - set(enc)
+        req_enc = _REQUIRED_ENCODER_WILD_VIDEO if is_wild else _REQUIRED_ENCODER
+        missing = req_enc - set(enc)
         if missing:
             errors.append(f"encoder missing keys: {sorted(missing)}")
 
@@ -140,21 +153,31 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
         if conv.get("quaternion_order") not in (None, "xyzw", "wxyz"):
             errors.append(f"convention.quaternion_order must be xyzw|wxyz, got {conv.get('quaternion_order')!r}")
 
-    teacher = data.get("teacher")
-    if isinstance(teacher, dict):
-        missing = _REQUIRED_TEACHER - set(teacher)
-        if missing:
-            errors.append(f"teacher missing keys: {sorted(missing)}")
-        # "" is the allowed stub value (provenance populated later in A5.14).
-        src = teacher.get("disagreement_source")
-        if src not in (None, "", *DISAGREEMENT_SOURCES):
-            errors.append(
-                f"teacher.disagreement_source must be one of {DISAGREEMENT_SOURCES} or '' (stub), got {src!r}"
-            )
+    if not is_wild:
+        teacher = data.get("teacher")
+        if isinstance(teacher, dict):
+            missing = _REQUIRED_TEACHER - set(teacher)
+            if missing:
+                errors.append(f"teacher missing keys: {sorted(missing)}")
+            src = teacher.get("disagreement_source")
+            if src not in (None, "", *DISAGREEMENT_SOURCES):
+                errors.append(
+                    f"teacher.disagreement_source must be one of {DISAGREEMENT_SOURCES} or '' (stub), got {src!r}"
+                )
 
-    # The per-entry required keys are the no-default fields of CacheManifestEntry — derived from
-    # the type, not a hand-kept literal (M5).
-    required_entry_keys = CacheManifestEntry.required_keys()
+    if is_wild:
+        ms = data.get("motion_source")
+        if not isinstance(ms, dict):
+            if "motion_source" not in data:
+                errors.append("missing key: motion_source (required for wild_video)")
+        else:
+            for k in _REQUIRED_MOTION_SOURCE:
+                if k not in ms:
+                    errors.append(f"motion_source missing key: {k}")
+        required_entry_keys = _REQUIRED_WILD_VIDEO_ENTRY
+    else:
+        required_entry_keys = CacheManifestEntry.required_keys()
+
     if isinstance(data.get("entries"), list):
         for i, e in enumerate(data["entries"]):
             if not isinstance(e, dict):
@@ -196,7 +219,63 @@ def _main(argv: list[str] | None = None) -> int:
     return 0
 
 
-__all__ = ["CACHE_VERSION", "build_manifest", "empty_manifest", "validate_manifest", "write_manifest"]
+# ---------------------------------------------------------------------------
+# Wild-video ingestion manifest (source_type = "wild_video")
+# ---------------------------------------------------------------------------
+
+_REQUIRED_MOTION_SOURCE = {"method", "model", "scale_mode", "source_fps"}
+_REQUIRED_WILD_VIDEO_ENTRY = ("clip_id", "n_frames", "latent_path")
+
+
+def build_manifest_wild_video(
+    *,
+    encoder_model_id: str,
+    encoder_dtype: str = "float16",
+    motion_method: str = "megasam",
+    motion_model: str = "megasam_base",
+    scale_mode: str = "normalized",
+    source_fps: float = 5.0,
+    entries: list[dict[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Build a cache manifest for wild-video ingestion (source_type=wild_video)."""
+    return {
+        "cache_version": CACHE_VERSION,
+        "encoder": {
+            "model_id": encoder_model_id,
+            "dtype": encoder_dtype,
+            "patch_tokens": PATCH_TOKENS,
+            "dim": EMBED_DIM,
+        },
+        "dataset": {
+            "name": "wild_video",
+            "source_type": "wild_video",
+            "variant": "",
+            "split": "",
+            "license": "fair-use-research",
+        },
+        "convention": {
+            "quaternion_order": "xyzw",
+            "color_order": "RGB",
+            "frame": "camera_body",
+        },
+        "motion_source": {
+            "method": motion_method,
+            "model": motion_model,
+            "scale_mode": scale_mode,
+            "source_fps": source_fps,
+        },
+        "entries": list(entries) if entries is not None else [],
+    }
+
+
+__all__ = [
+    "CACHE_VERSION",
+    "build_manifest",
+    "build_manifest_wild_video",
+    "empty_manifest",
+    "validate_manifest",
+    "write_manifest",
+]
 
 
 if __name__ == "__main__":  # pragma: no cover

@@ -14,6 +14,7 @@ from vllatent.config import (
     Config,
     DistillConfig,
     EncoderConfig,
+    IngestConfig,
     PredictorConfig,
     TrustConfig,
 )
@@ -108,3 +109,39 @@ def test_config_is_frozen_immutable() -> None:
     cfg = Config()
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.predictor.depth = 99  # type: ignore[misc]
+
+
+# --- IngestConfig ---
+
+def test_ingest_config_defaults() -> None:
+    c = IngestConfig()
+    assert c.name == "wild_video"
+    assert c.target_fps == 5.0
+    assert c.quality_threshold == 0.3
+
+
+def test_ingest_config_from_yaml(tmp_path) -> None:
+    p = tmp_path / "ingest.yaml"
+    p.write_text("ingest:\n  sport: snowboard\n  target_fps: 10.0\n")
+    cfg = Config.from_yaml(p)
+    assert cfg.ingest is not None
+    assert cfg.ingest.sport == "snowboard"
+    assert cfg.ingest.target_fps == 10.0
+
+
+def test_ingest_config_absent_by_default() -> None:
+    cfg = Config()
+    assert cfg.ingest is None
+
+
+@pytest.mark.parametrize("factory", [
+    lambda: IngestConfig(target_fps=0.0),
+    lambda: IngestConfig(min_clip_seconds=-1.0),
+    lambda: IngestConfig(min_clip_seconds=30.0, max_clip_seconds=10.0),
+    lambda: IngestConfig(resolution_h=0),
+    lambda: IngestConfig(quality_threshold=1.5),
+    lambda: IngestConfig(name=""),
+])
+def test_ingest_config_rejects_bad(factory) -> None:
+    with pytest.raises(ValueError):
+        factory()

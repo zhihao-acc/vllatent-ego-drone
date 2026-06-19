@@ -27,7 +27,6 @@ from typing import Any
 import yaml
 
 from vllatent.schemas import EMBED_DIM, HISTORY, HORIZON
-from vllatent.sports.config import SportsDataConfig
 
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 _DEFAULT_CONFIG = _REPO_ROOT / "configs" / "default.yaml"
@@ -183,6 +182,46 @@ class CacheConfig:
     frame: str = "airsim_ned_body"
 
 
+@dataclass(frozen=True)
+class IngestConfig:
+    """Wild-video ingestion pipeline settings (optional Config section)."""
+
+    name: str = "wild_video"
+    sport: str = "skiing"
+    license: str = "fair-use-research"
+    raw_dir: str = "ingest_data/raw"
+    frames_dir: str = "ingest_data/frames"
+    cache_dir: str = "ingest_data/latent_cache"
+    clips_yaml: str = "configs/ingest_clips.yaml"
+    target_fps: float = 5.0
+    min_clip_seconds: float = 10.0
+    max_clip_seconds: float = 120.0
+    resolution_h: int = 720
+    resolution_w: int = 1280
+    megasam_model: str = "megasam_base"
+    undistort_model: str = "pinhole"
+    quality_threshold: float = 0.3
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.name, str) or not self.name:
+            raise ValueError(f"ingest.name must be a non-empty str, got {self.name!r}")
+        if self.target_fps <= 0:
+            raise ValueError(f"ingest.target_fps must be > 0, got {self.target_fps}")
+        if self.min_clip_seconds <= 0:
+            raise ValueError(f"ingest.min_clip_seconds must be > 0, got {self.min_clip_seconds}")
+        if self.max_clip_seconds <= self.min_clip_seconds:
+            raise ValueError(
+                f"ingest.max_clip_seconds ({self.max_clip_seconds}) must be > "
+                f"min_clip_seconds ({self.min_clip_seconds})"
+            )
+        if self.resolution_h <= 0 or self.resolution_w <= 0:
+            raise ValueError(
+                f"ingest.resolution must be positive, got ({self.resolution_h}, {self.resolution_w})"
+            )
+        if not (0.0 <= self.quality_threshold <= 1.0):
+            raise ValueError(f"ingest.quality_threshold must be in [0,1], got {self.quality_threshold}")
+
+
 # YAML section name -> its frozen dataclass. Keep in sync with Config's fields.
 _SECTIONS: dict[str, type] = {
     "encoder": EncoderConfig,
@@ -192,9 +231,8 @@ _SECTIONS: dict[str, type] = {
     "data": DataConfig,
     "cache": CacheConfig,
 }
-# Optional sections: present in YAML → populated; absent → None.
 _OPTIONAL_SECTIONS: dict[str, type] = {
-    "sports": SportsDataConfig,
+    "ingest": IngestConfig,
 }
 
 
@@ -208,7 +246,7 @@ class Config:
     trust: TrustConfig = field(default_factory=TrustConfig)
     data: DataConfig = field(default_factory=DataConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
-    sports: SportsDataConfig | None = None
+    ingest: IngestConfig | None = None
 
     @classmethod
     def from_yaml(cls, path: str | Path | None = None) -> Config:
@@ -250,7 +288,7 @@ __all__ = [
     "TrustConfig",
     "DataConfig",
     "CacheConfig",
-    "SportsDataConfig",
+    "IngestConfig",
     "DISAGREEMENT_SOURCES",
     "ENCODER_DTYPES",
 ]

@@ -1,15 +1,11 @@
-"""MegaSaM ego-motion extraction wrapper (TOOL tier) — Phase B1 step 7.
+"""MegaSaM ego-motion extraction wrapper (TOOL tier).
 
 Subprocess wrapper for MegaSaM (CVPR 2025). Parses SE(3) camera poses and
 per-frame confidence from MegaSaM's output directory.
 
 MegaSaM handles dynamic foreground by downweighting moving objects during
-bundle adjustment — essential for skiing footage where the followed person
+bundle adjustment — essential for footage where the followed person
 occupies 20-40% of the frame.
-
-The wrapper is structured so the output parsing can adapt once MegaSaM's actual
-format is confirmed. If MegaSaM proves unsuitable, the wrapper can be swapped
-for DPVO/DROID-SLAM with the same ``MegaSamResult`` interface.
 """
 from __future__ import annotations
 
@@ -52,16 +48,7 @@ def run_megasam(
     model: str = "megasam_base",
     extra_args: list[str] | None = None,
 ) -> MegaSamResult:
-    """Run MegaSaM on a directory of frames and return parsed results.
-
-    Parameters
-    ----------
-    frame_dir : directory containing sequential JPEG frames
-    out_dir : directory for MegaSaM output
-    megasam_path : path to MegaSaM installation (autodetected if None)
-    model : MegaSaM model checkpoint name
-    extra_args : additional CLI arguments
-    """
+    """Run MegaSaM on a directory of frames and return parsed results."""
     fdir = Path(frame_dir)
     odir = Path(out_dir)
     odir.mkdir(parents=True, exist_ok=True)
@@ -106,16 +93,9 @@ def _find_megasam() -> Path:
 
 
 def parse_megasam_output(out_dir: str | Path) -> MegaSamResult:
-    """Parse MegaSaM output directory into a structured result.
-
-    Handles multiple output formats (adapt as MegaSaM evolves):
-    1. ``poses.npy`` + ``confidences.npy`` + ``intrinsics.npy``
-    2. ``cameras.npz`` with keys ``poses``, ``confidences``, ``intrinsics``
-    3. ``results.json`` with serialized arrays
-    """
+    """Parse MegaSaM output directory into a structured result."""
     odir = Path(out_dir)
 
-    # Format 1: separate .npy files
     poses_path = odir / "poses.npy"
     if poses_path.exists():
         poses = np.load(str(poses_path))
@@ -129,7 +109,6 @@ def parse_megasam_output(out_dir: str | Path) -> MegaSamResult:
             intrinsics=intrinsics.astype(np.float64),
         )
 
-    # Format 2: single .npz
     npz_path = odir / "cameras.npz"
     if npz_path.exists():
         with np.load(str(npz_path)) as data:
@@ -138,7 +117,6 @@ def parse_megasam_output(out_dir: str | Path) -> MegaSamResult:
             intrinsics = data.get("intrinsics", _default_intrinsics()).astype(np.float64)
         return MegaSamResult(poses=poses, confidences=confidences, intrinsics=intrinsics)
 
-    # Format 3: JSON
     json_path = odir / "results.json"
     if json_path.exists():
         raw = json.loads(json_path.read_text())
@@ -154,7 +132,7 @@ def parse_megasam_output(out_dir: str | Path) -> MegaSamResult:
 
 
 def _default_intrinsics() -> np.ndarray:
-    """Default pinhole intrinsics (placeholder; overwritten by MegaSaM's estimate)."""
+    """Default pinhole intrinsics (placeholder)."""
     return np.array([
         [500.0, 0.0, 640.0],
         [0.0, 500.0, 360.0],

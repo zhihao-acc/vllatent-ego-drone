@@ -89,6 +89,9 @@ class StepSample:
     z_next: np.ndarray           # (196,768) fp16   — DINOv3 latent of next obs = prediction target
     delta_4dof: np.ndarray       # (4,) f32         — (dx,dy,dz,dyaw) AirSim-NED body, yaw-only
     future_frame_rgb: np.ndarray | None = None  # (H,W,3) uint8 RGB — Phase-C V-JEPA-2 target (optional)
+    vo_confidence: float | None = None   # MegaSaM VO confidence [0,1] (wild-video ingest only)
+    frame_quality: float | None = None   # composite quality [0,1] (wild-video ingest only)
+    dt_seconds: float | None = None      # inter-frame time delta >0 (wild-video ingest only)
 
     def __post_init__(self) -> None:
         _check_array("z_t", self.z_t, (PATCH_TOKENS, EMBED_DIM), dtype=LATENT_DTYPE)
@@ -109,6 +112,24 @@ class StepSample:
             raise ValueError(f"action_id: expected 0..{N_ACTIONS - 1}, got {self.action_id}")
         if self.future_frame_rgb is not None:
             _check_array("future_frame_rgb", self.future_frame_rgb, (None, None, 3), dtype=RGB_DTYPE)
+        if self.vo_confidence is not None:
+            v = self.vo_confidence
+            if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
+                raise TypeError(f"vo_confidence: expected float, got {type(v).__name__}")
+            if not (0.0 <= float(v) <= 1.0):
+                raise ValueError(f"vo_confidence: expected [0,1], got {v}")
+        if self.frame_quality is not None:
+            v = self.frame_quality
+            if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
+                raise TypeError(f"frame_quality: expected float, got {type(v).__name__}")
+            if not (0.0 <= float(v) <= 1.0):
+                raise ValueError(f"frame_quality: expected [0,1], got {v}")
+        if self.dt_seconds is not None:
+            v = self.dt_seconds
+            if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
+                raise TypeError(f"dt_seconds: expected float, got {type(v).__name__}")
+            if float(v) <= 0.0:
+                raise ValueError(f"dt_seconds: expected > 0, got {v}")
 
 
 # --- Student output seams (H3) — typed so "−trust" / swap-predictor is a config flag, not surgery ---

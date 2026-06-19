@@ -1,4 +1,4 @@
-"""Frame quality scoring and filtering (PURE tier) — Phase B1 step 4.
+"""Frame quality scoring and filtering (PURE tier).
 
 All scoring uses numpy only (Laplacian via ``np.gradient``, histogram via
 ``np.histogram``, pixel statistics). No cv2 dependency at runtime.
@@ -9,17 +9,12 @@ from __future__ import annotations
 
 import numpy as np
 
-# Empirical normalization constants (tuned on action-camera footage).
 _BLUR_NORM = 500.0
 _EXPOSURE_BINS = 64
 
 
 def motion_blur_score(frame: np.ndarray) -> float:
-    """Score frame sharpness via Laplacian variance (higher = sharper).
-
-    Uses numpy gradient as a Laplacian approximation. Normalized to [0, 1]
-    with a saturation ceiling at ``_BLUR_NORM``.
-    """
+    """Score frame sharpness via Laplacian variance (higher = sharper)."""
     if frame.ndim == 3:
         gray = np.mean(frame, axis=2)
     else:
@@ -31,11 +26,7 @@ def motion_blur_score(frame: np.ndarray) -> float:
 
 
 def exposure_score(frame: np.ndarray) -> float:
-    """Score exposure quality via histogram spread.
-
-    Well-exposed frames use a wide range of intensities.
-    Returns 0 for single-value images, 1 for full-range.
-    """
+    """Score exposure quality via histogram spread."""
     if frame.ndim == 3:
         gray = np.mean(frame, axis=2)
     else:
@@ -47,12 +38,7 @@ def exposure_score(frame: np.ndarray) -> float:
 
 
 def snow_whiteout_score(frame: np.ndarray) -> float:
-    """Score snow whiteout as fraction of near-white pixels.
-
-    Returns 0 (no whiteout) to 1 (full whiteout). Higher = worse.
-    Note: this returns the whiteout FRACTION, not a quality score.
-    To use as quality: ``1 - snow_whiteout_score(frame)``.
-    """
+    """Score snow whiteout as fraction of near-white pixels (higher = worse)."""
     if frame.ndim == 3:
         brightness = np.mean(frame, axis=2)
     else:

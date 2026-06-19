@@ -1,9 +1,8 @@
-"""End-to-end per-clip processing pipeline (ORCH tier) — Phase B1 step 10.
+"""End-to-end per-clip processing pipeline (ORCH tier).
 
-Wires: acquire → extract → quality → megasam → ego_motion → encode → cache → manifest.
+Wires: acquire -> extract -> quality -> megasam -> ego_motion -> encode -> cache -> manifest.
 
 Each stage writes intermediate outputs to disk so the pipeline is resumable.
-If an intermediate exists (e.g. frames already extracted), the stage is skipped.
 """
 from __future__ import annotations
 
@@ -15,7 +14,9 @@ from typing import Any
 
 import numpy as np
 
-from vllatent.sports.config import SportsDataConfig
+from vllatent.config import IngestConfig
+from vllatent.io import load_rgb
+from vllatent.schemas import DELTA_DTYPE, EMBED_DIM, LATENT_DTYPE, MASK_DTYPE, PATCH_TOKENS
 
 
 @dataclass(frozen=True)
@@ -29,36 +30,70 @@ class ClipPipelineResult:
 
 
 def _log(msg: str) -> None:
-    print(f"[sports-pipeline] {msg}", file=sys.stderr)
+    print(f"[ingest-pipeline] {msg}", file=sys.stderr)
+
+
+def _build_clip_npz(
+    *,
+    latents: np.ndarray,
+    deltas: np.ndarray,
+    vo_confidence: np.ndarray,
+    frame_quality: np.ndarray,
+    timestamps: np.ndarray,
+    quality_mask: np.ndarray,
+) -> dict[str, np.ndarray]:
+    """Validate and return the arrays dict for a single clip's .npz."""
+    n = latents.shape[0]
+    if latents.shape != (n, PATCH_TOKENS, EMBED_DIM):
+        raise ValueError(f"latents: expected (N, {PATCH_TOKENS}, {EMBED_DIM}), got {latents.shape}")
+    if deltas.shape != (n - 1, 4):
+        raise ValueError(f"deltas: expected ({n - 1}, 4), got {deltas.shape}")
+    if vo_confidence.shape != (n,):
+        raise ValueError(f"vo_confidence: expected ({n},), got {vo_confidence.shape}")
+    if frame_quality.shape != (n,):
+        raise ValueError(f"frame_quality: expected ({n},), got {frame_quality.shape}")
+    if timestamps.shape != (n,):
+        raise ValueError(f"timestamps: expected ({n},), got {timestamps.shape}")
+    if quality_mask.shape != (n,):
+        raise ValueError(f"quality_mask: expected ({n},), got {quality_mask.shape}")
+
+    return {
+        "latents": latents.astype(LATENT_DTYPE),
+        "deltas": deltas.astype(DELTA_DTYPE),
+        "vo_confidence": vo_confidence.astype(np.float32),
+        "frame_quality": frame_quality.astype(np.float32),
+        "timestamps": timestamps.astype(np.float64),
+        "quality_mask": quality_mask.astype(MASK_DTYPE),
+    }
+
+
+def _write_clip_npz(
+    arrays: dict[str, np.ndarray],
+    out_path: str | Path,
+) -> Path:
+    """Write a clip's arrays to a .npz file."""
+    p = Path(out_path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    np.savez(str(p), **arrays)
+    return p
 
 
 def process_clip(
     *,
     url: str,
     clip_id: str,
-    cfg: SportsDataConfig,
+    cfg: IngestConfig,
     skip_download: bool = False,
     skip_megasam: bool = False,
     device: str = "cuda",
 ) -> ClipPipelineResult:
-    """Process a single clip end-to-end.
-
-    Parameters
-    ----------
-    url : source video URL (or local path if skip_download=True)
-    clip_id : unique clip identifier
-    cfg : sports data config
-    skip_download : if True, expect video already at raw_dir/clip_id.*
-    skip_megasam : if True, expect MegaSaM output already at megasam_out_dir
-    device : torch device for DINOv3 encoding
-    """
-    from vllatent.sports.acquire import download_clip, validate_clip
-    from vllatent.sports.cache import build_clip_npz, write_clip_npz
-    from vllatent.sports.ego_motion import normalize_scale, se3_sequence_to_deltas
-    from vllatent.sports.encode import encode_frames
-    from vllatent.sports.megasam import parse_megasam_output, run_megasam
-    from vllatent.sports.preprocess import extract_frames
-    from vllatent.sports.quality import composite_quality, filter_frames
+    """Process a single clip end-to-end."""
+    from vllatent.encode.batch import encode_frames
+    from vllatent.ingest.acquire import download_clip, validate_clip
+    from vllatent.ingest.ego_motion import normalize_scale, se3_sequence_to_deltas
+    from vllatent.ingest.megasam import parse_megasam_output, run_megasam
+    from vllatent.ingest.preprocess import extract_frames
+    from vllatent.ingest.quality import composite_quality, filter_frames
 
     errors: list[str] = []
     skipped: list[str] = []
@@ -116,7 +151,7 @@ def process_clip(
     frame_paths = sorted(frames_dir.glob("*.jpg"))
     qualities = np.zeros(len(frame_paths), dtype=np.float32)
     for i, fp in enumerate(frame_paths):
-        frame = _load_rgb_for_quality(fp)
+        frame = load_rgb(fp)
         qualities[i] = composite_quality(frame)
     quality_mask = filter_frames(qualities, cfg.quality_threshold)
     n_accepted = int(quality_mask.sum())
@@ -133,7 +168,7 @@ def process_clip(
 
     megasam_result = parse_megasam_output(megasam_out)
 
-    # --- Stage 5: SE(3) → body-frame deltas ---
+    # --- Stage 5: SE(3) -> body-frame deltas ---
     _log("converting SE(3) poses to body-frame deltas")
     deltas = se3_sequence_to_deltas(megasam_result.poses, fps=cfg.target_fps)
     deltas = normalize_scale(deltas, mode="median_speed")
@@ -163,7 +198,7 @@ def process_clip(
     vo_conf = megasam_result.confidences[:n].astype(np.float32)
     timestamps = np.arange(n, dtype=np.float64) / cfg.target_fps
 
-    arrays = build_clip_npz(
+    arrays = _build_clip_npz(
         latents=latents,
         deltas=deltas,
         vo_confidence=vo_conf,
@@ -173,7 +208,7 @@ def process_clip(
     )
 
     latent_rel = f"{clip_id}.npz"
-    write_clip_npz(arrays, cache_dir / latent_rel)
+    _write_clip_npz(arrays, cache_dir / latent_rel)
     _log(f"wrote {cache_dir / latent_rel}")
 
     return ClipPipelineResult(
@@ -188,13 +223,13 @@ def process_clip(
 
 def process_batch(
     clips_yaml: str | Path,
-    cfg: SportsDataConfig,
+    cfg: IngestConfig,
     *,
     skip_existing: bool = True,
     device: str = "cuda",
 ) -> list[ClipPipelineResult]:
     """Process all clips in a YAML clip list."""
-    from vllatent.sports.acquire import load_clips_yaml
+    from vllatent.ingest.acquire import load_clips_yaml
 
     clips = load_clips_yaml(str(clips_yaml))
     results: list[ClipPipelineResult] = []
@@ -217,22 +252,18 @@ def process_batch(
         if result.errors:
             _log(f"WARNING: {clip_id} had errors: {result.errors}")
         else:
-            _log(f"OK: {clip_id} → {result.n_accepted}/{result.n_frames} frames accepted")
+            _log(f"OK: {clip_id} -> {result.n_accepted}/{result.n_frames} frames accepted")
 
     return results
 
 
 def update_manifest_from_results(
     results: list[ClipPipelineResult],
-    cfg: SportsDataConfig,
+    cfg: IngestConfig,
     encoder_model_id: str = "vit_base_patch16_dinov3.lvd1689m",
 ) -> Path:
     """Build or update the manifest from pipeline results."""
-    from vllatent.sports.cache import (
-        build_sports_manifest,
-        validate_sports_manifest,
-        write_sports_manifest,
-    )
+    from vllatent.manifest import build_manifest_wild_video, validate_manifest, write_manifest
 
     cache_dir = Path(cfg.cache_dir)
     manifest_path = cache_dir / "manifest.json"
@@ -242,7 +273,7 @@ def update_manifest_from_results(
         existing = json.loads(manifest_path.read_text())
         existing_entries = existing.get("entries", [])
 
-    existing_ids = {e["clip_id"] for e in existing_entries}
+    existing_ids = {e.get("clip_id", e.get("episode_id", "")) for e in existing_entries}
     for r in results:
         if r.errors or not r.latent_path:
             continue
@@ -253,33 +284,20 @@ def update_manifest_from_results(
                 "latent_path": r.latent_path,
             })
 
-    m = build_sports_manifest(
+    m = build_manifest_wild_video(
         encoder_model_id=encoder_model_id,
-        sport=cfg.sport,
-        megasam_model=cfg.megasam_model or "megasam_base",
+        motion_method="megasam",
+        motion_model=cfg.megasam_model or "megasam_base",
         scale_mode="normalized",
         source_fps=cfg.target_fps,
         entries=existing_entries,
     )
 
-    errs = validate_sports_manifest(m)
+    errs = validate_manifest(m)
     if errs:
         _log(f"manifest validation errors: {errs}")
 
-    return write_sports_manifest(m, str(cache_dir))
-
-
-def _load_rgb_for_quality(path: Path) -> np.ndarray:
-    """Load a frame as RGB uint8 for quality scoring."""
-    try:
-        import cv2
-        bgr = cv2.imread(str(path), cv2.IMREAD_COLOR)
-        if bgr is not None:
-            return cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
-    except ImportError:
-        pass
-    from PIL import Image
-    return np.array(Image.open(str(path)).convert("RGB"))
+    return write_manifest(m, str(cache_dir))
 
 
 __all__ = [
