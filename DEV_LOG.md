@@ -41,9 +41,11 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.4 — Add fixed-clip-length cutting | done | 2026-06-19 | clip_length_seconds=10.0 in IngestConfig, cut_fixed_clips() in preprocess |
 | B1.5 — Revise Config for sports pivot | done | 2026-06-19 | vjepa_only default, megasam_vo added, lambda_trust, sports.yaml fixed |
 | B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof, vjepa_surprise)` + `Target` union alias; 94 schema tests green |
-| B1.7 — YouTube pilot: curate + ingest | pending | — | Phase B-1 Group 1: USER-GATED |
+| B1.7 — YouTube pilot: curate + ingest | pending | — | Phase B-1 Group 1: USER-GATED (depends on B1.7b) |
+| B1.7b — Content filter implementation | pending | — | Phase B-1 Group 1: AUTO (CLIP+PySceneDetect, blocks B1.7) |
 | B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
+| B1.9b — Per-clip HTML quality report | pending | — | Phase B-1 Group 2: AUTO (Plotly HTML, no blockers) |
 | B1.10 — MegaSaM VO validation on pilot clips | pending | — | Phase B-1 Group 2: USER-GATED |
 | B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
 | B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |

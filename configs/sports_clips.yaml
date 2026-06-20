@@ -1,10 +1,69 @@
-# Curated sports FPV clips for the seed dataset (Phase B1).
-# Populate with YouTube URLs of drone-following-skier footage.
-#
-# clips:
-#   - url: "https://youtube.com/watch?v=XXXXX"
-#     clip_id: ski01
-#     sport: skiing
-#     notes: "GoPro Hero12, helmet mount, Chamonix"
-#     camera_model: pinhole_undistorted
-clips: []
+clips:
+- url: https://www.youtube.com/watch?v=p6aNfWdPqJQ
+  clip_id: ski01
+  sport: skiing
+  notes: Your Follow-Me Drone for Running, Cycling & Travel｜DJI Neo 2 Hands-Free Filming
+    (67s, 2160p, 30fps)
+- url: https://www.youtube.com/watch?v=RFuiXiLSAVw
+  clip_id: ski02
+  sport: skiing
+  notes: 'DJI Neo 2: Testing the Skiing Follow Mode (Snowboarding) (410s, 2160p, 24fps)'
+- url: https://www.youtube.com/watch?v=viZYX7fpQEc
+  clip_id: ski03
+  sport: skiing
+  notes: 'GoPro: Giant Slalom FPV with Ted Ligety in 4K (51s, 2160p, 30fps)'
+- url: https://www.youtube.com/watch?v=1gltu0xGS6k
+  clip_id: ski04
+  sport: skiing
+  notes: Chasing Downhill Skiers with FPV Drones (417s, 1080p, 30fps)
+- url: https://www.youtube.com/watch?v=DFphM29JJq4
+  clip_id: ski05
+  sport: skiing
+  notes: Full FPV Downhill Run with Tomas Slavik | Red Bull Valparaiso Cerro Abajo
+    2022 (154s, 1080p, 30fps)
+- url: https://www.youtube.com/watch?v=ctEksNz7tqg
+  clip_id: ski06
+  sport: skiing
+  notes: World's Best FPV Drone Shot? (extreme mountain biking) (307s, 2160p, 25fps)
+- url: https://www.youtube.com/watch?v=qXvVzfLkpno
+  clip_id: ski07
+  sport: skiing
+  notes: Drone chases Barefoot Skiers and Derek from Indy Ski School on slalom (234s,
+    1440p, 30fps)
+- url: https://www.youtube.com/watch?v=U91VhZYT1Ek
+  clip_id: ski08
+  sport: skiing
+  notes: 'GoPro: Dreamy Ski + Snowboard Drone Reel | 5K Coffee Break (189s, 2160p,
+    25fps)'
+- url: https://www.youtube.com/watch?v=GdVl2I7YPlU
+  clip_id: ski09
+  sport: skiing
+  notes: Drone-a-rama! The best drone shots of the Milan Cortina Olympics | NBC Sports
+    (100s, 1080p, 30fps)
+- url: https://www.youtube.com/watch?v=cA9IDebVOaU
+  clip_id: ski10
+  sport: skiing
+  notes: TRYP FPV Downhill Ski Chase (52s, 1440p, 60fps)
+- url: https://www.youtube.com/watch?v=WH1U_KKYlkQ
+  clip_id: ski11
+  sport: skiing
+  notes: Water ski drone chase over Chicago's Lake Michigan (107s, 2160p, 25fps)
+- url: https://www.youtube.com/watch?v=VqlKF4-DHLc
+  clip_id: ski12
+  sport: skiing
+  notes: ALPINE STROLL 2 - Cinematic FPV Ski Trip (260s, 2160p, 25fps)
+- url: https://www.youtube.com/watch?v=q60f4l-fNh0
+  clip_id: ski13
+  sport: skiing
+  notes: Fastwood Fpv by Richard Permin - High Speed Free Skiing vs Drone Fpv (53s,
+    1080p, 25fps)
+- url: https://www.youtube.com/watch?v=x4Yjc5jV5Tw
+  clip_id: ski14
+  sport: skiing
+  notes: 'GoPro: Secrets of the Follow-Cam | Spencer Whiting aka Gimbal God (242s,
+    2160p, 30fps)'
+- url: https://www.youtube.com/watch?v=2HbTprcuzzU
+  clip_id: ski15
+  sport: skiing
+  notes: Soul Skiing - pure @GoPro  follow cam powder skiing, one take, no cuts, just
+    skiing (168s, 2160p, 60fps)

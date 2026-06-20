@@ -142,13 +142,38 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 **B1.7 — YouTube pilot: curate 10-15 skiing FPV clips + run full ingest.**
 - Tier ORCH / USER-GATED
 - Populate `configs/sports_clips.yaml` with 10-15 hand-curated YouTube skiing/MTB FPV URLs.
+  **Pre-step:** download with `yt-dlp --sponsorblock-remove sponsor,intro,outro` to strip
+  crowdsourced ad/intro/outro segments before frame extraction.
+  **Post-download:** run content filter (B1.7b) — SBD + CLIP filter → ingest only accepted
+  FPV shots. Pipeline flow: download → content filter → ingest accepted shots.
   Run `python -m vllatent.ingest batch` with fixed 10s clip cutting. This exercises the full
   pipeline including the B1.1 undistort fix and B1.4 clip cutting.
 - **Files:** `configs/sports_clips.yaml`
-- **DoD:** 10+ clips downloaded, extracted, quality-scored, MegaSaM-processed, DINOv3-encoded,
-  cached as `.npz`. Manifest validates. Per-clip quality stats inspected.
-- **Test:** User runs pipeline + reviews outputs.
-- **Deps:** blocks B1.8, B1.10. Blocked-by: B1.1, B1.2, B1.4.
+- **DoD:** 10+ clips downloaded, sponsor segments stripped, content-filtered (FPV accepted),
+  extracted, quality-scored, MegaSaM-processed, DINOv3-encoded, cached as `.npz`. Manifest
+  validates. Per-clip quality stats + thumbnail grids reviewed.
+- **Test:** User runs pipeline + reviews outputs + reviews content filter thumbnail grids.
+- **Deps:** blocks B1.8, B1.10. Blocked-by: B1.1, B1.2, B1.4, **B1.7b**.
+
+**B1.7b — Content filter implementation.**
+- Tier PURE+TOOL / AUTO
+- New file `vllatent/ingest/content_filter.py` (~250 LOC). Implements:
+  - PySceneDetect `AdaptiveDetector` wrapper for shot boundary detection (SBD)
+  - CLIP ViT-B/32 frame scoring against FPV prompt ensembles (reuses existing
+    `vllatent/encode/text.py` CLIP model for zero-shot classification)
+  - Per-shot majority vote: accept if FPV prompt score > all non-FPV prompt scores by
+    margin >= 0.03
+  - Whole-video verdict: ACCEPT (>=60% FPV shots), REJECT (<30% FPV), PARTIAL (accept FPV
+    shots only, discard non-FPV segments)
+  - Thumbnail grid generator for human review (~30s per video, representative frames with
+    accept/reject color-coding)
+- **New dependency:** `scenedetect` (`pip install scenedetect[opencv-headless]`)
+- **Files:** `vllatent/ingest/content_filter.py` (new), `tests/test_content_filter.py` (new)
+- **DoD:** Filter runs on sample video. Thumbnail grid produced. Tests pass.
+- **Test:** `$PY -m pytest -q tests/test_content_filter.py`
+- **Deps:** blocks B1.7. Blocked-by: none (CLIP model already exists in `vllatent/encode/text.py`).
+- **Upgrade path (B-2/B-3):** replace CLIP zero-shot with CLIP+MLP trained on ~2,500 human
+  labels (PriVi CVPR 2026 precedent: 90.3% precision, 82.8% recall).
 
 **B1.8 — CosFly-Track download + adapter.**
 - Tier TOOL+PURE / USER-GATED (HF download)
@@ -177,6 +202,29 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 - **DoD:** Script runs on any manifest directory. JSON + terminal output.
 - **Test:** `$PY scripts/data_quality_report.py --cache <fixture_dir>` on synthetic data.
 - **Deps:** none. Blocked-by: none.
+
+**B1.9b — Per-clip HTML quality report.**
+- Tier PURE+TOOL / AUTO
+- New file `vllatent/ingest/visualize.py` (~400 LOC). Generates self-contained Plotly offline
+  HTML per clip with 8 sections:
+  1. Filmstrip (10 evenly-spaced thumbnails extracted from cached frames)
+  2. Quality heatmap timeline (RdYlGn colorscale, `frame_quality` over time)
+  3. Content filter results (per-shot CLIP scores, color-coded accept/reject)
+  4. 3D ego-motion trajectory (interactive Plotly `Scatter3d` + `Cone` headings from
+     cumulative deltas, colored by speed magnitude)
+  5. Body-frame deltas (3 stacked subplots: dx/dy/dz, dyaw, quality overlay; outliers in red)
+  6. VO confidence timeline (low regions flagged below 0.3 threshold)
+  7. Latent coherence (`cos_sim(z_t, z_{t+1})` timeline, threshold line at 0.85 for
+     scene change detection)
+  8. Summary table (frames, duration, npz size, pass/fail verdict)
+- **Integration:** called after `_write_clip_npz()` in `pipeline.py` as post-hook. Also
+  standalone via `scripts/clip_report.py --cache <dir> --clip <id>`.
+- **Dependencies:** `plotly` (likely installed), `Pillow`, `jinja2` — all standard ML env.
+- **Files:** `vllatent/ingest/visualize.py` (new), `scripts/clip_report.py` (new),
+  `tests/test_visualize.py` (new)
+- **DoD:** HTML report generated from synthetic fixture. Opens in browser. All 8 sections render.
+- **Test:** `$PY -m pytest -q tests/test_visualize.py`
+- **Deps:** none (runs on any cached .npz). Blocked-by: none.
 
 **B1.10 — MegaSaM VO validation on pilot clips.**
 - Tier RESEARCH / USER-GATED
@@ -231,23 +279,45 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   - `history_latents (H,P,D) fp16` — **GT latents from previous H frames** (NOT predicted)
   - `history_mask (H,) bool` — block-causal padding at clip start
   - `target_latents (T,P,D) fp16` — GT future latents (L_latent targets)
-  - `target_deltas (T,4) f32` — GT future 4-DoF deltas (L_wp targets)
+  - `target_deltas (T,4) f32` — GT future 4-DoF deltas (L_wp targets), **preprocessed** (below)
   - `vo_confidence (T,) f32` — per-step VO confidence (for confidence-weighted L_wp)
   - `frame_quality float` — composite quality of z_t frame
+  - `dt_seconds (T,) f32` — inter-frame time delta (from cached `timestamps` diffs)
+- **Delta preprocessing pipeline** (applied in loader, in order):
+  1. Physics hard clip: max displacement 4.0 m/frame at 5 Hz, max dyaw 24 deg/frame
+     (thresholds scale proportionally by `dt` for other FPS, e.g. CosFly 2 Hz)
+  2. Median filter k=3 on deltas (removes single-frame VO spikes, preserves real turns;
+     two consecutive extreme frames survive — correct for mogul skiing)
+  3. Convert deltas to velocity: `velocity = delta / dt_seconds` (handles mixed FPS:
+     CosFly 2 Hz + YouTube 5 Hz in the same training run, per DINO-world precedent)
+  4. Per-dimension z-score normalization (store per-dataset mean/std for inference
+     denormalization; computed once at dataset construction, saved alongside manifest)
+- **Augmentation** (training only, disabled for val):
+  - Temporal jitter: shift window start by +/-1 frame randomly
+  - Gaussian noise on deltas: `N(0, 0.05 * std_per_dim)` during training
+- **Batch construction:** mix CosFly + YouTube sources; oversample CosFly-Track to ~40% of
+  batches (CosFly has GT deltas = implicit clean-data curriculum).
 - Clips pre-cut to `clip_length_seconds` (from B1.4), so windows are within 10s segments.
 - Reuses manifest reading from existing `vllatent/manifest.py`.
 - **Files:** `vllatent/data/sports_loader.py` (new), `tests/test_sports_loader.py` (new)
 - **DoD:** Loader emits correct shapes/dtypes on synthetic fixture. Block-causal mask correct
-  at clip boundaries. GT history verified (not predicted).
+  at clip boundaries. GT history verified (not predicted). Delta preprocessing pipeline tested
+  (physics clip, median filter, velocity normalization, z-score). Augmentation toggleable.
+  dt_seconds correctly computed from timestamps.
 - **Test:** `$PY -m pytest -q tests/test_sports_loader.py`
 - **Deps:** blocks B1.16. Blocked-by: B1.4, B1.6, B1.12.
 
 **B1.14 — Collate function for batched training.**
 - Tier TORCH / AUTO
 - `collate_sports_batch()` converts numpy samples to batched GPU tensors.
-  Returns `TrainingBatch` NamedTuple.
+  Returns `TrainingBatch` NamedTuple with fields:
+  - All fields from B1.13 sample, batched to `(B,...)` tensors
+  - `dt_seconds (B,T) f32` — inter-frame time deltas for FiLM conditioning on frame rate
+  - `sample_weight (B,) f32` = `frame_quality.clamp(min=0.1) * vo_confidence.clamp(min=0.05)`
+    — per-sample loss weight (floors prevent zero-weight samples from vanishing entirely)
 - **Files:** `vllatent/data/sports_loader.py` (add collate), `tests/test_sports_loader.py`
-- **DoD:** Works with `torch.utils.data.DataLoader`. Shapes/dtypes verified.
+- **DoD:** Works with `torch.utils.data.DataLoader`. Shapes/dtypes verified. `dt_seconds` and
+  `sample_weight` fields present and correctly computed.
 - **Test:** `$PY -m pytest -q tests/test_sports_loader.py -k collate`
 - **Deps:** blocks B1.16. Blocked-by: B1.13.
 
@@ -258,13 +328,19 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 **B1.15 — Block-causal ViT predictor + FiLM action conditioning.**
 - Tier TORCH / AUTO
 - `vllatent/model/predictor.py` with `LatentPredictor(nn.Module)`. Input: `history_latents
-  (B,H,P,D)` + `z_t (B,P,D)` + `action_4dof (B,4) f32`. Output: `predicted_latents (B,T,P,D)`.
+  (B,H,P,D)` + `z_t (B,P,D)` + `action_4dof (B,4) f32` + `dt_seconds (B,T) f32`. Output:
+  `predicted_latents (B,T,P,D)`.
   Block-causal mask: each horizon step `t+k` attends to `[history, z_t, t+1..t+k-1]`.
-  FiLM: action projected to `(scale, shift)` per block, applied after LayerNorm.
+  **Two FiLM conditioning sources:**
+  - Action FiLM: action projected to `(scale, shift)` per block, applied after LayerNorm.
+  - **dt FiLM:** `dt_embedding = MLP(dt_seconds)` → `(scale, shift)` per block, applied
+    alongside action FiLM. Lets the model handle mixed FPS (CosFly 2 Hz vs YouTube 5 Hz)
+    in a single training run without separate stages (DINO-world precedent).
   D, depth, heads from `PredictorConfig`. No language cross-attention in B-1.
 - **Files:** `vllatent/model/predictor.py` (new), `tests/test_predictor.py` (new)
 - **DoD:** Output shape correct. Param count matches expected (~25M at D=384 or ~50M at D=768).
-  Block-causal mask verified (future can't attend to later future). FiLM changes output.
+  Block-causal mask verified (future can't attend to later future). Action FiLM changes output.
+  dt FiLM changes output when dt varies.
 - **Test:** `$PY -m pytest -q tests/test_predictor.py -m torch`
 - **Deps:** blocks B1.17. Blocked-by: B1.12.
 
@@ -297,13 +373,20 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 **B1.18 — Loss functions: L_latent + L_wp.**
 - Tier TORCH / AUTO
 - `vllatent/train/losses.py`:
-  - `L_latent`: smooth L1 between predicted and GT future latents. Log cosine similarity
+  - `L_latent`: smooth L1 with **beta=0.1** (DINO-world 2025 precedent; NOT default beta=1.0).
+    **Quality-weighted**: per-sample L_latent scaled by `frame_quality.clamp(min=0.1)` — low
+    quality reduces gradient contribution but floor prevents zero-weight. Log cosine similarity
     as diagnostic (not gradient source).
   - `L_wp`: smooth L1 between predicted and GT future deltas. **Confidence-weighted**: each
-    sample's L_wp scaled by `vo_confidence` (high confidence = full weight).
-  - `combined_loss`: `lambda_latent * L_latent + lambda_wp * L_wp`. Lambdas from `DistillConfig`.
+    sample's L_wp scaled by `vo_confidence.clamp(min=0.05)`. **NOT weighted by frame_quality**
+    — waypoint head needs to learn from all motion patterns including fast/blurry frames.
+  - `combined_loss`: `L_total = w_quality * L_latent + lambda_wp * w_vo * L_wp`. Where
+    `w_quality = frame_quality.clamp(min=0.1)` and `w_vo = vo_confidence.clamp(min=0.05)`.
+    Lambdas from `DistillConfig`.
 - **Files:** `vllatent/train/losses.py` (new), `tests/test_losses.py` (new)
-- **DoD:** Losses computed correctly. Confidence weighting tested. Shapes correct.
+- **DoD:** Losses computed correctly. beta=0.1 for smooth L1 verified. Quality weighting on
+  L_latent tested. Confidence weighting on L_wp tested (frame_quality NOT applied to L_wp).
+  Floor clamps verified. Shapes correct.
 - **Test:** `$PY -m pytest -q tests/test_losses.py -m torch`
 - **Deps:** blocks B1.20. Blocked-by: B1.17.
 
@@ -407,45 +490,47 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 ## Dependency Graph (B-1)
 
 ```
-PARALLEL TRACK A (pipeline fixes, can start immediately):
+PARALLEL TRACK A (pipeline fixes + content filter, can start immediately):
   B1.1 (undistort wire) ---+
   B1.2 (megasam conf)  ---+
   B1.3 (GPS Sim3)      ---+
-  B1.4 (clip length)   ---+---> B1.7 (YouTube pilot) ---> B1.10 (VO validation)
-  B1.5 (config revise) ---+                                      |
-  B1.6 (SportsTarget)  ---+                                      |
-                                                                  |
-PARALLEL TRACK B (data, can start immediately):                  |
-  B1.8 (CosFly adapter) ----------------------------------------+|
-  B1.9 (quality report) ----------------------------------------+|
-                                                                 ||
-PARALLEL TRACK C (CRITICAL -- start ASAP):                      ||
-  B1.11 (Orin NX bench) ---> B1.12 (lock D) --+----------------+|
-                                                |                ||
-GROUP 4 (loader, needs D locked + schema):     |                ||
-  B1.13 (sports loader) <-- B1.4,B1.6,B1.12   |                ||
-  B1.14 (collate) <-- B1.13                    |                ||
-                                                |                ||
-GROUP 5 (model, needs D locked):               |                ||
-  B1.15 (predictor) <-- B1.12                  |                ||
-  B1.16 (heads) <-- B1.12                      |                ||
-  B1.17 (assembly) <-- B1.15, B1.16            |                ||
-                                                |                ||
-GROUP 6 (training):                             |                ||
-  B1.18 (losses) <-- B1.17                     |                ||
-  B1.19 (checkpoint) -- no block                |                ||
-  B1.20 (overfit-tiny) <-- B1.14,B1.17,B1.18,B1.19,data -------+|
-  B1.21 (sanity+viz) <-- B1.13,B1.18           |                ||
-                                                |                ||
-GROUP 8 (full training + verify):              |                ||
-  B1.22 (full train) <-- B1.20, B1.8          -+                ||
-  B1.23 (Jetson speed) <-- B1.22               |                ||
-  B1.24 (B-1 DoD) <-- ALL <-------------------+----------------++
+  B1.4 (clip length)   ---+---> B1.7b (content filter) ---> B1.7 (YouTube pilot) ---> B1.10 (VO)
+  B1.5 (config revise) ---+                                                                |
+  B1.6 (SportsTarget)  ---+                                                                |
+                                                                                            |
+PARALLEL TRACK B (data + quality dashboards, can start immediately):                       |
+  B1.8 (CosFly adapter) ---------------------------------------------------------------+  |
+  B1.9 (quality report) ---------------------------------------------------------------+  |
+  B1.9b (HTML clip report) — no deps, runs on any .npz --------------------------------+  |
+                                                                                        |  |
+PARALLEL TRACK C (CRITICAL -- start ASAP):                                             |  |
+  B1.11 (Orin NX bench) ---> B1.12 (lock D) --+---------------------------------------+  |
+                                                |                                       |  |
+GROUP 4 (loader, needs D locked + schema):     |                                       |  |
+  B1.13 (sports loader) <-- B1.4,B1.6,B1.12   |                                       |  |
+  B1.14 (collate) <-- B1.13                    |                                       |  |
+                                                |                                       |  |
+GROUP 5 (model, needs D locked):               |                                       |  |
+  B1.15 (predictor) <-- B1.12                  |                                       |  |
+  B1.16 (heads) <-- B1.12                      |                                       |  |
+  B1.17 (assembly) <-- B1.15, B1.16            |                                       |  |
+                                                |                                       |  |
+GROUP 6 (training):                             |                                       |  |
+  B1.18 (losses) <-- B1.17                     |                                       |  |
+  B1.19 (checkpoint) -- no block                |                                       |  |
+  B1.20 (overfit-tiny) <-- B1.14,B1.17,B1.18,B1.19,data ---------------------------+  |  |
+  B1.21 (sanity+viz) <-- B1.13,B1.18           |                                    |  |  |
+                                                |                                    |  |  |
+GROUP 8 (full training + verify):              |                                    |  |  |
+  B1.22 (full train) <-- B1.20, B1.8          -+                                    |  |  |
+  B1.23 (Jetson speed) <-- B1.22               |                                    |  |  |
+  B1.24 (B-1 DoD) <-- ALL <-------------------+------------------------------------+--+--+
 ```
 
 **Critical path:** B1.11 -> B1.12 -> B1.15 -> B1.17 -> B1.18 -> B1.20 -> B1.22 -> B1.24
+(unchanged — B1.7b is on the data track, not the critical path)
 
-**Parallel tracks before encoder gate:** Track A (B1.1-B1.7), Track B (B1.8-B1.9), Track C (B1.11)
+**Parallel tracks before encoder gate:** Track A (B1.1-B1.7b-B1.7), Track B (B1.8-B1.9-B1.9b), Track C (B1.11)
 
 ---
 
@@ -457,6 +542,19 @@ GROUP 8 (full training + verify):              |                ||
   (D=384) only if the Orin NX benchmark (B1.11) shows ViT-B/16 > 20ms.
 - **GPS Sim(3):** Stub with interface only. `normalize_scale(mode="median_speed")` is the
   active path for B-1.
+- **Content filter (B-1):** CLIP zero-shot + PySceneDetect `AdaptiveDetector`. Upgrade path
+  (B-2/B-3): CLIP+MLP trained on ~2,500 human labels (PriVi CVPR 2026 precedent).
+- **Visualization:** Self-contained Plotly HTML per clip, integrated as pipeline post-hook.
+- **Delta preprocessing:** physics hard clip → median filter k=3 → velocity normalize
+  (delta/dt) → per-dimension z-score normalize. Store mean/std for inference denormalization.
+- **Quality weighting:** per-sample loss weights (`frame_quality` → L_latent,
+  `vo_confidence` → L_wp), NOT hard exclusion. Floors: 0.1 (quality), 0.05 (confidence).
+- **No global temporal smoothing** (Kalman/MA). Confidence-gated median filter only.
+- **B-1 augmentation:** temporal jitter ±1 + delta noise only. Patch dropout deferred to B-2.
+- **TrackVLA remains unreleased** — B-1 trains without teacher (L_latent + L_wp only).
+- **L_latent beta:** smooth L1 with beta=0.1 (DINO-world 2025 precedent).
+- **Mixed FPS:** velocity normalization (delta/dt) + FiLM on dt_seconds. Joint training,
+  no separate stages. Oversample CosFly-Track to ~40% of batches.
 
 ## Open Decisions
 
@@ -466,11 +564,12 @@ GROUP 8 (full training + verify):              |                ||
 2. **`action_id` in StepSample.** Sports data has no discrete action. B-1 uses `action_id=0`
    sentinel. B-2 revises schema to make `action_id` optional or replace with continuous action.
 
-3. **L_latent loss type.** Start with smooth L1 (DINO-WM precedent). Log cosine sim as
-   diagnostic. Switch to cosine if smooth L1 plateaus.
+3. ~~**L_latent loss type.**~~ **RESOLVED:** Smooth L1 with **beta=0.1** (DINO-world 2025
+   precedent, not default beta=1.0). Log cosine sim as diagnostic.
 
-4. **CosFly-Track FPS (2 Hz vs 5 Hz).** Separate pre-train stage at native 2 Hz, then
-   fine-tune at 5 Hz on YouTube data. `dt_seconds` in StepSample supports mixed FPS.
+4. ~~**CosFly-Track FPS (2 Hz vs 5 Hz).**~~ **RESOLVED:** Velocity normalization (delta/dt) +
+   FiLM conditioning on `dt_seconds` in the predictor. Joint training (no separate stages).
+   Oversample CosFly-Track to ~40% of batches via weighted sampling.
 
 5. **Scheduled sampling (B-2).** B-1 uses GT history. Deployment needs auto-regressive.
    B-2 introduces curriculum mixing GT and predicted history.
@@ -486,6 +585,8 @@ GROUP 8 (full training + verify):              |                ||
 ## Ralph Loop Hand-off
 
 - Start at **B1.1** (pipeline bug fix, pure-tier cheap-win).
+- **B1.7b (content filter) is AUTO** — can run immediately, unblocks B1.7.
+- **B1.9b (HTML report) is AUTO** — can run anytime, no blockers.
 - **B1.11 (Orin NX benchmark) can run in parallel** with Group 0-2.
 - User-gated steps: B1.7, B1.8, B1.10, B1.11, B1.20, B1.22, B1.23, B1.24.
 - Always set `--max-iterations` backstop.
@@ -498,6 +599,29 @@ GROUP 8 (full training + verify):              |                ||
 After plan execution:
 1. `make test && make test-torch && make lint && make typecheck` — all green
 2. `$PY scripts/data_quality_report.py --cache <pilot_cache>` — quality metrics visible
-3. `$PY scripts/train_sports.py --overfit-tiny --max-steps 500` — loss below baseline
-4. Inspect val metrics from full training run
-5. Check Jetson inference speed < 50ms
+3. `$PY scripts/clip_report.py --cache <pilot_cache> --clip <id>` — HTML report renders (B1.9b)
+4. Content filter thumbnail grids reviewed for pilot clips (B1.7b)
+5. `$PY scripts/train_sports.py --overfit-tiny --max-steps 500` — loss below baseline
+6. Inspect val metrics from full training run
+7. Check Jetson inference speed < 50ms
+
+---
+
+## Research References (2026-06-20)
+
+Sources informing B-1 design decisions. Full research notes in vault.
+
+- **DINO-world** (arXiv 2507.19468): smooth L1 beta=0.1, variable timestamp conditioning via
+  FiLM, 66M uncurated videos. Precedent for loss function + FPS handling.
+- **PriVi** (CVPR 2026): CLIP+MLP on ~2,500 human labels achieves 90.3% precision for YouTube
+  FPV video filtering. Informs B1.7b upgrade path (B-2/B-3).
+- **Allegro**: 7-stage video processing pipeline — PySceneDetect + DOVER + CLIP alignment.
+  Precedent for content filtering architecture.
+- **EgoVid-5M**: CLIP frame-frame consistency >= 0.7, optical flow 3-35 pixels. Quality
+  thresholds for ego-centric video curation.
+- **DINO-WM** (ICLR 2025): ViT-S/14, D=384, L2 loss, no augmentation, simulator only.
+  Earlier baseline; superseded by DINO-world for loss choice.
+- **CosFly-Track**: ~100K frames public (HF `AutelRobotics/CosFly`), 2 Hz, CARLA GT.
+  Primary synthetic data source for B-1.
+- **TrackVLA** (CoRL 2025): Visual tracking for autonomous agents. Inference code only; no
+  weights/training released as of 2026-06. B-1 trains without teacher.
