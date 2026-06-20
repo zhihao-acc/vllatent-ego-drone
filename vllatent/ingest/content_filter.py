@@ -304,6 +304,28 @@ def thumbnail_grid_data(
 # ---------------------------------------------------------------------------
 
 
+def extract_fpv_ranges(shots: list[ShotInfo]) -> list[tuple[int, int]]:
+    """Merge consecutive FPV shots into contiguous frame ranges."""
+    ranges: list[tuple[int, int]] = []
+    current_start: int | None = None
+    current_end: int = 0
+
+    for shot in shots:
+        if shot.is_fpv:
+            if current_start is None:
+                current_start = shot.start
+            current_end = shot.end
+        else:
+            if current_start is not None:
+                ranges.append((current_start, current_end))
+                current_start = None
+
+    if current_start is not None:
+        ranges.append((current_start, current_end))
+
+    return ranges
+
+
 def filter_video(
     frames: list[np.ndarray],
     *,
@@ -343,6 +365,7 @@ __all__ = [
     "classify_shots",
     "video_verdict",
     "fpv_frame_mask",
+    "extract_fpv_ranges",
     "thumbnail_grid_data",
     "filter_video",
 ]

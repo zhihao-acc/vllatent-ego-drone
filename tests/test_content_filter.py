@@ -258,6 +258,66 @@ class TestThumbnailGrid:
 
 
 # ---------------------------------------------------------------------------
+# FPV range extraction
+# ---------------------------------------------------------------------------
+
+class TestExtractFpvRanges:
+    """Merging consecutive FPV shots into contiguous frame ranges."""
+
+    def test_all_fpv_merge_single_range(self) -> None:
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [
+            ShotInfo(start=0, end=10, is_fpv=True, mean_score=0.8),
+            ShotInfo(start=10, end=20, is_fpv=True, mean_score=0.7),
+            ShotInfo(start=20, end=30, is_fpv=True, mean_score=0.9),
+        ]
+        assert extract_fpv_ranges(shots) == [(0, 30)]
+
+    def test_mixed_fpv_produces_separate_ranges(self) -> None:
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [
+            ShotInfo(start=0, end=10, is_fpv=True, mean_score=0.8),
+            ShotInfo(start=10, end=20, is_fpv=True, mean_score=0.7),
+            ShotInfo(start=20, end=30, is_fpv=False, mean_score=0.1),
+            ShotInfo(start=30, end=40, is_fpv=True, mean_score=0.9),
+        ]
+        assert extract_fpv_ranges(shots) == [(0, 20), (30, 40)]
+
+    def test_no_fpv_returns_empty(self) -> None:
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [
+            ShotInfo(start=0, end=10, is_fpv=False, mean_score=0.1),
+            ShotInfo(start=10, end=20, is_fpv=False, mean_score=0.05),
+        ]
+        assert extract_fpv_ranges(shots) == []
+
+    def test_empty_shots_returns_empty(self) -> None:
+        from vllatent.ingest.content_filter import extract_fpv_ranges
+
+        assert extract_fpv_ranges([]) == []
+
+    def test_single_fpv_shot(self) -> None:
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [ShotInfo(start=5, end=15, is_fpv=True, mean_score=0.75)]
+        assert extract_fpv_ranges(shots) == [(5, 15)]
+
+    def test_non_consecutive_fpv_with_gap(self) -> None:
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [
+            ShotInfo(start=0, end=10, is_fpv=True, mean_score=0.8),
+            ShotInfo(start=10, end=20, is_fpv=False, mean_score=0.1),
+            ShotInfo(start=20, end=30, is_fpv=False, mean_score=0.15),
+            ShotInfo(start=30, end=40, is_fpv=True, mean_score=0.9),
+        ]
+        assert extract_fpv_ranges(shots) == [(0, 10), (30, 40)]
+
+
+# ---------------------------------------------------------------------------
 # Module purity (no torch at import time)
 # ---------------------------------------------------------------------------
 

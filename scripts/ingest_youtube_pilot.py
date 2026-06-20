@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import sys
 from pathlib import Path
 
@@ -136,7 +137,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from PIL import Image
 
-            from vllatent.ingest.content_filter import VideoVerdict, filter_video
+            from vllatent.ingest.content_filter import VideoVerdict, extract_fpv_ranges, filter_video
 
             stride = max(1, n_frames // 50)
             sample_frames = [
@@ -161,47 +162,99 @@ def main(argv: list[str] | None = None) -> int:
 
         except Exception as e:
             _log(f"  CONTENT FILTER WARNING: {e} — proceeding anyway")
+            filter_result = None
+
+        # --- Step 3: Extract FPV ranges and cut into 10s clips ---
+        from vllatent.ingest.content_filter import extract_fpv_ranges
+        from vllatent.ingest.preprocess import cut_fixed_clips
+
+        fpv_ranges: list[tuple[int, int]] = []
+        if filter_result is not None:
+            sampled_ranges = extract_fpv_ranges(filter_result.shots)
+            # Map sampled-frame indices back to full-frame indices
+            fpv_ranges = [
+                (s * stride, min(e * stride, n_frames))
+                for s, e in sampled_ranges
+            ]
+
+        if not fpv_ranges:
+            # Fallback: treat entire video as one FPV range
+            fpv_ranges = [(0, n_frames)]
+
+        clip_length_frames = int(cfg.clip_length_seconds * cfg.target_fps)
+        sub_clips: list[tuple[str, list[Path]]] = []
+
+        for range_idx, (rng_start, rng_end) in enumerate(fpv_ranges):
+            range_frame_paths = frame_paths[rng_start:rng_end]
+            if not range_frame_paths:
+                continue
+            segments = cut_fixed_clips(range_frame_paths, clip_length_frames)
+            for clip_idx, seg_paths in enumerate(segments):
+                sub_id = f"{clip_id}_fpv{range_idx:02d}_c{clip_idx:03d}"
+                sub_clips.append((sub_id, seg_paths))
+
+        _log(f"  FPV ranges: {len(fpv_ranges)}, 10s clips: {len(sub_clips)}")
 
         if args.filter_only:
             _log("  ACCEPTED (filter-only mode, skipping pipeline)")
-            results_summary.append({"clip_id": clip_id, "status": "filter_accepted"})
+            results_summary.append({
+                "clip_id": clip_id,
+                "status": "filter_accepted",
+                "fpv_ranges": len(fpv_ranges),
+                "n_sub_clips": len(sub_clips),
+            })
             continue
 
-        # --- Step 3: Full pipeline (quality → MegaSaM → DINOv3 → cache) ---
-        _log("  running pipeline...")
-        try:
-            from vllatent.ingest.pipeline import process_clip
+        # --- Step 4: Run pipeline on each sub-clip ---
+        from vllatent.ingest.pipeline import process_clip
 
-            pipeline_result = process_clip(
-                url=url,
-                clip_id=clip_id,
-                cfg=cfg,
-                skip_download=True,
-                skip_megasam=args.skip_megasam,
-                device=args.device,
-            )
+        n_clip_ok = 0
+        n_clip_err = 0
 
-            if pipeline_result.errors:
-                _log(f"  PIPELINE ERRORS: {pipeline_result.errors}")
-                results_summary.append({
-                    "clip_id": clip_id,
-                    "status": "pipeline_error",
-                    "errors": pipeline_result.errors,
-                })
-            else:
-                _log(f"  OK: {pipeline_result.n_accepted}/{pipeline_result.n_frames} frames")
-                results_summary.append({
-                    "clip_id": clip_id,
-                    "status": "ok",
-                    "n_frames": pipeline_result.n_frames,
-                    "n_accepted": pipeline_result.n_accepted,
-                    "latent_path": pipeline_result.latent_path,
-                })
+        for sub_id, seg_paths in sub_clips:
+            sub_frames_dir = frames_dir / sub_id
+            sub_frames_dir.mkdir(parents=True, exist_ok=True)
+            for j, src in enumerate(seg_paths):
+                dst = sub_frames_dir / f"{j:06d}.jpg"
+                if not dst.exists():
+                    shutil.copy2(src, dst)
 
-        except Exception as e:
-            _log(f"  PIPELINE FAILED: {e}")
-            results_summary.append({"clip_id": clip_id, "status": "pipeline_failed", "error": str(e)})
-            continue
+            _log(f"    pipeline {sub_id} ({len(seg_paths)} frames)...")
+            try:
+                pipeline_result = process_clip(
+                    url=url,
+                    clip_id=sub_id,
+                    cfg=cfg,
+                    skip_download=True,
+                    skip_megasam=args.skip_megasam,
+                    device=args.device,
+                )
+
+                if pipeline_result.errors:
+                    _log(f"    PIPELINE ERRORS: {pipeline_result.errors}")
+                    results_summary.append({
+                        "clip_id": sub_id,
+                        "status": "pipeline_error",
+                        "errors": pipeline_result.errors,
+                    })
+                    n_clip_err += 1
+                else:
+                    _log(f"    OK: {pipeline_result.n_accepted}/{pipeline_result.n_frames} frames")
+                    results_summary.append({
+                        "clip_id": sub_id,
+                        "status": "ok",
+                        "n_frames": pipeline_result.n_frames,
+                        "n_accepted": pipeline_result.n_accepted,
+                        "latent_path": pipeline_result.latent_path,
+                    })
+                    n_clip_ok += 1
+
+            except Exception as e:
+                _log(f"    PIPELINE FAILED: {e}")
+                results_summary.append({"clip_id": sub_id, "status": "pipeline_failed", "error": str(e)})
+                n_clip_err += 1
+
+        _log(f"  clip summary: {n_clip_ok} OK, {n_clip_err} failed out of {len(sub_clips)}")
 
     # --- Summary ---
     _log(f"\n{'='*60}")
@@ -212,11 +265,14 @@ def main(argv: list[str] | None = None) -> int:
     n_filter_ok = sum(1 for r in results_summary if r.get("status") == "filter_accepted")
     n_rejected = sum(1 for r in results_summary if r.get("status") == "content_rejected")
     n_failed = len(results_summary) - n_ok - n_filter_ok - n_rejected
+    n_fpv_ranges_total = sum(r.get("fpv_ranges", 0) for r in results_summary)
+    n_sub_clips_total = sum(r.get("n_sub_clips", 0) for r in results_summary)
 
-    _log(f"  Total: {len(clips)}")
-    _log(f"  Pipeline OK: {n_ok}")
+    _log(f"  Total clips: {len(clips)}")
+    _log(f"  Pipeline OK (sub-clips): {n_ok}")
     if n_filter_ok:
         _log(f"  Filter accepted (no pipeline): {n_filter_ok}")
+        _log(f"    FPV ranges: {n_fpv_ranges_total}, 10s sub-clips: {n_sub_clips_total}")
     _log(f"  Content-rejected: {n_rejected}")
     _log(f"  Failed: {n_failed}")
 
@@ -226,7 +282,7 @@ def main(argv: list[str] | None = None) -> int:
         if status == "ok":
             _log(f"    OK  {cid}: {r.get('n_accepted')}/{r.get('n_frames')} frames -> {r.get('latent_path')}")
         elif status == "filter_accepted":
-            _log(f"    FLT {cid}: accepted by content filter")
+            _log(f"    FLT {cid}: {r.get('fpv_ranges')} FPV ranges, {r.get('n_sub_clips')} sub-clips")
         elif status == "content_rejected":
             _log(f"    REJ {cid}: {r.get('fpv_shots')}/{r.get('total_shots')} FPV shots")
         else:
