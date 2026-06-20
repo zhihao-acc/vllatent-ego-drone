@@ -41,7 +41,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.4 — Add fixed-clip-length cutting | done | 2026-06-19 | clip_length_seconds=10.0 in IngestConfig, cut_fixed_clips() in preprocess |
 | B1.5 — Revise Config for sports pivot | done | 2026-06-19 | vjepa_only default, megasam_vo added, lambda_trust, sports.yaml fixed |
 | B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof, vjepa_surprise)` + `Target` union alias; 94 schema tests green |
-| B1.7 — YouTube pilot: curate + ingest | pending | — | Phase B-1 Group 1: USER-GATED (depends on B1.7b) |
+| B1.7 — YouTube pilot: curate + ingest | in_progress | 2026-06-20 | Phase B-1 Group 1: USER-GATED; `scripts/ingest_youtube_pilot.py` written; `acquire.py` SponsorBlock support added; awaiting user to run download + pipeline |
 | B1.7b — Content filter implementation | done | 2026-06-20 | `vllatent/ingest/content_filter.py` — CLIP ViT-B/32 zero-shot FPV scoring + PySceneDetect AdaptiveDetector SBD; per-shot majority vote; ACCEPT/PARTIAL/REJECT verdict; thumbnail grid data; 21 tests green; all imports lazy (AST-verified) |
 | B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
@@ -63,6 +63,30 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-20 — B1.7: YouTube pilot ingest — script written; USER-GATED (download + pipeline)
+
+**Status:** B1.7 pending → **in_progress** (script AUTONOMOUS; download + pipeline USER-GATED).
+**What's done.**
+- `vllatent/ingest/acquire.py` — added `sponsorblock: bool = False` parameter to `download_clip()`.
+  When True, adds `["--sponsorblock-remove", "all"]` to yt-dlp command (strips sponsor/intro/outro
+  segments via SponsorBlock crowdsourced data before frame extraction).
+- `scripts/ingest_youtube_pilot.py` — orchestration script:
+  1. Loads clips from `configs/sports_clips.yaml` (15 curated skiing FPV clips, already populated)
+  2. Downloads each with SponsorBlock enabled (skips already-downloaded)
+  3. Extracts frames at 5 fps (from `configs/sports.yaml` IngestConfig)
+  4. Runs content filter (B1.7b) — CLIP+PySceneDetect, samples ≤50 frames per clip
+  5. REJECTed clips are skipped; ACCEPT/PARTIAL proceed to full pipeline
+  6. Full pipeline: quality scoring → MegaSaM VO → DINOv3 encode → .npz cache
+  7. Writes `pilot_summary.json` to cache dir
+  Flags: `--limit N`, `--device`, `--skip-download`, `--skip-megasam`, `--filter-only`
+  Uses config paths throughout (raw_dir/frames_dir/cache_dir from IngestConfig defaults).
+- `configs/sports_clips.yaml` — 15 curated clips (ski01-ski15), already populated from B1.6 era.
+**USER GATE:** user must run the script and verify output. See command block below.
+**DoD (from plan):** 10+ clips downloaded, sponsor segments stripped, content-filtered (FPV accepted),
+extracted, quality-scored, MegaSaM-processed, DINOv3-encoded, cached as `.npz`. Manifest validates.
 
 ---
 

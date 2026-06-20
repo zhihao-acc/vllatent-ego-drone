@@ -58,8 +58,13 @@ def download_clip(
     *,
     clip_id: str = "",
     max_height: int = 1080,
+    sponsorblock: bool = False,
 ) -> ClipMetadata:
-    """Download a single video clip via yt-dlp."""
+    """Download a single video clip via yt-dlp.
+
+    When ``sponsorblock=True``, strips sponsor/intro/outro segments via SponsorBlock
+    crowdsourced data (``--sponsorblock-remove all``).
+    """
     out_path = Path(out_dir)
     out_path.mkdir(parents=True, exist_ok=True)
 
@@ -75,8 +80,10 @@ def download_clip(
         "--output", output_template,
         "--no-playlist",
         "--write-info-json",
-        url,
     ]
+    if sponsorblock:
+        cmd.extend(["--sponsorblock-remove", "all"])
+    cmd.append(url)
 
     subprocess.run(cmd, check=True, timeout=600)
 

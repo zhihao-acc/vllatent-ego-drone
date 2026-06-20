@@ -1,0 +1,243 @@
+#!/usr/bin/env python3
+"""YouTube pilot ingest: download + content filter + full pipeline (B1.7).
+
+Orchestrates:
+  1. Download clips from configs/sports_clips.yaml via yt-dlp (SponsorBlock pre-strip)
+  2. Run content filter (CLIP + PySceneDetect) — reject non-FPV clips
+  3. Run full pipeline on accepted clips (quality → MegaSaM → DINOv3 → cache)
+  4. Update manifest
+
+Usage:
+    python scripts/ingest_youtube_pilot.py [--limit N] [--device cuda] [--skip-download]
+
+USER-GATED: the user must run this script and verify output.
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import sys
+from pathlib import Path
+
+import numpy as np
+import yaml
+
+
+def _log(msg: str) -> None:
+    print(f"[youtube-pilot] {msg}", file=sys.stderr)
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description="YouTube pilot ingest (B1.7)")
+    parser.add_argument("--clips", default="configs/sports_clips.yaml", help="Clips YAML")
+    parser.add_argument("--config", default="configs/sports.yaml", help="Sports config")
+    parser.add_argument("--limit", type=int, default=0, help="Max clips to process (0=all)")
+    parser.add_argument("--device", default="cuda", help="Torch device for CLIP/DINOv3")
+    parser.add_argument("--skip-download", action="store_true", help="Skip yt-dlp download")
+    parser.add_argument("--skip-megasam", action="store_true", help="Skip MegaSaM VO")
+    parser.add_argument("--filter-only", action="store_true", help="Download + filter only, no pipeline")
+    args = parser.parse_args(argv)
+
+    clips_data = yaml.safe_load(Path(args.clips).read_text()) or {}
+    clips = clips_data.get("clips", [])
+    if not clips:
+        _log(f"ERROR: no clips in {args.clips}")
+        return 1
+
+    if args.limit > 0:
+        clips = clips[:args.limit]
+
+    from vllatent.config import Config
+    config = Config.from_yaml(args.config)
+    if config.ingest is None:
+        _log(f"ERROR: {args.config} has no 'ingest' section")
+        return 1
+    cfg = config.ingest
+
+    raw_dir = Path(cfg.raw_dir)
+    frames_dir = Path(cfg.frames_dir)
+    cache_dir = Path(cfg.cache_dir)
+
+    raw_dir.mkdir(parents=True, exist_ok=True)
+    frames_dir.mkdir(parents=True, exist_ok=True)
+    cache_dir.mkdir(parents=True, exist_ok=True)
+
+    _log(f"Processing {len(clips)} clips from {args.clips}")
+    _log(f"  raw_dir={raw_dir}, frames_dir={frames_dir}, cache_dir={cache_dir}")
+    _log(f"  device={args.device}, skip_download={args.skip_download}")
+
+    results_summary: list[dict] = []
+
+    for i, clip in enumerate(clips):
+        clip_id = clip.get("clip_id", f"clip_{i:03d}")
+        url = clip.get("url", "")
+        if not url:
+            _log(f"SKIP {clip_id}: no URL")
+            continue
+
+        _log(f"\n{'='*60}")
+        _log(f"[{i+1}/{len(clips)}] {clip_id}: {url}")
+
+        # --- Step 1: Download with SponsorBlock ---
+        if not args.skip_download:
+            existing = list(raw_dir.glob(f"{clip_id}.*"))
+            video_exts = {".mp4", ".mkv", ".webm", ".avi", ".mov"}
+            if any(p.suffix in video_exts for p in existing):
+                _log("  already downloaded, skipping")
+            else:
+                _log("  downloading (SponsorBlock enabled)...")
+                try:
+                    from vllatent.ingest.acquire import download_clip
+                    download_clip(
+                        url, str(raw_dir),
+                        clip_id=clip_id,
+                        max_height=cfg.resolution_h,
+                        sponsorblock=True,
+                    )
+                    _log("  download OK")
+                except Exception as e:
+                    _log(f"  DOWNLOAD FAILED: {e}")
+                    results_summary.append({"clip_id": clip_id, "status": "download_failed", "error": str(e)})
+                    continue
+
+        # --- Step 2: Quick content filter (sample frames from video) ---
+        clip_frames_dir = frames_dir / clip_id
+        if not clip_frames_dir.exists() or not list(clip_frames_dir.glob("*.jpg")):
+            candidates = list(raw_dir.glob(f"{clip_id}.*"))
+            video_exts = {".mp4", ".mkv", ".webm", ".avi", ".mov"}
+            videos = [p for p in candidates if p.suffix in video_exts]
+            if not videos:
+                _log(f"  SKIP: no video file for {clip_id}")
+                results_summary.append({"clip_id": clip_id, "status": "no_video"})
+                continue
+            _log(f"  extracting frames @ {cfg.target_fps} fps...")
+            try:
+                from vllatent.ingest.preprocess import extract_frames
+                extract_frames(
+                    videos[0], str(clip_frames_dir),
+                    target_fps=cfg.target_fps,
+                    resolution_hw=(cfg.resolution_h, cfg.resolution_w),
+                )
+            except Exception as e:
+                _log(f"  EXTRACT FAILED: {e}")
+                results_summary.append({"clip_id": clip_id, "status": "extract_failed", "error": str(e)})
+                continue
+
+        frame_paths = sorted(clip_frames_dir.glob("*.jpg"))
+        n_frames = len(frame_paths)
+        _log(f"  {n_frames} frames on disk")
+
+        if n_frames < 7:
+            _log(f"  SKIP: too few frames ({n_frames})")
+            results_summary.append({"clip_id": clip_id, "status": "too_few_frames", "n_frames": n_frames})
+            continue
+
+        _log("  running content filter...")
+        try:
+            from PIL import Image
+
+            from vllatent.ingest.content_filter import VideoVerdict, filter_video
+
+            stride = max(1, n_frames // 50)
+            sample_frames = [
+                np.array(Image.open(frame_paths[idx]))
+                for idx in range(0, n_frames, stride)
+            ]
+
+            filter_result = filter_video(sample_frames, device=args.device)
+
+            fpv_count = sum(1 for s in filter_result.shots if s.is_fpv)
+            _log(f"  verdict: {filter_result.verdict.value}, FPV shots: {fpv_count}/{len(filter_result.shots)}")
+
+            if filter_result.verdict == VideoVerdict.REJECT:
+                _log("  REJECTED — skipping")
+                results_summary.append({
+                    "clip_id": clip_id,
+                    "status": "content_rejected",
+                    "fpv_shots": fpv_count,
+                    "total_shots": len(filter_result.shots),
+                })
+                continue
+
+        except Exception as e:
+            _log(f"  CONTENT FILTER WARNING: {e} — proceeding anyway")
+
+        if args.filter_only:
+            _log("  ACCEPTED (filter-only mode, skipping pipeline)")
+            results_summary.append({"clip_id": clip_id, "status": "filter_accepted"})
+            continue
+
+        # --- Step 3: Full pipeline (quality → MegaSaM → DINOv3 → cache) ---
+        _log("  running pipeline...")
+        try:
+            from vllatent.ingest.pipeline import process_clip
+
+            pipeline_result = process_clip(
+                url=url,
+                clip_id=clip_id,
+                cfg=cfg,
+                skip_download=True,
+                skip_megasam=args.skip_megasam,
+                device=args.device,
+            )
+
+            if pipeline_result.errors:
+                _log(f"  PIPELINE ERRORS: {pipeline_result.errors}")
+                results_summary.append({
+                    "clip_id": clip_id,
+                    "status": "pipeline_error",
+                    "errors": pipeline_result.errors,
+                })
+            else:
+                _log(f"  OK: {pipeline_result.n_accepted}/{pipeline_result.n_frames} frames")
+                results_summary.append({
+                    "clip_id": clip_id,
+                    "status": "ok",
+                    "n_frames": pipeline_result.n_frames,
+                    "n_accepted": pipeline_result.n_accepted,
+                    "latent_path": pipeline_result.latent_path,
+                })
+
+        except Exception as e:
+            _log(f"  PIPELINE FAILED: {e}")
+            results_summary.append({"clip_id": clip_id, "status": "pipeline_failed", "error": str(e)})
+            continue
+
+    # --- Summary ---
+    _log(f"\n{'='*60}")
+    _log("PILOT INGEST SUMMARY")
+    _log(f"{'='*60}")
+
+    n_ok = sum(1 for r in results_summary if r.get("status") == "ok")
+    n_filter_ok = sum(1 for r in results_summary if r.get("status") == "filter_accepted")
+    n_rejected = sum(1 for r in results_summary if r.get("status") == "content_rejected")
+    n_failed = len(results_summary) - n_ok - n_filter_ok - n_rejected
+
+    _log(f"  Total: {len(clips)}")
+    _log(f"  Pipeline OK: {n_ok}")
+    if n_filter_ok:
+        _log(f"  Filter accepted (no pipeline): {n_filter_ok}")
+    _log(f"  Content-rejected: {n_rejected}")
+    _log(f"  Failed: {n_failed}")
+
+    for r in results_summary:
+        status = r.get("status", "unknown")
+        cid = r.get("clip_id", "?")
+        if status == "ok":
+            _log(f"    OK  {cid}: {r.get('n_accepted')}/{r.get('n_frames')} frames -> {r.get('latent_path')}")
+        elif status == "filter_accepted":
+            _log(f"    FLT {cid}: accepted by content filter")
+        elif status == "content_rejected":
+            _log(f"    REJ {cid}: {r.get('fpv_shots')}/{r.get('total_shots')} FPV shots")
+        else:
+            _log(f"    ERR {cid}: {status} — {r.get('error', r.get('errors', ''))}")
+
+    summary_path = cache_dir / "pilot_summary.json"
+    summary_path.write_text(json.dumps(results_summary, indent=2))
+    _log(f"\nSummary: {summary_path}")
+
+    return 0 if (n_ok > 0 or n_filter_ok > 0) else 1
+
+
+if __name__ == "__main__":
+    sys.exit(main())
