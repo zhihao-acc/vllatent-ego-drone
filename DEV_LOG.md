@@ -53,7 +53,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.16 — Waypoint head + trust head stub | pending | — | Phase B-1 Group 5 |
 | B1.17 — Full model assembly | pending | — | Phase B-1 Group 5 |
 | B1.18 — Loss functions: L_latent + L_wp | pending | — | Phase B-1 Group 6 |
-| B1.19 — Checkpoint save/load + config snapshot | pending | — | Phase B-1 Group 6 |
+| B1.19 — Checkpoint save/load + config snapshot | done | 2026-06-19 | `vllatent/train/checkpoint.py` — save/load + config snapshot + seed_everything; 10 torch tests green; lazy torch import (AST-verified) |
 | B1.20 — Training script: overfit-tiny-batch | pending | — | Phase B-1 Group 6: USER-GATED |
 | B1.21 — Pre-train sanity check + viz | pending | — | Phase B-1 Group 7 |
 | B1.22 — Full training run | pending | — | Phase B-1 Group 8: USER-GATED (H20) |
@@ -61,6 +61,24 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-19 — B1.19: checkpoint save/load + config snapshot
+
+**Status:** B1.19 pending → **done** (AUTO, TORCH tier).
+**What's done.** `vllatent/train/checkpoint.py` — `save_checkpoint()` / `load_checkpoint()` /
+`snapshot_config()` / `seed_everything()`. Save writes model state, optimizer state, epoch,
+global step, config (as plain dict), and metrics. Load restores model + optionally optimizer.
+Config snapshot writes a YAML file once at training start. `seed_everything` sets torch +
+numpy + python random deterministically. All torch imports lazy (inside functions); module
+imports pure-box-safe (AST-verified).
+**Tested.** `tests/test_checkpoint.py` (10, `@pytest.mark.torch`): YAML round-trip (all sections +
+ingest), tuple→list coercion, save/load round-trip (weights + metadata), parent-dir creation,
+load-without-optimizer, **resume produces identical gradients** (save at step N, load, verify
+step N+1 grad matches), deterministic seed, import purity AST guard. Full pure suite 375+13s
+green.
+**No blockers.** B1.19 has no dependencies (parallel with B1.15–B1.18, all blocked by B1.11→B1.12).
 
 ---
 
