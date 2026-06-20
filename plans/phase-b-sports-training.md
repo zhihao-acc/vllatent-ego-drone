@@ -139,21 +139,48 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 
 ### Group 1 — Data Acquisition + Quality
 
+**B1.7a — Create `vllatent/encode/batch.py` (batch DINOv3 encoding).**
+- Tier TORCH / AUTO
+- `pipeline.py:93` imports `from vllatent.encode.batch import encode_frames` which does not
+  exist. Create `vllatent/encode/batch.py` with `encode_frames(frames_dir, device) → (N, 196,
+  768) fp16` that iterates over sorted JPEGs in a directory and encodes each via
+  `DinoV3Encoder.encode_rgb()`. Lazy torch imports (tier rule).
+- **Files:** `vllatent/encode/batch.py` (new), `tests/test_encode_batch.py` (new)
+- **DoD:** `encode_frames()` returns stacked `(N, PATCH_TOKENS, EMBED_DIM)` fp16 latents.
+  Test covers shape/dtype contract with monkeypatched encoder (no real weights).
+- **Test:** `$PY -m pytest -q tests/test_encode_batch.py`
+- **Deps:** blocks B1.7. Blocked-by: none.
+
+**B1.7c — Segment-level FPV extraction + rework pilot script.**
+- Tier ORCH / AUTO
+- The current pilot script does whole-video ACCEPT/REJECT but never extracts FPV-only
+  segments or cuts 10s clips. Add `extract_fpv_ranges(shots) → list[tuple[int,int]]` to
+  `content_filter.py` that merges consecutive FPV shots into contiguous frame ranges. Rework
+  `scripts/ingest_youtube_pilot.py` to: (1) download full video with SponsorBlock, (2) extract
+  all frames, (3) run content filter → get FPV mask + shot list, (4) extract contiguous FPV
+  ranges, (5) within each FPV range cut 10s clips via `cut_fixed_clips()`, (6) run each clip
+  through the pipeline (quality → MegaSaM → DINOv3 → .npz cache). Pipeline uses per-clip
+  sub-directories (`{clip_id}_fpv{range_idx}_clip{clip_idx}`).
+- **Files:** `vllatent/ingest/content_filter.py` (add `extract_fpv_ranges`),
+  `scripts/ingest_youtube_pilot.py` (rework), `tests/test_content_filter.py` (add tests)
+- **DoD:** `extract_fpv_ranges()` tested. Pilot script handles PARTIAL videos (FPV-only
+  segments extracted). 10s clip cutting integrated.
+- **Test:** `$PY -m pytest -q tests/test_content_filter.py`
+- **Deps:** blocks B1.7. Blocked-by: B1.7a, B1.7b.
+
 **B1.7 — YouTube pilot: curate 10-15 skiing FPV clips + run full ingest.**
 - Tier ORCH / USER-GATED
-- Populate `configs/sports_clips.yaml` with 10-15 hand-curated YouTube skiing/MTB FPV URLs.
-  **Pre-step:** download with `yt-dlp --sponsorblock-remove sponsor,intro,outro` to strip
-  crowdsourced ad/intro/outro segments before frame extraction.
-  **Post-download:** run content filter (B1.7b) — SBD + CLIP filter → ingest only accepted
-  FPV shots. Pipeline flow: download → content filter → ingest accepted shots.
-  Run `python -m vllatent.ingest batch` with fixed 10s clip cutting. This exercises the full
-  pipeline including the B1.1 undistort fix and B1.4 clip cutting.
+- Run the reworked `scripts/ingest_youtube_pilot.py` which: downloads with SponsorBlock,
+  runs content filter, extracts FPV-only segments, cuts 10s clips, and runs each through
+  the full pipeline (quality → MegaSaM → DINOv3 → .npz cache). Exercises the complete
+  chain including B1.1 undistort fix, B1.4 clip cutting, B1.7a batch encoding, and B1.7c
+  segment-level FPV extraction.
 - **Files:** `configs/sports_clips.yaml`
-- **DoD:** 10+ clips downloaded, sponsor segments stripped, content-filtered (FPV accepted),
-  extracted, quality-scored, MegaSaM-processed, DINOv3-encoded, cached as `.npz`. Manifest
-  validates. Per-clip quality stats + thumbnail grids reviewed.
+- **DoD:** 10+ clips downloaded, sponsor segments stripped, content-filtered (FPV segments
+  extracted), cut to 10s clips, quality-scored, MegaSaM-processed, DINOv3-encoded, cached
+  as `.npz`. Manifest validates. Per-clip quality stats + thumbnail grids reviewed.
 - **Test:** User runs pipeline + reviews outputs + reviews content filter thumbnail grids.
-- **Deps:** blocks B1.8, B1.10. Blocked-by: B1.1, B1.2, B1.4, **B1.7b**.
+- **Deps:** blocks B1.8, B1.10. Blocked-by: B1.1, B1.2, B1.4, **B1.7a, B1.7b, B1.7c**.
 
 **B1.7b — Content filter implementation.**
 - Tier PURE+TOOL / AUTO
@@ -493,8 +520,8 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 PARALLEL TRACK A (pipeline fixes + content filter, can start immediately):
   B1.1 (undistort wire) ---+
   B1.2 (megasam conf)  ---+
-  B1.3 (GPS Sim3)      ---+
-  B1.4 (clip length)   ---+---> B1.7b (content filter) ---> B1.7 (YouTube pilot) ---> B1.10 (VO)
+  B1.3 (GPS Sim3)      ---+      B1.7a (batch encode) --+
+  B1.4 (clip length)   ---+---> B1.7b (content filter) -+--> B1.7c (FPV extract) --> B1.7 (pilot) --> B1.10
   B1.5 (config revise) ---+                                                                |
   B1.6 (SportsTarget)  ---+                                                                |
                                                                                             |

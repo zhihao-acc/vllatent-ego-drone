@@ -41,8 +41,10 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.4 — Add fixed-clip-length cutting | done | 2026-06-19 | clip_length_seconds=10.0 in IngestConfig, cut_fixed_clips() in preprocess |
 | B1.5 — Revise Config for sports pivot | done | 2026-06-19 | vjepa_only default, megasam_vo added, lambda_trust, sports.yaml fixed |
 | B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof, vjepa_surprise)` + `Target` union alias; 94 schema tests green |
-| B1.7 — YouTube pilot: curate + ingest | in_progress | 2026-06-20 | Phase B-1 Group 1: USER-GATED; `scripts/ingest_youtube_pilot.py` written; `acquire.py` SponsorBlock support added; awaiting user to run download + pipeline |
+| B1.7 — YouTube pilot: curate + ingest | in_progress | 2026-06-20 | REPLANNED: split into B1.7a (batch encode), B1.7c (FPV segment extract + pilot rework). USER-GATED: user runs reworked script |
+| B1.7a — Create vllatent/encode/batch.py | done | 2026-06-20 | `vllatent/encode/batch.py` — `encode_frames(frames_dir, device) → (N, 196, 768) fp16`; lazy torch; 5 tests green (mocked encoder, AST purity) |
 | B1.7b — Content filter implementation | done | 2026-06-20 | `vllatent/ingest/content_filter.py` — CLIP ViT-B/32 zero-shot FPV scoring + PySceneDetect AdaptiveDetector SBD; per-shot majority vote; ACCEPT/PARTIAL/REJECT verdict; thumbnail grid data; 21 tests green; all imports lazy (AST-verified) |
+| B1.7c — FPV segment extraction + pilot rework | done | 2026-06-20 | `extract_fpv_ranges()` in content_filter.py (6 tests); pilot script reworked: FPV ranges → 10s clips → per-clip pipeline; 27 content filter tests + 5 batch tests green |
 | B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
 | B1.9b — Per-clip HTML quality report | done | 2026-06-20 | `vllatent/ingest/visualize.py` + `scripts/clip_report.py` — Plotly offline HTML (5 sections: quality timeline, 3D trajectory, body deltas, VO confidence, latent coherence + summary); 15 tests green; all imports lazy |
@@ -63,6 +65,60 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-20 — B1.7 REPLAN: split into B1.7a + B1.7c sub-steps
+
+**Status:** B1.7 replanned. Three bugs/gaps identified:
+1. **Missing `vllatent.encode.batch`** — `pipeline.py:93` imports `encode_frames` from a module that doesn't
+   exist. → B1.7a creates `vllatent/encode/batch.py` with `encode_frames(frames_dir, device) → (N,196,768) fp16`.
+2. **No segment-level FPV extraction** — the pilot script does whole-video ACCEPT/REJECT but never uses the
+   per-frame FPV mask to cut out non-FPV segments (talking heads, title screens, B-roll) or calls
+   `cut_fixed_clips()` for 10s clip cutting. → B1.7c adds `extract_fpv_ranges()` to `content_filter.py` and
+   reworks the pilot script.
+3. **Full download is correct** — yt-dlp needs the full video first for the content filter to identify FPV
+   segments. SponsorBlock pre-strips crowdsourced junk. No change needed.
+
+**Plan updated:** `plans/phase-b-sports-training.md` — B1.7a and B1.7c sub-steps added before B1.7.
+**Dependency chain:** B1.7a (AUTO) + B1.7b (done) → B1.7c (AUTO) → B1.7 (USER-GATED).
+
+---
+
+## 2026-06-20 — B1.7c: FPV segment extraction + pilot script rework
+
+**Status:** B1.7c pending → **done** (AUTO).
+**What's done.**
+- `vllatent/ingest/content_filter.py` — added `extract_fpv_ranges(shots) → list[tuple[int,int]]`:
+  merges consecutive FPV shots into contiguous frame ranges (non-FPV shots break the range).
+  Added to `__all__`. 6 new tests in `tests/test_content_filter.py` (all FPV, mixed, no FPV,
+  empty, single, gap).
+- `scripts/ingest_youtube_pilot.py` — reworked for segment-level FPV + 10s clip cutting:
+  1. Download + extract all frames (unchanged)
+  2. Content filter on sampled frames → get verdict + shots
+  3. **NEW**: `extract_fpv_ranges(shots)` → FPV frame ranges (stride-mapped to full-frame indices)
+  4. **NEW**: `cut_fixed_clips(range_frames, clip_length_frames)` → 10s segments per FPV range
+  5. **NEW**: Each sub-clip gets ID `{clip_id}_fpv{range_idx:02d}_c{clip_idx:03d}`, frames copied
+     to sub-directory, pipeline runs per sub-clip with `skip_download=True`
+  Fallback: if no FPV ranges found, treats entire video as one range. `--filter-only` reports
+  FPV ranges + sub-clip counts without running pipeline. Summary tracks per-clip OK/error.
+**Tested.** 27 content filter tests (21 existing + 6 new); ruff clean.
+**No blockers.** B1.7 (USER-GATED pilot run) is now unblocked.
+
+---
+
+## 2026-06-20 — B1.7a: batch DINOv3 encoder
+
+**Status:** B1.7a pending → **done** (AUTO, TORCH tier).
+**What's done.** `vllatent/encode/batch.py` — `encode_frames(frames_dir, device) → (N, 196, 768) fp16`:
+loops over sorted `*.jpg` files, loads each via `load_rgb`, encodes via `DinoV3Encoder.encode_rgb`,
+stacks into `(N, PATCH_TOKENS, EMBED_DIM)` fp16 numpy array. Lazy torch imports (DinoV3Encoder +
+load_rgb imported inside function body). Raises `ValueError` if dir missing, `FileNotFoundError`
+if no JPEGs. Resolves the missing import at `pipeline.py:93`.
+**Tested.** `tests/test_encode_batch.py` (5 tests, PURE — mocked encoder, no real weights):
+shape/dtype contract, empty/missing dir errors, sorted order verification, AST import purity.
+**Full suite:** 379 passed, 11 skipped, 0 regressions. Ruff clean.
+**No blockers.** B1.7c can proceed.
 
 ---
 
