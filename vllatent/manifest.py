@@ -66,6 +66,10 @@ def build_manifest(
     — NOT re-hardcoded here. The teacher-provenance fields are STUBBED now (empty strings) and
     populated at cache-build time (A5.14); only ``disagreement_source`` is known from
     ``Config.trust`` today (finalized in A5.9). ``split`` / ``variant`` are per-build labels.
+
+    Sports-pivot note: this builder is the AerialVLN path (teacher section with WorldVLN fields).
+    Sports data uses ``build_manifest_wild_video()`` which skips the teacher section. The two
+    builders converge in B-2/Phase C when the teacher changes to TrackVLA.
     """
     enc, cache, data = config.encoder, config.cache, config.data
     return {

@@ -1,4 +1,9 @@
-"""Render -> encode -> CACHE orchestrator + provenance manifest (SIM+TORCH tier) — A5.14.
+"""⚠ HISTORICAL — Phase A AerialVLN cache pipeline only (SIM+TORCH tier, A5.14).
+
+Sports-following pivot (2026-06-19) replaced this with ``vllatent.ingest.pipeline``.
+Kept working + tested for historical AerialVLN compat. Not used by Phase B sports path.
+
+Render -> encode -> CACHE orchestrator + provenance manifest.
 
 For each episode: render every ``reference_path`` pose via the AirSim harness
 (``vllatent.render``), **center-crop to square then resize to 224²** (normalizing the

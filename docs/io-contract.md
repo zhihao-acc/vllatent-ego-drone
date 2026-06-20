@@ -1,5 +1,11 @@
 # I/O Contract — vllatent-ego-drone (Phase A)
 
+> **⚠ PIVOT 2026-06-19 — SPORTS-FOLLOWING.** This document describes the Phase A AerialVLN I/O
+> contract. WorldVLN teacher references are **historical** — the sports pipeline uses MegaSaM VO
+> for ego-motion and TrackVLA (Phase C) as the teacher. AirSim render references apply to the
+> historical cache path only; sports data uses ``vllatent.ingest.pipeline``. The tensor shapes
+> (196×D, 4-DoF waypoint, H=3/T=4) and the seam dataclasses remain valid.
+
 > **What this is.** A *transcription* of the **LOCKED** I/O contract for in-repo reference. The
 > authoritative source is the vault design doc
 > `[[arch-design-2026-06-08-latent-pred]]` (§4 I/O contract · §6 data-audit spec · §9.3–9.7 seam

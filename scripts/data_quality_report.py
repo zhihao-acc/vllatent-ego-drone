@@ -41,7 +41,8 @@ def load_manifest(cache_dir: Path) -> dict | None:
 
 
 def analyze_npz(path: Path) -> dict:
-    data = dict(np.load(path, allow_pickle=False))
+    with np.load(path, allow_pickle=False) as npz:
+        data = dict(npz)
     result: dict = {"path": str(path.name), "keys": sorted(data.keys())}
 
     if "latents" in data:
@@ -84,19 +85,19 @@ def build_report(cache_dir: Path) -> dict:
     all_vo_conf = []
     all_quality = []
     for c in clips:
-        if "delta_stats" in c:
-            npz = np.load(cache_dir / c["path"], allow_pickle=False)
-            key = "deltas" if "deltas" in npz else "waypoint_4dof"
-            if key in npz:
-                all_deltas.append(npz[key])
-        if "vo_confidence" in c:
-            npz = np.load(cache_dir / c["path"], allow_pickle=False)
-            if "vo_confidence" in npz:
-                all_vo_conf.append(npz["vo_confidence"])
-        if "frame_quality" in c:
-            npz = np.load(cache_dir / c["path"], allow_pickle=False)
-            if "frame_quality" in npz:
-                all_quality.append(npz["frame_quality"])
+        needs_load = ("delta_stats" in c) or ("vo_confidence" in c) or ("frame_quality" in c)
+        if needs_load:
+            with np.load(cache_dir / c["path"], allow_pickle=False) as npz:
+                if "delta_stats" in c:
+                    key = "deltas" if "deltas" in npz else "waypoint_4dof"
+                    if key in npz:
+                        all_deltas.append(np.array(npz[key]))
+                if "vo_confidence" in c:
+                    if "vo_confidence" in npz:
+                        all_vo_conf.append(np.array(npz["vo_confidence"]))
+                if "frame_quality" in c:
+                    if "frame_quality" in npz:
+                        all_quality.append(np.array(npz["frame_quality"]))
 
     delta_magnitudes = np.array([], dtype=np.float64)
     if all_deltas:

@@ -32,7 +32,7 @@ HISTORY = 3                 # H — history frames fed to the predictor (DINO-WM
 HORIZON = 4                 # T — prediction horizon (documented; not a StepSample field)
 N_ACTIONS = 8               # AerialVLN discrete action set, ids 0..7
 DOF = 4                     # continuous waypoint DoF: (dx, dy, dz, dyaw)
-TEACHER_DOF = 6             # WorldVLN teacher action head: absolute [roll,yaw,pitch,x,y,z] (A5.8)
+TEACHER_DOF = 6             # teacher action head DoF: [roll,yaw,pitch,x,y,z] (A5.8; Phase C: TrackVLA)
 
 LATENT_DTYPE = np.float16   # cached DINOv3 latents on disk
 DELTA_DTYPE = np.float32    # continuous 4-DoF delta, AirSim-NED body frame
@@ -85,7 +85,9 @@ class StepSample:
     history_mask: np.ndarray     # (3,) bool        — True = real history frame, False = padding
     lang_tokens: np.ndarray      # (M,768) fp16     — frozen text-tower tokens (cached per episode)
     lang_mask: np.ndarray        # (M,) bool        — True = real language token, False = padding
-    action_id: int               # int in [0,7]     — AerialVLN discrete actions[t]
+    # B-2 revision: sports data uses action_id=0 sentinel (no discrete action). Validator
+    # range [0, N_ACTIONS) is the AerialVLN set — relaxed to action_id >= 0 in B-2.
+    action_id: int               # int in [0,7]     — AerialVLN discrete actions[t]; 0=sentinel for sports
     z_next: np.ndarray           # (196,768) fp16   — DINOv3 latent of next obs = prediction target
     delta_4dof: np.ndarray       # (4,) f32         — (dx,dy,dz,dyaw) AirSim-NED body, yaw-only
     future_frame_rgb: np.ndarray | None = None  # (H,W,3) uint8 RGB — Phase-C V-JEPA-2 target (optional)

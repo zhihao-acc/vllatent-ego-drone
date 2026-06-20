@@ -63,11 +63,11 @@ arrow(9.0, 2.8, 9.0, 1.9, color="#3fb950")
 arrow(9.8, 2.8, 11.8, 1.9, color="#bc8cff")
 
 # Teacher (distillation)
-box(12.5, 4.3, "WorldVLN", "frozen teacher\nK=5 stochastic", TEACH)
+box(12.5, 4.3, "TrackVLA", "frozen teacher\n(Phase C)", TEACH)
 arrow(12.5, 3.8, 11.8, 1.9, "distill", color="#bc8cff")
 
 # Title
-ax.text(7, 6.7, "vllatent-ego-drone — Trust-Aware Latent Predictor for Aerial VLN",
+ax.text(7, 6.7, "vllatent-ego-drone — Trust-Aware Latent Predictor for Sports-Following Drone",
         color="white", fontsize=12, ha="center", fontweight="bold")
 
 # Legend
