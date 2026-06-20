@@ -35,15 +35,15 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | A5.16 — loader over real teacher/oracle dump | done | 2026-06-15 | USER-GATED: inspect over real 5-episode cache GREEN — 987 transitions (H=3), block-causal masks correct, all (StepSample,OracleTarget) tuples well-formed |
 | A5.17 — size full render→teacher→cache job | done | 2026-06-15 | sizing doc + guard script (AUTO); build verified (6 episodes total: 5 from A5.14 + 1 incremental). Full 50-ep run deferred to Phase B start |
 | A5.18 — Phase-A DoD verification | done | 2026-06-15 | all 3 DoD items verified; code review WARNING→4 HIGHs fixed (wrap_pi docstring, data_audit.yaml stale ref_path+camera+vehicle, np.load fd leak); 0 CRITICAL; **PHASE A COMPLETE** |
-| **B1.1 — Wire batch_undistort() into pipeline.py** | **pending** | — | Phase B-1 Group 0: pipeline bug fix |
-| B1.2 — Fix MegaSaM confidence np.ones() fallback | pending | — | Phase B-1 Group 0: pipeline bug fix |
-| B1.3 — Stub GPS Sim(3) alignment | pending | — | Phase B-1 Group 0: interface stub |
-| B1.4 — Add fixed-clip-length cutting | pending | — | Phase B-1 Group 0: IngestConfig + preprocess |
-| B1.5 — Revise Config for sports pivot | pending | — | Phase B-1 Group 0: config/schema revision |
-| B1.6 — Create SportsTarget in schemas.py | pending | — | Phase B-1 Group 0: slim OracleTarget |
+| B1.1 — Wire batch_undistort() into pipeline.py | done | 2026-06-19 | undistort wired between stage 2 and 3, gated by undistort_model + K/D |
+| B1.2 — Fix MegaSaM confidence np.ones() fallback | done | 2026-06-19 | confidence_source field ("real"/"default"), warnings on fallback |
+| B1.3 — Stub GPS Sim(3) alignment | done | 2026-06-19 | AlignmentResult type + NotImplementedError stub |
+| B1.4 — Add fixed-clip-length cutting | done | 2026-06-19 | clip_length_seconds=10.0 in IngestConfig, cut_fixed_clips() in preprocess |
+| B1.5 — Revise Config for sports pivot | done | 2026-06-19 | vjepa_only default, megasam_vo added, lambda_trust, sports.yaml fixed |
+| B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof, vjepa_surprise)` + `Target` union alias; 94 schema tests green |
 | B1.7 — YouTube pilot: curate + ingest | pending | — | Phase B-1 Group 1: USER-GATED |
 | B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
-| B1.9 — Data quality report script | pending | — | Phase B-1 Group 2 |
+| B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
 | B1.10 — MegaSaM VO validation on pilot clips | pending | — | Phase B-1 Group 2: USER-GATED |
 | B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
 | B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |

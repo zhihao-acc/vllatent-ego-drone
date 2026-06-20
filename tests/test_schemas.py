@@ -27,7 +27,9 @@ from vllatent.schemas import (
     EpisodeRecord,
     OracleTarget,
     PredictorOutput,
+    SportsTarget,
     StepSample,
+    Target,
     TeacherOutput,
     TrustReadout,
     Waypoint,
@@ -261,6 +263,55 @@ def test_oracle_target_valid_and_immutable() -> None:
 def test_oracle_target_rejects_bad(bad: dict[str, object]) -> None:
     with pytest.raises((ValueError, TypeError)):
         _oracle(**bad)
+
+
+# --- SportsTarget (B1.6) ---
+
+def _sports_target(**over: object) -> SportsTarget:
+    kw: dict[str, object] = dict(
+        waypoint_4dof=np.zeros((DOF,), DELTA_DTYPE),
+        vjepa_surprise=0.0,
+    )
+    kw.update(over)
+    return SportsTarget(**kw)  # type: ignore[arg-type]
+
+
+def test_sports_target_valid_and_immutable() -> None:
+    st = _sports_target(vjepa_surprise=0.3)
+    assert st.waypoint_4dof.shape == (DOF,) and st.waypoint_4dof.dtype == DELTA_DTYPE
+    assert st.vjepa_surprise == 0.3
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        st.vjepa_surprise = 1.0  # type: ignore[misc]
+
+
+def test_sports_target_default_surprise_zero() -> None:
+    st = _sports_target()
+    assert st.vjepa_surprise == 0.0
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        dict(waypoint_4dof=np.zeros((DOF,), np.float16)),    # wrong dtype (must be f32)
+        dict(waypoint_4dof=np.zeros((3,), DELTA_DTYPE)),     # wrong DoF
+        dict(waypoint_4dof=np.zeros((DOF,), np.int32)),      # wrong dtype
+        dict(vjepa_surprise=-0.1),                           # must be >= 0
+        dict(vjepa_surprise=float("nan")),                   # must be finite
+        dict(vjepa_surprise=float("inf")),                   # must be finite
+        dict(vjepa_surprise=True),                           # bool is not valid
+        dict(vjepa_surprise="nope"),                         # string not valid
+    ],
+)
+def test_sports_target_rejects_bad(bad: dict[str, object]) -> None:
+    with pytest.raises((ValueError, TypeError)):
+        _sports_target(**bad)
+
+
+def test_target_type_alias_accepts_both() -> None:
+    oracle: Target = _oracle()
+    sports: Target = _sports_target()
+    assert isinstance(oracle, OracleTarget)
+    assert isinstance(sports, SportsTarget)
 
 
 # --- EpisodeRecord ---

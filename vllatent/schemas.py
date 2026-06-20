@@ -197,6 +197,30 @@ class Waypoint:
         _check_array("delta_4dof", self.delta_4dof, (DOF,), dtype=DELTA_DTYPE)
 
 
+# --- Sports-following target (B1.6) — slim target for sports FPV data ---
+
+@dataclass(frozen=True, eq=False)
+class SportsTarget:
+    """Per-step target for sports-following training (B1.6, Phase B pivot).
+
+    Slim replacement for :class:`OracleTarget` on sports FPV data — only the fields the
+    sports pipeline produces. ``waypoint_4dof`` from MegaSaM ego-motion, ``vjepa_surprise``
+    from the V-JEPA-2 verifier (Phase C; defaults to 0.0 until then). The sports loader
+    emits ``(StepSample, SportsTarget)``; AerialVLN legacy keeps ``(StepSample, OracleTarget)``.
+    """
+
+    waypoint_4dof: np.ndarray   # (4,) f32  — (dx,dy,dz,dyaw) from MegaSaM VO
+    vjepa_surprise: float       # V-JEPA-2 surprise >= 0 (Phase C gate; 0.0 until then)
+
+    def __post_init__(self) -> None:
+        _check_array("waypoint_4dof", self.waypoint_4dof, (DOF,), dtype=DELTA_DTYPE)
+        v = self.vjepa_surprise
+        if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
+            raise TypeError(f"vjepa_surprise: expected float, got {type(v).__name__}")
+        if not np.isfinite(float(v)) or float(v) < 0.0:
+            raise ValueError(f"vjepa_surprise: expected a finite value >= 0, got {v}")
+
+
 # --- Teacher distillation seam (A5.9) — the (StepSample, OracleTarget) the student trains against ---
 
 @dataclass(frozen=True, eq=False)
@@ -257,6 +281,9 @@ class OracleTarget:
                 raise TypeError(f"{name}: expected float, got {type(v).__name__}")
             if not np.isfinite(float(v)) or float(v) < 0.0:
                 raise ValueError(f"{name}: expected a finite value >= 0, got {v}")
+
+
+Target = OracleTarget | SportsTarget
 
 
 @dataclass(frozen=True, eq=False)
@@ -357,6 +384,8 @@ __all__ = [
     "Waypoint",
     "TeacherOutput",
     "OracleTarget",
+    "SportsTarget",
+    "Target",
     "EpisodeRecord",
     "CacheManifestEntry",
 ]
