@@ -42,7 +42,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.5 — Revise Config for sports pivot | done | 2026-06-19 | vjepa_only default, megasam_vo added, lambda_trust, sports.yaml fixed |
 | B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof, vjepa_surprise)` + `Target` union alias; 94 schema tests green |
 | B1.7 — YouTube pilot: curate + ingest | pending | — | Phase B-1 Group 1: USER-GATED (depends on B1.7b) |
-| B1.7b — Content filter implementation | pending | — | Phase B-1 Group 1: AUTO (CLIP+PySceneDetect, blocks B1.7) |
+| B1.7b — Content filter implementation | done | 2026-06-20 | `vllatent/ingest/content_filter.py` — CLIP ViT-B/32 zero-shot FPV scoring + PySceneDetect AdaptiveDetector SBD; per-shot majority vote; ACCEPT/PARTIAL/REJECT verdict; thumbnail grid data; 21 tests green; all imports lazy (AST-verified) |
 | B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
 | B1.9b — Per-clip HTML quality report | pending | — | Phase B-1 Group 2: AUTO (Plotly HTML, no blockers) |
@@ -63,6 +63,40 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-20 — B1.7b: content filter implementation (CLIP + PySceneDetect)
+
+**Status:** B1.7b pending → **done** (AUTO, TORCH tier — all heavy imports lazy).
+**What's done.** `vllatent/ingest/content_filter.py` (~250 LOC) — full content filter pipeline:
+- **Shot boundary detection:** PySceneDetect `AdaptiveDetector` wrapper processes in-memory frames
+  (no video file needed). Returns sorted frame indices of shot transitions. Configurable
+  `adaptive_threshold` (default 3.0) and `min_scene_len` (default 2).
+- **CLIP zero-shot FPV scoring:** `_get_clip_scorer()` lazy-loads the existing CLIP ViT-B/32 model
+  (same `openai/clip-vit-base-patch32` from `vllatent/encode/text.py`). 8 positive FPV prompts
+  (drone, GoPro, POV, egocentric, skiing, MTB, FPV racing, body-mounted) vs 8 negative prompts
+  (talking head, text overlay, title screen, static shot, interview, ad, subscribe button,
+  stationary). Per-frame score = clipped `(mean_pos - mean_neg + 0.5)` ∈ [0,1].
+- **Per-shot majority vote:** `classify_shots()` splits frames at boundaries, per-shot FPV if >50%
+  of frames score >= threshold (default 0.25). Returns `ShotClassification` with `ShotInfo` list.
+- **Whole-video verdict:** `video_verdict()` — ACCEPT (>=60% FPV shots), REJECT (<30%), PARTIAL.
+- **Per-frame FPV mask:** `fpv_frame_mask()` → boolean `(N,)` array for pipeline integration.
+- **Thumbnail grid data:** `thumbnail_grid_data()` selects mid-shot representative frames with
+  accept/reject labels for human review.
+- **Top-level orchestrator:** `filter_video()` → `FilterResult` (verdict, mask, boundaries, shots,
+  per-frame scores).
+**Tier compliance.** All heavy imports (torch, transformers, scenedetect, PIL) are LAZY — inside
+functions only. Module imports on a torch-free box (AST-verified in tests).
+**New dependency:** `scenedetect` (`pip install scenedetect[opencv-headless]`).
+**Tested.** `tests/test_content_filter.py` (21 tests, PURE — CLIP scorer mocked via `patch`):
+SBD (list return, single-scene empty, sharp-cut detected, empty-raises); CLIP scoring
+(shape, range [0,1], empty-raises); shot voting (all-FPV, mixed, threshold boundary);
+video verdict (ACCEPT, REJECT, PARTIAL, threshold values); FPV mask (shape, values);
+thumbnail grid (structure); import purity (AST + sys.modules); integration
+(filter_video ACCEPT, filter_video REJECT). 340 total tests pass (1 pre-existing failure
+in `test_ingest_preprocess.py` from missing `vllatent.io` — unrelated). Ruff clean.
+**No blockers.** B1.7 (YouTube pilot) is now unblocked.
 
 ---
 
