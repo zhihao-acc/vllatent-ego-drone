@@ -45,7 +45,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.7b — Content filter implementation | done | 2026-06-20 | `vllatent/ingest/content_filter.py` — CLIP ViT-B/32 zero-shot FPV scoring + PySceneDetect AdaptiveDetector SBD; per-shot majority vote; ACCEPT/PARTIAL/REJECT verdict; thumbnail grid data; 21 tests green; all imports lazy (AST-verified) |
 | B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
-| B1.9b — Per-clip HTML quality report | pending | — | Phase B-1 Group 2: AUTO (Plotly HTML, no blockers) |
+| B1.9b — Per-clip HTML quality report | done | 2026-06-20 | `vllatent/ingest/visualize.py` + `scripts/clip_report.py` — Plotly offline HTML (5 sections: quality timeline, 3D trajectory, body deltas, VO confidence, latent coherence + summary); 15 tests green; all imports lazy |
 | B1.10 — MegaSaM VO validation on pilot clips | pending | — | Phase B-1 Group 2: USER-GATED |
 | B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
 | B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |
@@ -63,6 +63,30 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-20 — B1.9b: per-clip HTML quality report (Plotly)
+
+**Status:** B1.9b pending → **done** (AUTO, TORCH tier — all plotly imports lazy).
+**What's done.** `vllatent/ingest/visualize.py` (~250 LOC) + `scripts/clip_report.py` CLI.
+Generates self-contained offline HTML per clip with 5 interactive Plotly sections + summary:
+1. **Frame quality timeline** (RdYlGn colorscale, markers+line)
+2. **3D ego-motion trajectory** (Scatter3d, colored by speed magnitude, cumulative deltas)
+3. **Body-frame deltas** (3-row subplot: dx/dy/dz, dyaw, quality overlay)
+4. **VO confidence timeline** (threshold line at 0.3, flagging low-confidence regions)
+5. **Latent coherence** (cos_sim z_t/z_{t+1}, threshold at 0.85 for scene change detection)
+6. **Summary table** (frames, duration, npz size, means, PASS/FAIL banner)
+
+Helper functions: `compute_latent_coherence` (cosine sim between consecutive latent frames),
+`compute_cumulative_trajectory` (cumsum xyz), `compute_speed_magnitudes` (L2 norm xyz).
+Plotly CDN for first section, deferred for rest (fast load). CLI:
+`python scripts/clip_report.py --cache <dir> --clip <id>`.
+**Tested.** `tests/test_visualize.py` (15): HTML structure (7 section checks), write-to-file,
+minimal frames (7), latent coherence shape+range, cumulative trajectory correctness,
+speed magnitudes, import purity (AST). Ruff clean.
+**New dependency:** `plotly` (pip install plotly).
+**No blockers.** B1.9b complete.
 
 ---
 
