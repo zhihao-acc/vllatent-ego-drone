@@ -1,14 +1,16 @@
-"""CLIP ViT-B/32 zero-shot FPV content filter + PySceneDetect shot boundaries (B1.7b).
+"""Motion + YOLO-World open-vocabulary content filter + PySceneDetect shot boundaries (B1.7c).
 
-Classifies frames as first-person-view (FPV) sports footage vs non-FPV (talking heads,
-text overlays, static scenes, etc.) using CLIP zero-shot similarity. Shot boundaries
-detected via PySceneDetect AdaptiveDetector. Per-shot majority vote produces a whole-video
-verdict (ACCEPT / PARTIAL / REJECT).
+Two-signal FPV filter for sports footage:
+1. **Motion** (primary): frame-to-frame pixel difference rejects static/product shots.
+2. **YOLO-World** (semantic): open-vocabulary object detection rejects frames containing
+   drones, cameras, gear, text overlays, etc. — objects that should never appear in
+   first-person training data.
 
-**Tier: TORCH** (CLIP inference). All heavy imports (torch, transformers, scenedetect) are
-LAZY — inside functions — so the module imports on a torch-free box (pure CI lane).
+Shot boundaries detected via PySceneDetect AdaptiveDetector. Per-shot majority vote
+produces a whole-video verdict (ACCEPT / PARTIAL / REJECT).
 
-Reuses the existing CLIP ViT-B/32 model from ``vllatent/encode/text.py``.
+**Tier: TORCH** (YOLO inference). All heavy imports (torch, ultralytics, scenedetect)
+are LAZY — inside functions — so the module imports on a torch-free box (pure CI lane).
 """
 from __future__ import annotations
 
@@ -19,39 +21,55 @@ from typing import Any
 
 import numpy as np
 
-# --- FPV prompt ensembles (zero-shot CLIP classification) ---
+# --- Rejected object classes (YOLO-World open-vocabulary) ---
 
-_FPV_POSITIVE = [
-    "first-person view skiing down a steep snowy mountain slope",
-    "POV footage looking down at snow rushing beneath ski tips",
-    "wide-angle fisheye perspective of a ski run from the skier's point of view",
-    "head-mounted perspective descending through a snowy forest",
-    "barrel-distorted horizon with snow surface filling the lower frame",
-    "fast-moving first-person ski run with motion blur on the snow",
-    "skier's eye-level view of a groomed piste with tracks visible",
-    "egocentric view of a powdery off-piste descent, snow spray visible",
-    "immersive downhill skiing perspective, trees rushing past on both sides",
-    "helmet-mounted view looking forward down a ski slope",
-    "subjective viewpoint of high-speed carving turns on a ski run",
-    "dynamic first-person snowboarding descent with mountain in background",
+REJECTED_CLASSES: list[str] = [
+    # --- drone body + parts ---
+    "drone",
+    "quadcopter",
+    "hexacopter",
+    "octocopter",
+    "multirotor",
+    "rotor",
+    "propeller",
+    "drone arm",
+    "drone motor",
+    "landing gear",
+    "gimbal",
+    "flight controller",
+    "drone battery",
+    "RC controller",
+    "remote controller",
+    # --- camera + filming gear ---
+    "camera",
+    "GoPro",
+    "action camera",
+    "camera lens",
+    "tripod",
+    "monopod",
+    "stabilizer",
+    "microphone",
+    "selfie stick",
+    # --- electronics / non-FPV ---
+    "laptop",
+    "monitor",
+    "television",
+    "phone screen",
+    # --- overlays / graphics ---
+    "text overlay",
+    "title card",
+    "logo",
+    "watermark",
+    "subtitle",
 ]
 
-_FPV_NEGATIVE = [
-    "a person sitting on a chairlift or gondola with mountain scenery",
-    "third-person view of a skier filmed from the slope side",
-    "a skiing instructor talking directly to the camera explaining technique",
-    "aerial shot of a ski resort or mountain from very high above",
-    "a person standing still at the top of a ski run looking at scenery",
-    "slow-motion close-up of ski equipment, bindings, or boots on snow",
-    "a group of skiers posing for a photo at the base of a mountain",
-    "behind-the-shoulder follow-cam shot of a skier filmed by another skier",
-]
-
-_NEGATIVE_WEIGHT = 0.75
+_YOLO_CONFIDENCE_THRESHOLD = 0.15
+_YOLO_MODEL_ID = "yolov8s-worldv2.pt"
 
 # Thresholds
 _ACCEPT_SHOT_FRAC = 0.60   # >= 60% FPV shots => ACCEPT whole video
 _REJECT_SHOT_FRAC = 0.30   # < 30% FPV shots => REJECT whole video
+_MIN_SEGMENT_FRAMES = 10   # 2s at 5fps — discard shorter accepted runs
 
 
 class VideoVerdict(enum.Enum):
@@ -127,90 +145,122 @@ def detect_shot_boundaries(
     return boundaries
 
 
+def detect_shot_boundaries_from_paths(
+    frame_paths: list,
+    *,
+    adaptive_threshold: float = 3.0,
+    min_scene_len: int = 2,
+    fps: float = 30.0,
+) -> list[int]:
+    """Detect shot boundaries by loading frames one at a time from file paths."""
+    if not frame_paths:
+        raise ValueError("frame_paths: expected a non-empty list of paths")
+
+    from PIL import Image
+    from scenedetect import AdaptiveDetector, FrameTimecode
+
+    detector = AdaptiveDetector(
+        adaptive_threshold=adaptive_threshold,
+        min_scene_len=min_scene_len,
+    )
+    boundaries: list[int] = []
+
+    for i, path in enumerate(frame_paths):
+        frame = np.array(Image.open(path))
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            raise ValueError(f"frame {i}: expected (H,W,3) RGB, got shape {frame.shape}")
+
+        tc = FrameTimecode(i, fps=fps)
+        cuts = detector.process_frame(tc, frame)
+        for cut in cuts:
+            boundaries.append(cut.frame_num)
+
+    boundaries.sort()
+    return boundaries
+
+
 # ---------------------------------------------------------------------------
-# CLIP zero-shot FPV scoring
+# YOLO-World open-vocabulary object detection
 # ---------------------------------------------------------------------------
 
 
-def _get_clip_scorer(device: str = "cpu") -> Callable[[list[np.ndarray]], np.ndarray]:
-    """Build a CLIP zero-shot FPV scorer. Lazy-loads torch/transformers."""
-    import torch
-    from transformers import CLIPModel, CLIPProcessor
+def _get_yolo_detector(
+    device: str = "cpu",
+    confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
+) -> Callable[[list[np.ndarray]], np.ndarray]:
+    """Build a YOLO-World detector that flags frames containing rejected objects.
 
-    from vllatent.config import EncoderConfig
-    model_id = EncoderConfig().text_model_id
+    Lazy-loads ultralytics. Text embeddings are computed once via set_classes().
+    Returns a callable: list[np.ndarray] → np.ndarray[bool] (True = rejected).
+    """
+    from ultralytics import YOLOWorld
 
-    model = CLIPModel.from_pretrained(model_id).to(device).eval()
-    processor = CLIPProcessor.from_pretrained(model_id)
-    for p in model.parameters():
-        p.requires_grad_(False)
+    model = YOLOWorld(_YOLO_MODEL_ID)
+    model.to(device)
+    model.set_classes(REJECTED_CLASSES)
 
-    n_pos = len(_FPV_POSITIVE)
-    n_neg = len(_FPV_NEGATIVE)
-
-    pos_inputs = processor(text=_FPV_POSITIVE, return_tensors="pt", padding=True, truncation=True)
-    pos_inputs = {k: v.to(device) for k, v in pos_inputs.items() if isinstance(v, torch.Tensor)}
-    neg_inputs = processor(text=_FPV_NEGATIVE, return_tensors="pt", padding=True, truncation=True)
-    neg_inputs = {k: v.to(device) for k, v in neg_inputs.items() if isinstance(v, torch.Tensor)}
-
-    logit_scale = model.logit_scale.exp()
-
-    with torch.no_grad():
-        pos_out = model.get_text_features(**pos_inputs)
-        pos_features = pos_out.pooler_output if hasattr(pos_out, "pooler_output") else pos_out
-        pos_features = pos_features / pos_features.norm(dim=-1, keepdim=True)
-
-        neg_out = model.get_text_features(**neg_inputs)
-        neg_features = neg_out.pooler_output if hasattr(neg_out, "pooler_output") else neg_out
-        neg_features = neg_features / neg_features.norm(dim=-1, keepdim=True)
-
-    def _score_batch(frames_batch: list[np.ndarray]) -> np.ndarray:
+    def _detect_batch(frames_batch: list[np.ndarray]) -> np.ndarray:
         from PIL import Image
 
         images = [Image.fromarray(f) for f in frames_batch]
-        image_inputs = processor(images=images, return_tensors="pt", padding=True)
-        image_inputs = {k: v.to(device) for k, v in image_inputs.items() if isinstance(v, torch.Tensor)}
+        results = model.predict(images, conf=confidence, verbose=False)
+        rejected = np.zeros(len(frames_batch), dtype=np.bool_)
+        for i, result in enumerate(results):
+            if len(result.boxes) > 0:
+                rejected[i] = True
+        return rejected
 
-        with torch.no_grad():
-            image_out = model.get_image_features(**image_inputs)
-            image_features = image_out.pooler_output if hasattr(image_out, "pooler_output") else image_out
-            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-
-            pos_sim = (image_features @ pos_features.T) * logit_scale  # (B, n_pos)
-            neg_sim = (image_features @ neg_features.T) * logit_scale  # (B, n_neg)
-
-            pos_class = pos_sim.mean(dim=-1)  # (B,)
-            neg_class = neg_sim.mean(dim=-1) * _NEGATIVE_WEIGHT  # (B,)
-            logits = torch.stack([pos_class, neg_class], dim=-1)  # (B, 2)
-            fpv_prob = torch.softmax(logits, dim=-1)[:, 0]  # P(FPV)
-
-        return fpv_prob.float().cpu().numpy().astype(np.float32)
-
-    return _score_batch
+    return _detect_batch
 
 
-def score_frames_fpv(
+def detect_rejected_objects(
     frames: list[np.ndarray],
     *,
     device: str = "cpu",
     batch_size: int = 32,
+    confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
 ) -> np.ndarray:
-    """Score frames for FPV content using CLIP zero-shot classification.
+    """Detect rejected objects in frames using YOLO-World.
 
-    Returns per-frame scores in [0, 1] where higher = more likely FPV.
+    Returns per-frame boolean mask: True = frame contains a rejected object.
     """
     if not frames:
         raise ValueError("frames: expected a non-empty list of RGB arrays")
 
-    scorer = _get_clip_scorer(device=device)
+    detector = _get_yolo_detector(device=device, confidence=confidence)
 
-    all_scores: list[np.ndarray] = []
+    all_rejected: list[np.ndarray] = []
     for i in range(0, len(frames), batch_size):
         batch = frames[i : i + batch_size]
-        scores = scorer(batch)
-        all_scores.append(scores)
+        rejected = detector(batch)
+        all_rejected.append(rejected)
 
-    return np.concatenate(all_scores).astype(np.float32)
+    return np.concatenate(all_rejected)
+
+
+def detect_rejected_objects_from_paths(
+    frame_paths: list,
+    *,
+    device: str = "cpu",
+    batch_size: int = 32,
+    confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
+) -> np.ndarray:
+    """Detect rejected objects by loading frames from file paths in bounded batches."""
+    if not frame_paths:
+        raise ValueError("frame_paths: expected a non-empty list of paths")
+
+    from PIL import Image
+
+    detector = _get_yolo_detector(device=device, confidence=confidence)
+
+    all_rejected: list[np.ndarray] = []
+    for i in range(0, len(frame_paths), batch_size):
+        batch_paths = frame_paths[i : i + batch_size]
+        batch_frames = [np.array(Image.open(p)) for p in batch_paths]
+        rejected = detector(batch_frames)
+        all_rejected.append(rejected)
+
+    return np.concatenate(all_rejected)
 
 
 # ---------------------------------------------------------------------------
@@ -370,73 +420,45 @@ def compute_motion_scores(frame_paths: list, *, downsample: int = 4) -> np.ndarr
     return scores
 
 
-def score_frames_from_paths(
-    frame_paths: list,
-    *,
-    device: str = "cpu",
-    batch_size: int = 32,
-) -> np.ndarray:
-    """Score frames for FPV content by loading from file paths in bounded batches.
+def _compute_motion_from_arrays(frames: list[np.ndarray], *, downsample: int = 4) -> np.ndarray:
+    """Per-frame motion score from in-memory arrays (no disk I/O)."""
+    scores = np.zeros(len(frames), dtype=np.float32)
+    prev: np.ndarray | None = None
 
-    Never holds more than ``batch_size`` frames in memory at once.
-    Returns per-frame scores in [0, 1] where higher = more likely FPV.
-    """
-    if not frame_paths:
-        raise ValueError("frame_paths: expected a non-empty list of paths")
+    for i, frame in enumerate(frames):
+        small = frame[::downsample, ::downsample] if downsample > 1 else frame
+        if prev is not None:
+            scores[i] = np.mean(np.abs(small.astype(np.float32) - prev.astype(np.float32)))
+        prev = small
 
-    from PIL import Image
-
-    scorer = _get_clip_scorer(device=device)
-
-    all_scores: list[np.ndarray] = []
-    for i in range(0, len(frame_paths), batch_size):
-        batch_paths = frame_paths[i : i + batch_size]
-        batch_frames = [np.array(Image.open(p)) for p in batch_paths]
-        scores = scorer(batch_frames)
-        all_scores.append(scores)
-
-    return np.concatenate(all_scores).astype(np.float32)
-
-
-def detect_shot_boundaries_from_paths(
-    frame_paths: list,
-    *,
-    adaptive_threshold: float = 3.0,
-    min_scene_len: int = 2,
-    fps: float = 30.0,
-) -> list[int]:
-    """Detect shot boundaries by loading frames one at a time from file paths.
-
-    Memory-efficient: never holds more than 1 frame in memory.
-    Returns a sorted list of frame indices where shot transitions occur.
-    """
-    if not frame_paths:
-        raise ValueError("frame_paths: expected a non-empty list of paths")
-
-    from PIL import Image
-    from scenedetect import AdaptiveDetector, FrameTimecode
-
-    detector = AdaptiveDetector(
-        adaptive_threshold=adaptive_threshold,
-        min_scene_len=min_scene_len,
-    )
-    boundaries: list[int] = []
-
-    for i, path in enumerate(frame_paths):
-        frame = np.array(Image.open(path))
-        if frame.ndim != 3 or frame.shape[2] != 3:
-            raise ValueError(f"frame {i}: expected (H,W,3) RGB, got shape {frame.shape}")
-
-        tc = FrameTimecode(i, fps=fps)
-        cuts = detector.process_frame(tc, frame)
-        for cut in cuts:
-            boundaries.append(cut.frame_num)
-
-    boundaries.sort()
-    return boundaries
+    return scores
 
 
 _MOTION_THRESHOLD = 8.0  # mean abs pixel diff; FPV at 5fps typically 15-50+
+
+
+def filter_short_segments(mask: np.ndarray, min_length: int) -> np.ndarray:
+    """Zero out contiguous True runs shorter than ``min_length``.
+
+    Prevents tiny accepted fragments between rejected regions from leaking
+    into training data. Returns a new array (immutable).
+    """
+    if min_length <= 1 or len(mask) == 0:
+        return mask.copy()
+
+    out = mask.copy()
+    n = len(out)
+    i = 0
+    while i < n:
+        if out[i]:
+            run_start = i
+            while i < n and out[i]:
+                i += 1
+            if i - run_start < min_length:
+                out[run_start:i] = False
+        else:
+            i += 1
+    return out
 
 
 def filter_video_from_paths(
@@ -444,16 +466,17 @@ def filter_video_from_paths(
     *,
     device: str = "cpu",
     adaptive_threshold: float = 3.0,
-    fpv_threshold: float = 0.65,
     motion_threshold: float = _MOTION_THRESHOLD,
+    min_segment_frames: int = _MIN_SEGMENT_FRAMES,
+    yolo_confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
     batch_size: int = 32,
 ) -> FilterResult:
-    """Run full content filter on file paths: CLIP + motion + SBD + verdict.
+    """Run full content filter on file paths: motion + YOLO + SBD + verdict.
 
-    Two-signal filter: a frame is FPV only if its CLIP semantic score AND its
-    temporal motion score both pass their thresholds. This catches content that
-    CLIP alone misses (e.g. drone close-ups that semantically match "drone"
-    prompts but have near-zero inter-frame motion).
+    Three-stage filter:
+    1. Motion: reject static frames (below ``motion_threshold``).
+    2. YOLO-World: reject frames containing drones, cameras, gear, etc.
+    3. Minimum segment: discard accepted runs shorter than ``min_segment_frames``.
 
     The FPV mask covers EVERY frame — no stride sampling.
     """
@@ -463,28 +486,28 @@ def filter_video_from_paths(
     boundaries = detect_shot_boundaries_from_paths(
         frame_paths, adaptive_threshold=adaptive_threshold,
     )
-    clip_scores = score_frames_from_paths(
-        frame_paths, device=device, batch_size=batch_size,
-    )
     motion_scores = compute_motion_scores(frame_paths)
+    rejected_objects = detect_rejected_objects_from_paths(
+        frame_paths, device=device, batch_size=batch_size,
+        confidence=yolo_confidence,
+    )
 
-    combined = np.where(
-        motion_scores >= motion_threshold, clip_scores, 0.0,
-    ).astype(np.float32)
+    has_motion = motion_scores >= motion_threshold
+    fpv_mask = filter_short_segments(has_motion & ~rejected_objects, min_segment_frames)
 
-    mask = combined >= fpv_threshold
+    scores = np.where(fpv_mask, 1.0, 0.0).astype(np.float32)
 
-    classification = classify_shots(combined, boundaries, threshold=fpv_threshold)
+    classification = classify_shots(scores, boundaries, threshold=0.5)
     verdict = video_verdict(classification)
 
     return FilterResult(
         verdict=verdict,
         n_frames=len(frame_paths),
-        n_fpv_frames=int(mask.sum()),
-        fpv_mask=mask,
+        n_fpv_frames=int(fpv_mask.sum()),
+        fpv_mask=fpv_mask,
         shot_boundaries=boundaries,
         shots=classification.shots,
-        per_frame_scores=combined,
+        per_frame_scores=scores,
     )
 
 
@@ -493,24 +516,35 @@ def filter_video(
     *,
     device: str = "cpu",
     adaptive_threshold: float = 3.0,
-    fpv_threshold: float = 0.65,
+    motion_threshold: float = _MOTION_THRESHOLD,
+    min_segment_frames: int = _MIN_SEGMENT_FRAMES,
+    yolo_confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
     batch_size: int = 32,
 ) -> FilterResult:
-    """Run full content filter: SBD + CLIP scoring + shot voting + verdict."""
+    """Run full content filter on in-memory frames: motion + YOLO + SBD + verdict."""
     if not frames:
         raise ValueError("frames: expected a non-empty list of RGB arrays")
 
     boundaries = detect_shot_boundaries(frames, adaptive_threshold=adaptive_threshold)
-    scores = score_frames_fpv(frames, device=device, batch_size=batch_size)
-    classification = classify_shots(scores, boundaries, threshold=fpv_threshold)
+    motion_scores = _compute_motion_from_arrays(frames)
+    rejected_objects = detect_rejected_objects(
+        frames, device=device, batch_size=batch_size,
+        confidence=yolo_confidence,
+    )
+
+    has_motion = motion_scores >= motion_threshold
+    fpv_mask = filter_short_segments(has_motion & ~rejected_objects, min_segment_frames)
+
+    scores = np.where(fpv_mask, 1.0, 0.0).astype(np.float32)
+
+    classification = classify_shots(scores, boundaries, threshold=0.5)
     verdict = video_verdict(classification)
-    mask = fpv_frame_mask(classification)
 
     return FilterResult(
         verdict=verdict,
         n_frames=len(frames),
-        n_fpv_frames=int(mask.sum()),
-        fpv_mask=mask,
+        n_fpv_frames=int(fpv_mask.sum()),
+        fpv_mask=fpv_mask,
         shot_boundaries=boundaries,
         shots=classification.shots,
         per_frame_scores=scores,
@@ -518,6 +552,7 @@ def filter_video(
 
 
 __all__ = [
+    "REJECTED_CLASSES",
     "VideoVerdict",
     "ShotInfo",
     "ShotClassification",
@@ -525,8 +560,9 @@ __all__ = [
     "compute_motion_scores",
     "detect_shot_boundaries",
     "detect_shot_boundaries_from_paths",
-    "score_frames_fpv",
-    "score_frames_from_paths",
+    "detect_rejected_objects",
+    "detect_rejected_objects_from_paths",
+    "filter_short_segments",
     "classify_shots",
     "video_verdict",
     "fpv_frame_mask",

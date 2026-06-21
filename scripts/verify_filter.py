@@ -30,26 +30,32 @@ def main(argv: list[str] | None = None) -> int:
 
     from vllatent.ingest.content_filter import (
         compute_motion_scores,
+        detect_rejected_objects_from_paths,
         extract_fpv_ranges,
         filter_video_from_paths,
-        score_frames_from_paths,
     )
-
-    print("[verify] Computing CLIP scores...")
-    clip_scores = score_frames_from_paths(frame_paths, device=args.device)
 
     print("[verify] Computing motion scores...")
     motion_scores = compute_motion_scores(frame_paths)
 
+    print("[verify] Running YOLO-World object detection...")
+    rejected = detect_rejected_objects_from_paths(frame_paths, device=args.device)
+
     print(f"\n[verify] Per-frame diagnostics (first 30 frames):")
-    print(f"  {'frame':<14} {'CLIP':>6} {'motion':>8} {'decision'}")
-    print(f"  {'─' * 14} {'─' * 6} {'─' * 8} {'─' * 10}")
+    print(f"  {'frame':<14} {'motion':>8} {'objects':>8} {'decision'}")
+    print(f"  {'─' * 14} {'─' * 8} {'─' * 8} {'─' * 10}")
     for i in range(min(30, len(frame_paths))):
-        clip = clip_scores[i]
         motion = motion_scores[i]
-        ok = clip >= 0.50 and motion >= 8.0
-        tag = "  FPV" if ok else "  REJECT" if clip < 0.50 else "  STATIC"
-        print(f"  {frame_paths[i].name:<14} {clip:6.3f} {motion:8.1f} {tag}")
+        has_obj = rejected[i]
+        ok = motion >= 8.0 and not has_obj
+        if ok:
+            tag = "  FPV"
+        elif motion < 8.0:
+            tag = "  STATIC"
+        else:
+            tag = "  OBJECT"
+        obj_str = "YES" if has_obj else "---"
+        print(f"  {frame_paths[i].name:<14} {motion:8.1f} {obj_str:>8} {tag}")
 
     print(f"\n[verify] Running full filter pipeline...")
     result = filter_video_from_paths(frame_paths, device=args.device)
@@ -57,6 +63,10 @@ def main(argv: list[str] | None = None) -> int:
     print(f"[verify] Verdict: {result.verdict.value}")
     print(f"[verify] FPV frames: {result.n_fpv_frames}/{result.n_frames}")
     print(f"[verify] Shots: {len(result.shots)} total, {sum(1 for s in result.shots if s.is_fpv)} FPV")
+
+    n_objects = int(rejected.sum())
+    n_static = int((motion_scores < 8.0).sum())
+    print(f"[verify] Rejected: {n_objects} object-detected, {n_static} static")
 
     out_dir = Path(args.out) if args.out else frames_dir.parent / "filter_verify"
     accepted_dir = out_dir / "accepted"

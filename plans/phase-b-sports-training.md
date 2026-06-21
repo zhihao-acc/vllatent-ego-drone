@@ -182,25 +182,32 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 - **Test:** User runs pipeline + reviews outputs + reviews content filter thumbnail grids.
 - **Deps:** blocks B1.8, B1.10. Blocked-by: B1.1, B1.2, B1.4, **B1.7a, B1.7b, B1.7c**.
 
-**B1.7b — Content filter implementation.**
-- Tier PURE+TOOL / AUTO
-- New file `vllatent/ingest/content_filter.py` (~250 LOC). Implements:
-  - PySceneDetect `AdaptiveDetector` wrapper for shot boundary detection (SBD)
-  - CLIP ViT-B/32 frame scoring against FPV prompt ensembles (reuses existing
-    `vllatent/encode/text.py` CLIP model for zero-shot classification)
-  - Per-shot majority vote: accept if FPV prompt score > all non-FPV prompt scores by
-    margin >= 0.03
-  - Whole-video verdict: ACCEPT (>=60% FPV shots), REJECT (<30% FPV), PARTIAL (accept FPV
-    shots only, discard non-FPV segments)
-  - Thumbnail grid generator for human review (~30s per video, representative frames with
-    accept/reject color-coding)
-- **New dependency:** `scenedetect` (`pip install scenedetect[opencv-headless]`)
-- **Files:** `vllatent/ingest/content_filter.py` (new), `tests/test_content_filter.py` (new)
-- **DoD:** Filter runs on sample video. Thumbnail grid produced. Tests pass.
+**B1.7b — Content filter implementation (motion + YOLO-World).**
+- Tier TORCH / AUTO
+- `vllatent/ingest/content_filter.py`. Two-signal FPV filter:
+  - **Motion** (primary): frame-to-frame mean absolute pixel difference. Threshold >= 8.0 at
+    5 fps. Catches static/product shots, talking heads, title screens.
+  - **YOLO-World** (semantic): open-vocabulary object detection via `yolov8s-worldv2.pt` (13M
+    params, 74 FPS on V100). Detects objects that should never appear in FPV training data:
+    drone body + parts (rotors, propellers, arms, landing gear, gimbal), cameras, tripods,
+    gear, text overlays, logos, watermarks. Text embeddings computed once via `set_classes()`
+    and cached — no per-frame re-encoding.
+  - Per-frame decision: `is_fpv = motion >= threshold AND no_rejected_objects(YOLO)`
+  - **Minimum segment filter**: after per-frame masking, contiguous accepted runs shorter
+    than `min_segment_frames` (default 10 = 2s at 5fps) are discarded. Prevents tiny
+    fragments between rejected regions from leaking into training data.
+  - PySceneDetect `AdaptiveDetector` for shot boundary detection (SBD)
+  - Per-shot majority vote → ACCEPT (>=60% FPV) / REJECT (<30%) / PARTIAL
+  - Thumbnail grid generator for human review
+- **CLIP DROPPED (B1.7c finding):** CLIP zero-shot scores 0.999 on all frames within the same
+  visual domain (all skiing = snow+mountain). Zero discriminative power for within-domain
+  filtering. CLIP ignores prepositions (ARO/WinoGround ICLR 2023: 0.50-0.56 accuracy on
+  compositional benchmarks). Replaced by YOLO-World object detection.
+- **New dependencies:** `ultralytics>=8.2.0` (in `[torch]` extra), `scenedetect`
+- **Files:** `vllatent/ingest/content_filter.py`, `tests/test_content_filter.py`
+- **DoD:** Filter runs on sample video. 36 tests green. All imports lazy (AST-verified).
 - **Test:** `$PY -m pytest -q tests/test_content_filter.py`
-- **Deps:** blocks B1.7. Blocked-by: none (CLIP model already exists in `vllatent/encode/text.py`).
-- **Upgrade path (B-2/B-3):** replace CLIP zero-shot with CLIP+MLP trained on ~2,500 human
-  labels (PriVi CVPR 2026 precedent: 90.3% precision, 82.8% recall).
+- **Deps:** blocks B1.7. Blocked-by: none.
 
 **B1.8 — CosFly-Track download + adapter.**
 - Tier TOOL+PURE / USER-GATED (HF download)
@@ -236,7 +243,7 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   HTML per clip with 8 sections:
   1. Filmstrip (10 evenly-spaced thumbnails extracted from cached frames)
   2. Quality heatmap timeline (RdYlGn colorscale, `frame_quality` over time)
-  3. Content filter results (per-shot CLIP scores, color-coded accept/reject)
+  3. Content filter results (per-shot motion + YOLO verdicts, color-coded accept/reject)
   4. 3D ego-motion trajectory (interactive Plotly `Scatter3d` + `Cone` headings from
      cumulative deltas, colored by speed magnitude)
   5. Body-frame deltas (3 stacked subplots: dx/dy/dz, dyaw, quality overlay; outliers in red)
@@ -557,7 +564,7 @@ GROUP 8 (full training + verify):              |                                
 **Critical path:** B1.11 -> B1.12 -> B1.15 -> B1.17 -> B1.18 -> B1.20 -> B1.22 -> B1.24
 (unchanged — B1.7b is on the data track, not the critical path)
 
-**Parallel tracks before encoder gate:** Track A (B1.1-B1.7b-B1.7), Track B (B1.8-B1.9-B1.9b), Track C (B1.11)
+**Parallel tracks before encoder gate:** Track A (B1.1-B1.7b(motion+YOLO)-B1.7c-B1.7), Track B (B1.8-B1.9-B1.9b), Track C (B1.11)
 
 ---
 
@@ -569,8 +576,9 @@ GROUP 8 (full training + verify):              |                                
   (D=384) only if the Orin NX benchmark (B1.11) shows ViT-B/16 > 20ms.
 - **GPS Sim(3):** Stub with interface only. `normalize_scale(mode="median_speed")` is the
   active path for B-1.
-- **Content filter (B-1):** CLIP zero-shot + PySceneDetect `AdaptiveDetector`. Upgrade path
-  (B-2/B-3): CLIP+MLP trained on ~2,500 human labels (PriVi CVPR 2026 precedent).
+- **Content filter (B-1):** Motion (primary) + YOLO-World `yolov8s-worldv2.pt` (semantic object
+  rejection) + PySceneDetect `AdaptiveDetector` (SBD). CLIP zero-shot DROPPED — scores 0.999
+  within-domain, no discriminative power. YOLO-World: 74 FPS V100, ~1.5 GB VRAM, text cached.
 - **Visualization:** Self-contained Plotly HTML per clip, integrated as pipeline post-hook.
 - **Delta preprocessing:** physics hard clip → median filter k=3 → velocity normalize
   (delta/dt) → per-dimension z-score normalize. Store mean/std for inference denormalization.
@@ -612,7 +620,7 @@ GROUP 8 (full training + verify):              |                                
 ## Ralph Loop Hand-off
 
 - Start at **B1.1** (pipeline bug fix, pure-tier cheap-win).
-- **B1.7b (content filter) is AUTO** — can run immediately, unblocks B1.7.
+- **B1.7b (content filter, motion+YOLO-World) is AUTO** — can run immediately, unblocks B1.7.
 - **B1.9b (HTML report) is AUTO** — can run anytime, no blockers.
 - **B1.11 (Orin NX benchmark) can run in parallel** with Group 0-2.
 - User-gated steps: B1.7, B1.8, B1.10, B1.11, B1.20, B1.22, B1.23, B1.24.
@@ -640,10 +648,14 @@ Sources informing B-1 design decisions. Full research notes in vault.
 
 - **DINO-world** (arXiv 2507.19468): smooth L1 beta=0.1, variable timestamp conditioning via
   FiLM, 66M uncurated videos. Precedent for loss function + FPS handling.
+- **YOLO-World** (CVPR 2024, arXiv 2401.17270): open-vocabulary object detection via
+  reparam CLIP + YOLOv8. 74 FPS on V100 (49x faster than Grounding DINO). Used for B1.7b
+  semantic signal (reject drones/cameras/gear). `yolov8s-worldv2.pt` via ultralytics.
 - **PriVi** (CVPR 2026): CLIP+MLP on ~2,500 human labels achieves 90.3% precision for YouTube
-  FPV video filtering. Informs B1.7b upgrade path (B-2/B-3).
+  FPV video filtering. Historical reference only — CLIP zero-shot dropped in B1.7c (scores
+  0.999 on everything within-domain).
 - **Allegro**: 7-stage video processing pipeline — PySceneDetect + DOVER + CLIP alignment.
-  Precedent for content filtering architecture.
+  Precedent for content filtering architecture (SBD component reused).
 - **EgoVid-5M**: CLIP frame-frame consistency >= 0.7, optical flow 3-35 pixels. Quality
   thresholds for ego-centric video curation.
 - **DINO-WM** (ICLR 2025): ViT-S/14, D=384, L2 loss, no augmentation, simulator only.

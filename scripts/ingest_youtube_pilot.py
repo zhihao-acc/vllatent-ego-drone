@@ -3,7 +3,7 @@
 
 Orchestrates:
   1. Download clips from configs/sports_clips.yaml via yt-dlp (SponsorBlock pre-strip)
-  2. Run content filter (CLIP + PySceneDetect) — reject non-FPV clips
+  2. Run content filter (motion + YOLO-World) — reject non-FPV clips
   3. Run full pipeline on accepted clips (quality → MegaSaM → DINOv3 → cache)
   4. Update manifest
 
