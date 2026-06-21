@@ -43,7 +43,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof, vjepa_surprise)` + `Target` union alias; 94 schema tests green |
 | B1.7 — YouTube pilot: curate + ingest | in_progress | 2026-06-20 | REPLANNED: split into B1.7a (batch encode), B1.7c (FPV segment extract + pilot rework). USER-GATED: user runs reworked script |
 | B1.7a — Create vllatent/encode/batch.py | done | 2026-06-20 | `vllatent/encode/batch.py` — `encode_frames(frames_dir, device) → (N, 196, 768) fp16`; lazy torch; 5 tests green (mocked encoder, AST purity) |
-| B1.7b — Content filter implementation | done | 2026-06-20 | `vllatent/ingest/content_filter.py` — CLIP ViT-B/32 zero-shot FPV scoring + PySceneDetect AdaptiveDetector SBD; per-shot majority vote; ACCEPT/PARTIAL/REJECT verdict; thumbnail grid data; 21 tests green; all imports lazy (AST-verified) |
+| B1.7b — Content filter implementation | done | 2026-06-20 | **REVISED B1.7c**: CLIP dropped (0.999 within-domain, zero discrimination). Replaced with YOLO-World `yolov8s-worldv2` (74 FPS, 13M params, open-vocab). 36 rejected classes (drone body+parts, camera/gear, electronics, overlays). `filter_short_segments()` discards accepted runs < 10 frames (2s@5fps). `ultralytics>=8.2.0` added to `[torch]`. Filter: `is_fpv = motion≥8 AND ¬YOLO AND segment≥10`. 44 tests green; all imports lazy (AST-verified) |
 | B1.7c — FPV segment extraction + pilot rework | done | 2026-06-20 | **REWORKED**: added `score_frames_from_paths()`, `detect_shot_boundaries_from_paths()`, `filter_video_from_paths()` — path-based memory-efficient filter scoring EVERY frame (no stride sampling). Pilot script uses `filter_video_from_paths()` directly on frame paths; stride variable removed; FPV ranges exact. 35 content filter tests green (8 new path-based) |
 | B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
@@ -65,6 +65,29 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-21 — B1.7b REVISED: CLIP → YOLO-World + minimum segment filter
+
+**Status:** B1.7b revised — done (AUTO).
+**Problem.** CLIP ViT-B/32 zero-shot scores 0.999 on ALL frames within the same visual domain
+(all skiing = snow+mountain+trees). Zero discriminative power for within-domain filtering.
+CLIP ignores prepositions (ARO/WinoGround ICLR 2023: 0.50-0.56 compositional accuracy).
+**Fix — two changes:**
+1. **CLIP → YOLO-World `yolov8s-worldv2`** (74 FPS V100, 13M params, ~1.5 GB VRAM).
+   Open-vocabulary object detection via `set_classes()` (text cached, no per-frame re-encoding).
+   36 rejected classes in 4 groups: drone body+parts (rotor, propeller, gimbal, landing gear,
+   drone arm, motor, battery, RC controller, …), camera/filming gear (GoPro, action camera,
+   tripod, monopod, stabilizer, …), electronics (laptop, monitor, phone screen), overlays
+   (text overlay, title card, logo, watermark, subtitle).
+2. **`filter_short_segments(mask, min_length=10)`** — discards contiguous accepted runs shorter
+   than 10 frames (2s at 5fps). Prevents tiny fragments between rejected regions from leaking
+   into training data as unusable micro-episodes.
+- Filter logic: `is_fpv = motion >= 8.0 AND ¬YOLO AND segment >= 10 frames`
+- `ultralytics>=8.2.0` added to `[torch]` extra in `pyproject.toml`
+- Phase B plan updated (B1.7b rewritten, decisions/refs/dependency graph updated)
+- 44 content filter tests green (was 36). 396 total suite green (was 388).
 
 ---
 
