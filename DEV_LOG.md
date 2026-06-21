@@ -44,7 +44,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.7 — YouTube pilot: curate + ingest | in_progress | 2026-06-20 | REPLANNED: split into B1.7a (batch encode), B1.7c (FPV segment extract + pilot rework). USER-GATED: user runs reworked script |
 | B1.7a — Create vllatent/encode/batch.py | done | 2026-06-20 | `vllatent/encode/batch.py` — `encode_frames(frames_dir, device) → (N, 196, 768) fp16`; lazy torch; 5 tests green (mocked encoder, AST purity) |
 | B1.7b — Content filter implementation | done | 2026-06-20 | `vllatent/ingest/content_filter.py` — CLIP ViT-B/32 zero-shot FPV scoring + PySceneDetect AdaptiveDetector SBD; per-shot majority vote; ACCEPT/PARTIAL/REJECT verdict; thumbnail grid data; 21 tests green; all imports lazy (AST-verified) |
-| B1.7c — FPV segment extraction + pilot rework | done | 2026-06-20 | `extract_fpv_ranges()` in content_filter.py (6 tests); pilot script reworked: FPV ranges → 10s clips → per-clip pipeline; 27 content filter tests + 5 batch tests green |
+| B1.7c — FPV segment extraction + pilot rework | done | 2026-06-20 | **REWORKED**: added `score_frames_from_paths()`, `detect_shot_boundaries_from_paths()`, `filter_video_from_paths()` — path-based memory-efficient filter scoring EVERY frame (no stride sampling). Pilot script uses `filter_video_from_paths()` directly on frame paths; stride variable removed; FPV ranges exact. 35 content filter tests green (8 new path-based) |
 | B1.8 — CosFly-Track download + adapter | pending | — | Phase B-1 Group 1: USER-GATED (HF download) |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
 | B1.9b — Per-clip HTML quality report | done | 2026-06-20 | `vllatent/ingest/visualize.py` + `scripts/clip_report.py` — Plotly offline HTML (5 sections: quality timeline, 3D trajectory, body deltas, VO confidence, latent coherence + summary); 15 tests green; all imports lazy |
@@ -65,6 +65,35 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-20 — B1.7c REWORK: path-based content filter (every frame scored, no stride)
+
+**Status:** B1.7c reworked — done (AUTO).
+**Problem.** The prior B1.7c stride-sampled ~50 frames per video for the content filter.
+Non-FPV content (talking heads, drone closeups, title screens, B-roll) between sampled frames
+went undetected and leaked into training data. A 3-second talking-head in a 10-minute video
+was invisible to the 50-frame sample.
+**Fix — three new path-based functions in `vllatent/ingest/content_filter.py`:**
+- `score_frames_from_paths(frame_paths, device, batch_size=32) → (N,) float32` — loads frames
+  in bounded batches of `batch_size`, scores each via `_get_clip_scorer()`. Never holds more
+  than `batch_size` frames in RAM.
+- `detect_shot_boundaries_from_paths(frame_paths, …) → list[int]` — loads frames one at a
+  time through PySceneDetect AdaptiveDetector. Never holds more than 1 frame.
+- `filter_video_from_paths(frame_paths, device, …) → FilterResult` — composes the two above
+  + `classify_shots` + `video_verdict` + `fpv_frame_mask`. Same `FilterResult` as `filter_video()`,
+  but the FPV mask covers EVERY frame. No stride. No sampling.
+All three use lazy torch/PIL/scenedetect imports (tier rule). Added to `__all__`.
+**Pilot script reworked** (`scripts/ingest_youtube_pilot.py`):
+- Replaced stride-sampled `filter_video()` call with `filter_video_from_paths(frame_paths, …)`.
+- Removed `stride` variable, PIL Image.open sampling loop, unused numpy import.
+- FPV ranges from `extract_fpv_ranges(filter_result.shots)` are now exact frame indices (no
+  stride-to-full-frame remapping needed).
+**Tested.** 35 content filter tests (27 existing + 8 new path-based): `score_frames_from_paths`
+(shape, batching, empty-raises), `detect_shot_boundaries_from_paths` (processes all, empty-raises),
+`filter_video_from_paths` (full result, mask covers every frame, empty-raises). 387 total tests
+pass, 0 regressions. Ruff clean.
 
 ---
 

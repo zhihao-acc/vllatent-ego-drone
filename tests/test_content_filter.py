@@ -124,7 +124,7 @@ class TestShotVoting:
 
         scores = np.array([0.8, 0.9, 0.7, 0.85, 0.6], dtype=np.float32)
         boundaries: list[int] = []
-        result = classify_shots(scores, boundaries, threshold=0.25)
+        result = classify_shots(scores, boundaries, threshold=0.65)
         assert result.n_shots == 1
         assert result.shots[0].is_fpv is True
 
@@ -138,7 +138,7 @@ class TestShotVoting:
             dtype=np.float32,
         )
         boundaries = [5]
-        result = classify_shots(scores, boundaries, threshold=0.25)
+        result = classify_shots(scores, boundaries, threshold=0.65)
         assert result.n_shots == 2
         assert result.shots[0].is_fpv is True
         assert result.shots[1].is_fpv is False
@@ -147,8 +147,8 @@ class TestShotVoting:
         """Frames exactly at threshold: majority must be strictly above."""
         from vllatent.ingest.content_filter import classify_shots
 
-        scores = np.array([0.25, 0.25, 0.25], dtype=np.float32)
-        result = classify_shots(scores, [], threshold=0.25)
+        scores = np.array([0.65, 0.65, 0.65], dtype=np.float32)
+        result = classify_shots(scores, [], threshold=0.65)
         # >= threshold counts as FPV for the per-frame check
         assert result.shots[0].is_fpv is True
 
@@ -164,7 +164,7 @@ class TestVideoVerdict:
         from vllatent.ingest.content_filter import VideoVerdict, classify_shots, video_verdict
 
         scores = np.ones(20, dtype=np.float32) * 0.8
-        classification = classify_shots(scores, [], threshold=0.25)
+        classification = classify_shots(scores, [], threshold=0.65)
         verdict = video_verdict(classification)
         assert verdict == VideoVerdict.ACCEPT
 
@@ -172,7 +172,7 @@ class TestVideoVerdict:
         from vllatent.ingest.content_filter import VideoVerdict, classify_shots, video_verdict
 
         scores = np.ones(20, dtype=np.float32) * 0.05
-        classification = classify_shots(scores, [], threshold=0.25)
+        classification = classify_shots(scores, [], threshold=0.65)
         verdict = video_verdict(classification)
         assert verdict == VideoVerdict.REJECT
 
@@ -185,7 +185,7 @@ class TestVideoVerdict:
             dtype=np.float32,
         )
         boundaries = [10]
-        classification = classify_shots(scores, boundaries, threshold=0.25)
+        classification = classify_shots(scores, boundaries, threshold=0.65)
         verdict = video_verdict(classification)
         assert verdict == VideoVerdict.PARTIAL
 
@@ -198,12 +198,12 @@ class TestVideoVerdict:
         non_fpv_scores = np.ones(5, dtype=np.float32) * 0.05
         boundaries_10 = list(range(5, 50, 5))  # 10 shots of 5 frames each
         scores_70 = np.concatenate([all_fpv_scores] * 7 + [non_fpv_scores] * 3)
-        cls_70 = classify_shots(scores_70, boundaries_10[:9], threshold=0.25)
+        cls_70 = classify_shots(scores_70, boundaries_10[:9], threshold=0.65)
         assert video_verdict(cls_70) == VideoVerdict.ACCEPT
 
         # 2 FPV shots out of 10 = 20% => REJECT
         scores_20 = np.concatenate([all_fpv_scores] * 2 + [non_fpv_scores] * 8)
-        cls_20 = classify_shots(scores_20, boundaries_10[:9], threshold=0.25)
+        cls_20 = classify_shots(scores_20, boundaries_10[:9], threshold=0.65)
         assert video_verdict(cls_20) == VideoVerdict.REJECT
 
 
@@ -218,7 +218,7 @@ class TestFpvFrameMask:
         from vllatent.ingest.content_filter import classify_shots, fpv_frame_mask
 
         scores = np.ones(20, dtype=np.float32) * 0.8
-        cls = classify_shots(scores, [10], threshold=0.25)
+        cls = classify_shots(scores, [10], threshold=0.65)
         mask = fpv_frame_mask(cls)
         assert mask.shape == (20,)
         assert mask.dtype == np.bool_
@@ -227,7 +227,7 @@ class TestFpvFrameMask:
         from vllatent.ingest.content_filter import classify_shots, fpv_frame_mask
 
         scores = np.array([0.8] * 5 + [0.05] * 5, dtype=np.float32)
-        cls = classify_shots(scores, [5], threshold=0.25)
+        cls = classify_shots(scores, [5], threshold=0.65)
         mask = fpv_frame_mask(cls)
         assert np.all(mask[:5])      # FPV shot
         assert not np.any(mask[5:])  # non-FPV shot
@@ -245,7 +245,7 @@ class TestThumbnailGrid:
 
         frames = _make_frames(20)
         scores = np.array([0.8] * 10 + [0.1] * 10, dtype=np.float32)
-        cls = classify_shots(scores, [10], threshold=0.25)
+        cls = classify_shots(scores, [10], threshold=0.65)
         grid = thumbnail_grid_data(frames, cls, max_thumbs=6)
         assert isinstance(grid, list)
         assert len(grid) <= 6
@@ -315,6 +315,166 @@ class TestExtractFpvRanges:
             ShotInfo(start=30, end=40, is_fpv=True, mean_score=0.9),
         ]
         assert extract_fpv_ranges(shots) == [(0, 10), (30, 40)]
+
+
+# ---------------------------------------------------------------------------
+# Path-based scoring (memory-efficient, no stride sampling)
+# ---------------------------------------------------------------------------
+
+class TestScoreFramesFromPaths:
+    """score_frames_from_paths: batched CLIP scoring from file paths."""
+
+    def test_shape_matches_input_count(self, tmp_path: Path) -> None:
+        from vllatent.ingest.content_filter import score_frames_from_paths
+
+        frame_dir = tmp_path / "frames"
+        frame_dir.mkdir()
+        for i in range(10):
+            _save_dummy_frame(frame_dir / f"{i:06d}.jpg")
+
+        paths = sorted(frame_dir.glob("*.jpg"))
+        with patch("vllatent.ingest.content_filter._get_clip_scorer") as mock_scorer:
+            mock_fn = MagicMock(side_effect=lambda batch: np.ones(len(batch), dtype=np.float32) * 0.7)
+            mock_scorer.return_value = mock_fn
+            scores = score_frames_from_paths(paths, device="cpu", batch_size=4)
+
+        assert isinstance(scores, np.ndarray)
+        assert scores.shape == (10,)
+        assert scores.dtype == np.float32
+
+    def test_batching_respects_batch_size(self, tmp_path: Path) -> None:
+        from vllatent.ingest.content_filter import score_frames_from_paths
+
+        frame_dir = tmp_path / "frames"
+        frame_dir.mkdir()
+        for i in range(7):
+            _save_dummy_frame(frame_dir / f"{i:06d}.jpg")
+
+        paths = sorted(frame_dir.glob("*.jpg"))
+        batch_sizes_seen: list[int] = []
+        with patch("vllatent.ingest.content_filter._get_clip_scorer") as mock_scorer:
+            def _track_batch(batch: list) -> np.ndarray:
+                batch_sizes_seen.append(len(batch))
+                return np.ones(len(batch), dtype=np.float32) * 0.5
+            mock_scorer.return_value = _track_batch
+            score_frames_from_paths(paths, device="cpu", batch_size=3)
+
+        assert batch_sizes_seen == [3, 3, 1]
+
+    def test_empty_paths_raises(self) -> None:
+        from vllatent.ingest.content_filter import score_frames_from_paths
+        with pytest.raises(ValueError, match="frame_paths"):
+            score_frames_from_paths([], device="cpu")
+
+
+class TestDetectShotBoundariesFromPaths:
+    """detect_shot_boundaries_from_paths: one-at-a-time loading from paths."""
+
+    def test_processes_all_frames(self, tmp_path: Path) -> None:
+        from vllatent.ingest.content_filter import detect_shot_boundaries_from_paths
+
+        frame_dir = tmp_path / "frames"
+        frame_dir.mkdir()
+        for i in range(15):
+            _save_dummy_frame(frame_dir / f"{i:06d}.jpg")
+
+        paths = sorted(frame_dir.glob("*.jpg"))
+        boundaries = detect_shot_boundaries_from_paths(paths)
+        assert isinstance(boundaries, list)
+        for b in boundaries:
+            assert isinstance(b, int)
+
+    def test_empty_paths_raises(self) -> None:
+        from vllatent.ingest.content_filter import detect_shot_boundaries_from_paths
+        with pytest.raises(ValueError, match="frame_paths"):
+            detect_shot_boundaries_from_paths([])
+
+
+class TestFilterVideoFromPaths:
+    """filter_video_from_paths: full pipeline on file paths, every frame scored."""
+
+    def test_returns_filter_result_covering_all_frames(self, tmp_path: Path) -> None:
+        from vllatent.ingest.content_filter import FilterResult, VideoVerdict, filter_video_from_paths
+
+        frame_dir = tmp_path / "frames"
+        frame_dir.mkdir()
+        for i in range(20):
+            _save_dummy_frame(frame_dir / f"{i:06d}.jpg")
+
+        paths = sorted(frame_dir.glob("*.jpg"))
+        high_motion = np.ones(20, dtype=np.float32) * 30.0
+        with patch("vllatent.ingest.content_filter._get_clip_scorer") as mock_scorer, \
+             patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=high_motion):
+            mock_fn = MagicMock(side_effect=lambda batch: np.ones(len(batch), dtype=np.float32) * 0.8)
+            mock_scorer.return_value = mock_fn
+            result = filter_video_from_paths(paths, device="cpu")
+
+        assert isinstance(result, FilterResult)
+        assert result.verdict == VideoVerdict.ACCEPT
+        assert result.n_frames == 20
+        assert result.fpv_mask.shape == (20,)
+        assert result.n_fpv_frames == 20
+
+    def test_motion_rejects_static_frames(self, tmp_path: Path) -> None:
+        """Frames with high CLIP but zero motion should be rejected."""
+        from vllatent.ingest.content_filter import filter_video_from_paths
+
+        frame_dir = tmp_path / "frames"
+        frame_dir.mkdir()
+        for i in range(10):
+            _save_dummy_frame(frame_dir / f"{i:06d}.jpg")
+
+        paths = sorted(frame_dir.glob("*.jpg"))
+        zero_motion = np.zeros(10, dtype=np.float32)
+        with patch("vllatent.ingest.content_filter._get_clip_scorer") as mock_scorer, \
+             patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=zero_motion):
+            mock_fn = MagicMock(side_effect=lambda batch: np.ones(len(batch), dtype=np.float32) * 0.9)
+            mock_scorer.return_value = mock_fn
+            result = filter_video_from_paths(paths, device="cpu")
+
+        assert result.n_fpv_frames == 0
+
+    def test_mask_covers_every_frame(self, tmp_path: Path) -> None:
+        """The mask length must equal the number of input paths — no stride gaps."""
+        from vllatent.ingest.content_filter import filter_video_from_paths
+
+        frame_dir = tmp_path / "frames"
+        frame_dir.mkdir()
+        n = 37
+        for i in range(n):
+            _save_dummy_frame(frame_dir / f"{i:06d}.jpg")
+
+        paths = sorted(frame_dir.glob("*.jpg"))
+        clip_scores = np.concatenate([
+            np.ones(20, dtype=np.float32) * 0.8,
+            np.ones(17, dtype=np.float32) * 0.1,
+        ])
+        high_motion = np.ones(n, dtype=np.float32) * 30.0
+        call_count = [0]
+        with patch("vllatent.ingest.content_filter._get_clip_scorer") as mock_scorer, \
+             patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=high_motion):
+            def _score(batch: list) -> np.ndarray:
+                start = call_count[0]
+                call_count[0] += len(batch)
+                return clip_scores[start:start + len(batch)]
+            mock_scorer.return_value = _score
+            result = filter_video_from_paths(paths, device="cpu")
+
+        assert result.fpv_mask.shape == (n,)
+        assert result.per_frame_scores.shape == (n,)
+        assert np.all(result.fpv_mask[:20])
+
+    def test_empty_paths_raises(self) -> None:
+        from vllatent.ingest.content_filter import filter_video_from_paths
+        with pytest.raises(ValueError, match="frame_paths"):
+            filter_video_from_paths([], device="cpu")
+
+
+def _save_dummy_frame(path: Path, h: int = 64, w: int = 64) -> None:
+    """Write a tiny JPEG to disk for path-based tests."""
+    from PIL import Image
+    img = Image.fromarray(np.random.RandomState(42).randint(0, 256, (h, w, 3), dtype=np.uint8))
+    img.save(path)
 
 
 # ---------------------------------------------------------------------------

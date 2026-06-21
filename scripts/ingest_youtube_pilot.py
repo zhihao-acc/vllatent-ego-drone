@@ -20,7 +20,6 @@ import shutil
 import sys
 from pathlib import Path
 
-import numpy as np
 import yaml
 
 
@@ -133,22 +132,15 @@ def main(argv: list[str] | None = None) -> int:
             results_summary.append({"clip_id": clip_id, "status": "too_few_frames", "n_frames": n_frames})
             continue
 
-        _log("  running content filter...")
+        _log("  running content filter (every frame)...")
         try:
-            from PIL import Image
+            from vllatent.ingest.content_filter import VideoVerdict, extract_fpv_ranges, filter_video_from_paths
 
-            from vllatent.ingest.content_filter import VideoVerdict, extract_fpv_ranges, filter_video
-
-            stride = max(1, n_frames // 50)
-            sample_frames = [
-                np.array(Image.open(frame_paths[idx]))
-                for idx in range(0, n_frames, stride)
-            ]
-
-            filter_result = filter_video(sample_frames, device=args.device)
+            filter_result = filter_video_from_paths(frame_paths, device=args.device)
 
             fpv_count = sum(1 for s in filter_result.shots if s.is_fpv)
             _log(f"  verdict: {filter_result.verdict.value}, FPV shots: {fpv_count}/{len(filter_result.shots)}")
+            _log(f"  FPV frames: {filter_result.n_fpv_frames}/{filter_result.n_frames}")
 
             if filter_result.verdict == VideoVerdict.REJECT:
                 _log("  REJECTED — skipping")
@@ -170,15 +162,9 @@ def main(argv: list[str] | None = None) -> int:
 
         fpv_ranges: list[tuple[int, int]] = []
         if filter_result is not None:
-            sampled_ranges = extract_fpv_ranges(filter_result.shots)
-            # Map sampled-frame indices back to full-frame indices
-            fpv_ranges = [
-                (s * stride, min(e * stride, n_frames))
-                for s, e in sampled_ranges
-            ]
+            fpv_ranges = extract_fpv_ranges(filter_result.shots)
 
         if not fpv_ranges:
-            # Fallback: treat entire video as one FPV range
             fpv_ranges = [(0, n_frames)]
 
         clip_length_frames = int(cfg.clip_length_seconds * cfg.target_fps)

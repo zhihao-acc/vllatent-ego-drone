@@ -22,26 +22,32 @@ import numpy as np
 # --- FPV prompt ensembles (zero-shot CLIP classification) ---
 
 _FPV_POSITIVE = [
-    "a first person view from a drone flying over terrain",
-    "point of view footage from an action camera while skiing",
-    "first person perspective of mountain biking on a trail",
-    "POV drone footage following an athlete",
-    "egocentric camera view of outdoor sports activity",
-    "GoPro footage of skiing downhill",
-    "FPV drone racing through a landscape",
-    "body-mounted camera view during extreme sports",
+    "first-person view skiing down a steep snowy mountain slope",
+    "POV footage looking down at snow rushing beneath ski tips",
+    "wide-angle fisheye perspective of a ski run from the skier's point of view",
+    "head-mounted perspective descending through a snowy forest",
+    "barrel-distorted horizon with snow surface filling the lower frame",
+    "fast-moving first-person ski run with motion blur on the snow",
+    "skier's eye-level view of a groomed piste with tracks visible",
+    "egocentric view of a powdery off-piste descent, snow spray visible",
+    "immersive downhill skiing perspective, trees rushing past on both sides",
+    "helmet-mounted view looking forward down a ski slope",
+    "subjective viewpoint of high-speed carving turns on a ski run",
+    "dynamic first-person snowboarding descent with mountain in background",
 ]
 
 _FPV_NEGATIVE = [
-    "a person talking to the camera in a room",
-    "text overlay on a dark background",
-    "video title screen with graphics",
-    "static establishing shot of a landscape",
-    "interview scene with two people sitting",
-    "product advertisement with logos",
-    "social media subscribe button animation",
-    "drone hovering stationary above a building",
+    "a person sitting on a chairlift or gondola with mountain scenery",
+    "third-person view of a skier filmed from the slope side",
+    "a skiing instructor talking directly to the camera explaining technique",
+    "aerial shot of a ski resort or mountain from very high above",
+    "a person standing still at the top of a ski run looking at scenery",
+    "slow-motion close-up of ski equipment, bindings, or boots on snow",
+    "a group of skiers posing for a photo at the base of a mountain",
+    "behind-the-shoulder follow-cam shot of a skier filmed by another skier",
 ]
+
+_NEGATIVE_WEIGHT = 0.75
 
 # Thresholds
 _ACCEPT_SHOT_FRAC = 0.60   # >= 60% FPV shots => ACCEPT whole video
@@ -139,15 +145,24 @@ def _get_clip_scorer(device: str = "cpu") -> Callable[[list[np.ndarray]], np.nda
     for p in model.parameters():
         p.requires_grad_(False)
 
-    all_prompts = _FPV_POSITIVE + _FPV_NEGATIVE
     n_pos = len(_FPV_POSITIVE)
+    n_neg = len(_FPV_NEGATIVE)
 
-    text_inputs = processor(text=all_prompts, return_tensors="pt", padding=True, truncation=True)
-    text_inputs = {k: v.to(device) for k, v in text_inputs.items() if isinstance(v, torch.Tensor)}
+    pos_inputs = processor(text=_FPV_POSITIVE, return_tensors="pt", padding=True, truncation=True)
+    pos_inputs = {k: v.to(device) for k, v in pos_inputs.items() if isinstance(v, torch.Tensor)}
+    neg_inputs = processor(text=_FPV_NEGATIVE, return_tensors="pt", padding=True, truncation=True)
+    neg_inputs = {k: v.to(device) for k, v in neg_inputs.items() if isinstance(v, torch.Tensor)}
+
+    logit_scale = model.logit_scale.exp()
 
     with torch.no_grad():
-        text_features = model.get_text_features(**text_inputs)
-        text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+        pos_out = model.get_text_features(**pos_inputs)
+        pos_features = pos_out.pooler_output if hasattr(pos_out, "pooler_output") else pos_out
+        pos_features = pos_features / pos_features.norm(dim=-1, keepdim=True)
+
+        neg_out = model.get_text_features(**neg_inputs)
+        neg_features = neg_out.pooler_output if hasattr(neg_out, "pooler_output") else neg_out
+        neg_features = neg_features / neg_features.norm(dim=-1, keepdim=True)
 
     def _score_batch(frames_batch: list[np.ndarray]) -> np.ndarray:
         from PIL import Image
@@ -157,16 +172,19 @@ def _get_clip_scorer(device: str = "cpu") -> Callable[[list[np.ndarray]], np.nda
         image_inputs = {k: v.to(device) for k, v in image_inputs.items() if isinstance(v, torch.Tensor)}
 
         with torch.no_grad():
-            image_features = model.get_image_features(**image_inputs)
+            image_out = model.get_image_features(**image_inputs)
+            image_features = image_out.pooler_output if hasattr(image_out, "pooler_output") else image_out
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
-            similarity = (image_features @ text_features.T)  # (B, n_prompts)
 
-        sim_np = similarity.float().cpu().numpy()
-        pos_score = sim_np[:, :n_pos].mean(axis=1)
-        neg_score = sim_np[:, n_pos:].mean(axis=1)
+            pos_sim = (image_features @ pos_features.T) * logit_scale  # (B, n_pos)
+            neg_sim = (image_features @ neg_features.T) * logit_scale  # (B, n_neg)
 
-        fpv_prob = np.clip(pos_score - neg_score + 0.5, 0.0, 1.0)
-        return fpv_prob.astype(np.float32)
+            pos_class = pos_sim.mean(dim=-1)  # (B,)
+            neg_class = neg_sim.mean(dim=-1) * _NEGATIVE_WEIGHT  # (B,)
+            logits = torch.stack([pos_class, neg_class], dim=-1)  # (B, 2)
+            fpv_prob = torch.softmax(logits, dim=-1)[:, 0]  # P(FPV)
+
+        return fpv_prob.float().cpu().numpy().astype(np.float32)
 
     return _score_batch
 
@@ -204,7 +222,7 @@ def classify_shots(
     scores: np.ndarray,
     boundaries: list[int],
     *,
-    threshold: float = 0.25,
+    threshold: float = 0.65,
 ) -> ShotClassification:
     """Classify each shot as FPV or non-FPV via majority vote on per-frame scores."""
     n = len(scores)
@@ -326,12 +344,156 @@ def extract_fpv_ranges(shots: list[ShotInfo]) -> list[tuple[int, int]]:
     return ranges
 
 
+def compute_motion_scores(frame_paths: list, *, downsample: int = 4) -> np.ndarray:
+    """Per-frame motion score: mean absolute pixel difference vs previous frame.
+
+    Returns (N,) float32. First frame gets score 0 (no predecessor).
+    Loads two frames at a time — O(1) memory. ``downsample`` shrinks frames
+    before differencing to save compute (default 4x).
+    """
+    if not frame_paths:
+        raise ValueError("frame_paths: expected a non-empty list of paths")
+
+    from PIL import Image
+
+    scores = np.zeros(len(frame_paths), dtype=np.float32)
+    prev: np.ndarray | None = None
+
+    for i, path in enumerate(frame_paths):
+        frame = np.array(Image.open(path))
+        if downsample > 1:
+            frame = frame[::downsample, ::downsample]
+        if prev is not None:
+            scores[i] = np.mean(np.abs(frame.astype(np.float32) - prev.astype(np.float32)))
+        prev = frame
+
+    return scores
+
+
+def score_frames_from_paths(
+    frame_paths: list,
+    *,
+    device: str = "cpu",
+    batch_size: int = 32,
+) -> np.ndarray:
+    """Score frames for FPV content by loading from file paths in bounded batches.
+
+    Never holds more than ``batch_size`` frames in memory at once.
+    Returns per-frame scores in [0, 1] where higher = more likely FPV.
+    """
+    if not frame_paths:
+        raise ValueError("frame_paths: expected a non-empty list of paths")
+
+    from PIL import Image
+
+    scorer = _get_clip_scorer(device=device)
+
+    all_scores: list[np.ndarray] = []
+    for i in range(0, len(frame_paths), batch_size):
+        batch_paths = frame_paths[i : i + batch_size]
+        batch_frames = [np.array(Image.open(p)) for p in batch_paths]
+        scores = scorer(batch_frames)
+        all_scores.append(scores)
+
+    return np.concatenate(all_scores).astype(np.float32)
+
+
+def detect_shot_boundaries_from_paths(
+    frame_paths: list,
+    *,
+    adaptive_threshold: float = 3.0,
+    min_scene_len: int = 2,
+    fps: float = 30.0,
+) -> list[int]:
+    """Detect shot boundaries by loading frames one at a time from file paths.
+
+    Memory-efficient: never holds more than 1 frame in memory.
+    Returns a sorted list of frame indices where shot transitions occur.
+    """
+    if not frame_paths:
+        raise ValueError("frame_paths: expected a non-empty list of paths")
+
+    from PIL import Image
+    from scenedetect import AdaptiveDetector, FrameTimecode
+
+    detector = AdaptiveDetector(
+        adaptive_threshold=adaptive_threshold,
+        min_scene_len=min_scene_len,
+    )
+    boundaries: list[int] = []
+
+    for i, path in enumerate(frame_paths):
+        frame = np.array(Image.open(path))
+        if frame.ndim != 3 or frame.shape[2] != 3:
+            raise ValueError(f"frame {i}: expected (H,W,3) RGB, got shape {frame.shape}")
+
+        tc = FrameTimecode(i, fps=fps)
+        cuts = detector.process_frame(tc, frame)
+        for cut in cuts:
+            boundaries.append(cut.frame_num)
+
+    boundaries.sort()
+    return boundaries
+
+
+_MOTION_THRESHOLD = 8.0  # mean abs pixel diff; FPV at 5fps typically 15-50+
+
+
+def filter_video_from_paths(
+    frame_paths: list,
+    *,
+    device: str = "cpu",
+    adaptive_threshold: float = 3.0,
+    fpv_threshold: float = 0.65,
+    motion_threshold: float = _MOTION_THRESHOLD,
+    batch_size: int = 32,
+) -> FilterResult:
+    """Run full content filter on file paths: CLIP + motion + SBD + verdict.
+
+    Two-signal filter: a frame is FPV only if its CLIP semantic score AND its
+    temporal motion score both pass their thresholds. This catches content that
+    CLIP alone misses (e.g. drone close-ups that semantically match "drone"
+    prompts but have near-zero inter-frame motion).
+
+    The FPV mask covers EVERY frame — no stride sampling.
+    """
+    if not frame_paths:
+        raise ValueError("frame_paths: expected a non-empty list of paths")
+
+    boundaries = detect_shot_boundaries_from_paths(
+        frame_paths, adaptive_threshold=adaptive_threshold,
+    )
+    clip_scores = score_frames_from_paths(
+        frame_paths, device=device, batch_size=batch_size,
+    )
+    motion_scores = compute_motion_scores(frame_paths)
+
+    combined = np.where(
+        motion_scores >= motion_threshold, clip_scores, 0.0,
+    ).astype(np.float32)
+
+    mask = combined >= fpv_threshold
+
+    classification = classify_shots(combined, boundaries, threshold=fpv_threshold)
+    verdict = video_verdict(classification)
+
+    return FilterResult(
+        verdict=verdict,
+        n_frames=len(frame_paths),
+        n_fpv_frames=int(mask.sum()),
+        fpv_mask=mask,
+        shot_boundaries=boundaries,
+        shots=classification.shots,
+        per_frame_scores=combined,
+    )
+
+
 def filter_video(
     frames: list[np.ndarray],
     *,
     device: str = "cpu",
     adaptive_threshold: float = 3.0,
-    fpv_threshold: float = 0.25,
+    fpv_threshold: float = 0.65,
     batch_size: int = 32,
 ) -> FilterResult:
     """Run full content filter: SBD + CLIP scoring + shot voting + verdict."""
@@ -360,12 +522,16 @@ __all__ = [
     "ShotInfo",
     "ShotClassification",
     "FilterResult",
+    "compute_motion_scores",
     "detect_shot_boundaries",
+    "detect_shot_boundaries_from_paths",
     "score_frames_fpv",
+    "score_frames_from_paths",
     "classify_shots",
     "video_verdict",
     "fpv_frame_mask",
     "extract_fpv_ranges",
     "thumbnail_grid_data",
     "filter_video",
+    "filter_video_from_paths",
 ]
