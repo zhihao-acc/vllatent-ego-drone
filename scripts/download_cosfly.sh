@@ -1,60 +1,60 @@
 #!/usr/bin/env bash
 # Download CosFly-Track dataset from HuggingFace (AutelRobotics/CosFly).
 #
-# Usage:
-#   bash scripts/download_cosfly.sh [--out DIR] [--limit N]
+# SELECTIVE download: only trajectory.json + rgb.png (~5-10 GB estimate).
+# Skips depth.npy, instance.png, debug.png which make up the bulk of 622 GB.
 #
-# Requires: huggingface-cli (pip install huggingface_hub)
+# Usage:
+#   bash scripts/download_cosfly.sh [--out DIR] [--meta-only]
+#
+# Requires: hf CLI (pip install huggingface_hub)
 # Uses HF_ENDPOINT env var if set (for mirrors like hf-mirror.com).
 set -euo pipefail
 
 OUT_DIR="ingest_data/cosfly"
-LIMIT=""
-REPO="AutelRobotics/CosFly"
+META_ONLY=false
 
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        --out)    OUT_DIR="$2"; shift 2 ;;
-        --limit)  LIMIT="$2"; shift 2 ;;
+        --out)       OUT_DIR="$2"; shift 2 ;;
+        --meta-only) META_ONLY=true; shift ;;
         -h|--help)
-            echo "Usage: $0 [--out DIR] [--limit N]"
-            echo "  --out DIR   Output directory (default: ingest_data/cosfly)"
-            echo "  --limit N   Download only the first N trace directories"
+            echo "Usage: $0 [--out DIR] [--meta-only]"
+            echo "  --out DIR     Output directory (default: ingest_data/cosfly)"
+            echo "  --meta-only   Download only trajectory.json files (~few MB), skip frames"
             exit 0
             ;;
         *) echo "Unknown arg: $1"; exit 1 ;;
     esac
 done
 
-echo "[cosfly] Downloading CosFly-Track from ${REPO}"
+echo "[cosfly] Downloading CosFly-Track from AutelRobotics/CosFly"
 echo "[cosfly] Output: ${OUT_DIR}"
 echo "[cosfly] HF_ENDPOINT: ${HF_ENDPOINT:-https://huggingface.co}"
 
 mkdir -p "${OUT_DIR}"
 
-if ! command -v huggingface-cli &>/dev/null; then
-    echo "[cosfly] ERROR: huggingface-cli not found. Install with: pip install huggingface_hub"
+if ! command -v hf &>/dev/null; then
+    echo "[cosfly] ERROR: hf CLI not found. Install with: pip install huggingface_hub"
     exit 1
 fi
 
-if [[ -n "${LIMIT}" ]]; then
-    echo "[cosfly] Limiting to first ${LIMIT} trace directories"
-    echo "[cosfly] Fetching file list..."
-
-    # Get the list of trajectory directories and take the first N
-    huggingface-cli download "${REPO}" \
+if [[ "${META_ONLY}" == true ]]; then
+    echo "[cosfly] Meta-only mode: downloading trajectory.json + perturbation_report.json only"
+    hf download "AutelRobotics/CosFly" \
         --repo-type dataset \
         --local-dir "${OUT_DIR}" \
-        --include "data_v7/*" \
-        2>&1 | head -20
-
-    echo "[cosfly] NOTE: --limit only applies to the adapter (convert_dataset --limit N)."
-    echo "[cosfly] The HF download fetches the full dataset; use convert_dataset(limit=N) to process a subset."
+        --include "data_v7/*/trajectory_*/*/trajectory.json" \
+                  "data_v7/*/trajectory_*/*/perturbation_report.json"
 else
-    huggingface-cli download "${REPO}" \
+    echo "[cosfly] Selective download: trajectory.json + rgb.png only (skipping depth/instance/debug)"
+    echo "[cosfly] Full dataset is ~622 GB; this downloads only what we need (~5-10 GB)"
+    hf download "AutelRobotics/CosFly" \
         --repo-type dataset \
         --local-dir "${OUT_DIR}" \
-        --include "data_v7/*"
+        --include "data_v7/*/trajectory_*/*/trajectory.json" \
+                  "data_v7/*/trajectory_*/*/perturbation_report.json" \
+                  "data_v7/*/trajectory_*/*/frames_playback/*/rgb.png"
 fi
 
 echo ""
