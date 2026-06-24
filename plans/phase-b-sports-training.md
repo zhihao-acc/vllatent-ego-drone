@@ -261,15 +261,86 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 - **Deps:** none (runs on any cached .npz). Blocked-by: none.
 
 **B1.10 — MegaSaM VO validation on pilot clips.**
-- Tier RESEARCH / USER-GATED
-- Run MegaSaM on 3-5 YouTube pilot clips. Inspect 3D trajectory shapes (cumulative deltas).
-  Compare against expected motion (e.g., downhill ski run should be roughly linear+descending).
-  If any GPS-paired clip is available, run `evo` ATE. Produce GO / CONDITIONAL-GO / NO-GO
-  verdict on MegaSaM for skiing FPV. If NO-GO, evaluate DPVO fallback.
-- **Files:** written findings note (not committed — vault or dev log)
-- **DoD:** Trajectory plots reviewed. Verdict written.
-- **Test:** User inspects plots + renders verdict.
-- **Deps:** blocks B1.12. Blocked-by: B1.7.
+- Tier RESEARCH+TOOL / USER-GATED
+- **Objective.** Validate MegaSaM monocular VO on skiing FPV video. No ground truth available
+  (no GPS/IMU), so use physics-plausibility + smoothness proxies. Produce GO / CONDITIONAL-GO
+  / NO-GO verdict.
+
+- **B1.10a — Validation metrics module (AUTO).**
+  `vllatent/ingest/vo_validation.py` — pure numpy, no MegaSaM dependency. Functions:
+  - `trajectory_smoothness(poses) → SmoothnessReport` — jerk (3rd derivative of position),
+    acceleration discontinuity count (jumps > 3σ), angular velocity spikes (> 300°/s).
+    Skiing should show gradual curves, not step changes.
+  - `physics_plausibility(deltas, fps) → PhysicsReport` — check:
+    - Max frame-to-frame displacement (skiing ≤ 22 m/s = 4.4 m/frame at 5 Hz)
+    - Altitude change pattern: net descending for downhill skiing
+    - Lateral acceleration (turns ≤ 3-5 m/s²)
+    - Yaw rate (peak ≤ 180°/s plausible; > 300°/s = failure)
+  - `confidence_analysis(confidences) → ConfidenceReport` — distribution stats,
+    fraction below 0.3 (low-confidence), longest contiguous low-confidence run.
+  - `scale_drift(poses) → DriftReport` — compare displacement magnitude in first vs last
+    quarter of trajectory (monocular scale drift shows as speed-up or slow-down over time).
+  - `vo_verdict(smoothness, physics, confidence, drift) → Verdict` — combine all checks
+    into GO / CONDITIONAL-GO / NO-GO with per-check pass/warn/fail.
+  Tests: `tests/test_vo_validation.py` (synthetic trajectories: smooth descent, jerky,
+  stationary, circular, physically implausible).
+
+- **B1.10b — Validation visualization (AUTO).**
+  `scripts/validate_megasam.py` — CLI that runs the full validation pipeline:
+  1. Parse MegaSaM output (`parse_megasam_output` from `megasam.py`)
+  2. Convert to body-frame deltas (`se3_sequence_to_deltas` from `ego_motion.py`)
+  3. Run all validation checks from `vo_validation.py`
+  4. Generate HTML report (extend `visualize.py` or standalone Plotly):
+     - 3D trajectory plot (cumulative deltas, colored by speed)
+     - Speed profile over time (flag frames > physics threshold)
+     - Yaw rate over time (flag spikes)
+     - VO confidence heatmap over trajectory
+     - Jerk magnitude timeline
+     - Per-check verdict table (smoothness / physics / confidence / drift)
+  5. Print terminal summary with GO/CONDITIONAL-GO/NO-GO
+  Usage: `python scripts/validate_megasam.py --frames-dir ingest_data/frames/ski01
+    --megasam-dir ingest_data/frames/ski01_megasam --fps 5 --out reports/ski01_vo.html`
+
+- **B1.10c — Run MegaSaM + validate (USER-GATED).**
+  Run on 3 pilot clips of varying difficulty:
+  - `ski01` (335 frames, ~67s) — short, likely clean
+  - `ski03` (254 frames, ~51s) — shortest accepted
+  - `ski05` (768 frames, ~154s) — medium length, single FPV range
+  MegaSaM command per clip:
+  ```bash
+  python ~/CODE/MegaSaM/run.py \
+    --input_dir ingest_data/frames/ski01 \
+    --output_dir ingest_data/frames/ski01_megasam
+  ```
+  Then validate:
+  ```bash
+  python scripts/validate_megasam.py \
+    --frames-dir ingest_data/frames/ski01 \
+    --megasam-dir ingest_data/frames/ski01_megasam \
+    --fps 5 --out reports/ski01_vo.html
+  ```
+  **Known failure modes for skiing FPV:**
+  - Homogeneous snow texture → feature-poor → drift
+  - Fast motion blur during acceleration/jumps
+  - Large dynamic foreground (followed skier, 20-40% of frame) — MegaSaM handles
+    this via dynamic-object downweighting, but skiing has unusually large foreground
+  - Rapid yaw during turns → rotation estimation failure
+
+- **Verdict criteria.**
+  - **GO:** ≥2/3 clips pass all checks. Trajectories visually resemble downhill descent.
+    Minor smoothness warnings acceptable.
+  - **CONDITIONAL-GO:** 1/3 clips fail hard OR systematic drift detected but trajectories
+    are directionally correct. Proceed with confidence-weighted L_wp (low-confidence
+    frames contribute less via `vo_confidence` floor at 0.05).
+  - **NO-GO:** Majority of clips produce degenerate trajectories (stationary, random walk,
+    physically impossible speeds). Evaluate DPVO fallback before proceeding.
+
+- **Files:** `vllatent/ingest/vo_validation.py` (new), `scripts/validate_megasam.py` (new),
+  `tests/test_vo_validation.py` (new), `reports/*.html` (gitignored)
+- **DoD:** Validation module tested. 3 clips run through MegaSaM + validated. HTML reports
+  generated. Terminal verdict printed. User reviews and confirms GO/CONDITIONAL-GO/NO-GO.
+- **Test:** `$PY -m pytest -q tests/test_vo_validation.py`. User runs MegaSaM + reviews.
+- **Deps:** blocks B1.12. Blocked-by: B1.7, MegaSaM installed.
 
 ---
 
