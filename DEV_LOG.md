@@ -50,7 +50,9 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.9b — Per-clip HTML quality report | done | 2026-06-20 | `vllatent/ingest/visualize.py` + `scripts/clip_report.py` — Plotly offline HTML (5 sections: quality timeline, 3D trajectory, body deltas, VO confidence, latent coherence + summary); 15 tests green; all imports lazy |
 | B1.10a — VO validation metrics module | done | 2026-06-24 | `vllatent/ingest/vo_validation.py` — PURE: smoothness (jerk, accel disc MAD-robust, angular spikes), physics plausibility (speed/yaw limits), confidence analysis, scale drift, GO/CONDITIONAL-GO/NO-GO verdict. 18 tests green |
 | B1.10b — VO validation CLI + HTML report | done | 2026-06-24 | `scripts/validate_megasam.py` — single-clip + batch mode; Plotly HTML (3D trajectory, speed, yaw rate, confidence, accel); terminal verdict summary; JSON export. Ruff clean |
-| B1.10c — Run MegaSaM on pilot clips + validate | pending | — | **USER-GATED**: install MegaSaM → run on ski01/ski03/ski05 → `validate_megasam.py --batch-dir` → review verdict |
+| B1.10d — Rework MegaSaM parser for real output | done | 2026-06-24 | Parser handles real format: `(T,7)` Lie group w2c → c2w inversion, `motion_prob.npy (T,H,W)` → per-frame confidence, `(T,4)` intrinsics → K matrix. Also `droid.npz` with `cam_c2w`. Legacy fallback kept. 37 tests green |
+| B1.10e — MegaSaM 3-step automation script | done | 2026-06-24 | `scripts/run_megasam_pipeline.sh` — DepthAnything → UniDepth → camera_tracking; `run_megasam()` rewired to use it instead of nonexistent `run.py` |
+| B1.10c — Run MegaSaM on pilot clips + validate | pending | — | **USER-GATED**: run 3-step pipeline on ski01/ski03/ski05 → `validate_megasam.py` → review verdict |
 | B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
 | B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |
 | B1.13 — Sports sliding-window loader | pending | — | Phase B-1 Group 4 |

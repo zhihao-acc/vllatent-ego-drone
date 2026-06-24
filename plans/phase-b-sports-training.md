@@ -301,23 +301,99 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   Usage: `python scripts/validate_megasam.py --frames-dir ingest_data/frames/ski01
     --megasam-dir ingest_data/frames/ski01_megasam --fps 5 --out reports/ski01_vo.html`
 
+- **B1.10d — Rework MegaSaM parser for real output format (AUTO).**
+  The existing `parse_megasam_output()` was written against a guessed output format that doesn't
+  match MegaSaM's actual 3-step pipeline output. Five critical mismatches:
+
+  | What | Parser expected | MegaSaM actual |
+  |---|---|---|
+  | poses.npy | `(N, 4, 4)` SE(3) c2w | `(T, 7)` w2c `[x,y,z,qx,qy,qz,qw]` (Lie group) |
+  | c2w matrices | from poses.npy directly | `outputs/{scene}_droid.npz` key `cam_c2w (T,4,4)` |
+  | confidence | `confidences.npy (N,)` | `motion_prob.npy (T,H/8,W/8)` per-pixel — needs aggregation |
+  | intrinsics | `(3, 3)` K matrix | `(T, 4)` vector `[fx,fy,cx,cy]` × 8.0 |
+  | run_megasam() | calls `run.py` (nonexistent) | 3-step: DepthAnything → UniDepth → camera_tracking |
+
+  **Rework scope:**
+  1. `parse_megasam_output()`: NEW primary path reads `reconstructions/{scene}/` directory:
+     - `poses.npy (T,7)` — convert w2c `[x,y,z,qx,qy,qz,qw]` → c2w `(T,4,4)` via
+       `SE3(poses).inv()` (quaternion → matrix → invert). Pure numpy, no lietorch.
+     - `motion_prob.npy (T,H/8,W/8)` → aggregate per-pixel to per-frame `(T,)` confidence
+       via spatial mean (or spatial-percentile for robustness).
+     - `intrinsics.npy (T,4)` → build K matrix from first frame `[fx,fy,cx,cy]` (already ×8.0).
+     - ALSO support `outputs/{scene}_droid.npz` as alternative path (has `cam_c2w (T,4,4)`
+       directly + `intrinsic (3,3)` K matrix; no per-frame confidence in this file).
+  2. `run_megasam()`: rewrite as 3-step orchestrator calling MegaSaM's actual scripts:
+     - Step 1: `Depth-Anything/run_videos.py` (mono disparity)
+     - Step 2: `UniDepth/scripts/demo_mega-sam.py` (metric depth + FoV)
+     - Step 3: `camera_tracking_scripts/test_demo.py` (SLAM tracking)
+     Each step is a subprocess with proper `--conda-env mega_sam` or `PYTHONPATH` handling.
+  3. Keep old format paths (flat `poses.npy (N,4,4)`, `cameras.npz`, `results.json`) as
+     fallback for backward compat, but log deprecation warning.
+  4. Update `validate_megasam.py` CLI: `--megasam-dir` now points to MegaSaM repo root's
+     `reconstructions/{scene}` directory (or the `outputs/{scene}_droid.npz` path).
+
+  **Files:** `vllatent/ingest/megasam.py` (rework), `tests/test_ingest_megasam.py` (update)
+  **DoD:** Parser reads real ski01 MegaSaM output correctly. Tests cover new format + old fallback.
+    `validate_megasam.py` produces correct verdict on ski01.
+  **Test:** `$PY -m pytest -q tests/test_ingest_megasam.py`
+  **Deps:** blocks B1.10c, B1.10e. Blocked-by: B1.10a, B1.10b (done).
+
+- **B1.10e — End-to-end MegaSaM automation script (AUTO).**
+  `scripts/run_megasam_pipeline.sh` — one-command wrapper for the 3-step MegaSaM pipeline:
+  ```bash
+  bash scripts/run_megasam_pipeline.sh --clip-id ski01 \
+    --frames-dir ingest_data/frames/ski01 \
+    --megasam-dir ~/CODE/MegaSaM
+  ```
+  Runs DepthAnything → UniDepth → camera_tracking in sequence, with progress logging and
+  error checking. Copies final `reconstructions/{scene}/` output back to
+  `ingest_data/frames/{clip_id}_megasam/` for our pipeline to pick up.
+  Also update `run_megasam()` in `megasam.py` to call this script as subprocess (replacing
+  the broken `run.py` call), so `process_clip()` in `pipeline.py` works end-to-end.
+
+  **Files:** `scripts/run_megasam_pipeline.sh` (new), `vllatent/ingest/megasam.py` (update run_megasam)
+  **DoD:** Script runs full 3-step pipeline on one clip. `run_megasam()` uses it. `process_clip()`
+    works end-to-end from frames → MegaSaM → deltas → cache.
+  **Test:** Manual run on ski01 (USER-GATED verify).
+  **Deps:** blocks future batch ingest. Blocked-by: B1.10d.
+
 - **B1.10c — Run MegaSaM + validate (USER-GATED).**
   Run on 3 pilot clips of varying difficulty:
   - `ski01` (335 frames, ~67s) — short, likely clean
   - `ski03` (254 frames, ~51s) — shortest accepted
   - `ski05` (768 frames, ~154s) — medium length, single FPV range
-  MegaSaM command per clip:
+  MegaSaM is a **3-step pipeline** (all run from `~/CODE/MegaSaM`, conda `mega_sam`):
   ```bash
-  python ~/CODE/MegaSaM/run.py \
-    --input_dir ingest_data/frames/ski01 \
-    --output_dir ingest_data/frames/ski01_megasam
+  # Step 1 — DepthAnything (mono disparity)
+  CUDA_VISIBLE_DEVICES=0 python Depth-Anything/run_videos.py --encoder vitl \
+    --load-from Depth-Anything/checkpoints/depth_anything_vitl14.pth \
+    --img-path ~/CODE/vllatent-ego-drone/ingest_data/frames/ski01 \
+    --outdir Depth-Anything/video_visualization/ski01
+
+  # Step 2 — UniDepth (metric depth + FoV)
+  export PYTHONPATH="${PYTHONPATH}:$(pwd)/UniDepth"
+  CUDA_VISIBLE_DEVICES=0 python UniDepth/scripts/demo_mega-sam.py \
+    --scene-name ski01 \
+    --img-path ~/CODE/vllatent-ego-drone/ingest_data/frames/ski01 \
+    --outdir UniDepth/outputs
+
+  # Step 3 — Camera tracking
+  CUDA_VISIBLE_DEVICES=0 python camera_tracking_scripts/test_demo.py \
+    --datapath ~/CODE/vllatent-ego-drone/ingest_data/frames/ski01 \
+    --weights checkpoints/megasam_final.pth \
+    --scene_name ski01 \
+    --mono_depth_path Depth-Anything/video_visualization \
+    --metric_depth_path UniDepth/outputs \
+    --disable_vis
   ```
-  Then validate:
+  Output lands in `reconstructions/ski01/` (poses.npy, motion_prob.npy, intrinsics.npy)
+  and `outputs/ski01_droid.npz` (cam_c2w, depths, intrinsic).
+
+  Then validate with the reworked parser (B1.10d):
   ```bash
   python scripts/validate_megasam.py \
-    --frames-dir ingest_data/frames/ski01 \
-    --megasam-dir ingest_data/frames/ski01_megasam \
-    --fps 5 --out reports/ski01_vo.html
+    --megasam-dir ~/CODE/MegaSaM/reconstructions/ski01 \
+    --fps 5 --clip-id ski01 --out reports/ski01_vo.html
   ```
   **Known failure modes for skiing FPV:**
   - Homogeneous snow texture → feature-poor → drift
@@ -335,12 +411,12 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   - **NO-GO:** Majority of clips produce degenerate trajectories (stationary, random walk,
     physically impossible speeds). Evaluate DPVO fallback before proceeding.
 
-- **Files:** `vllatent/ingest/vo_validation.py` (new), `scripts/validate_megasam.py` (new),
-  `tests/test_vo_validation.py` (new), `reports/*.html` (gitignored)
+- **Files:** `vllatent/ingest/vo_validation.py`, `scripts/validate_megasam.py`,
+  `tests/test_vo_validation.py`, `reports/*.html` (gitignored)
 - **DoD:** Validation module tested. 3 clips run through MegaSaM + validated. HTML reports
   generated. Terminal verdict printed. User reviews and confirms GO/CONDITIONAL-GO/NO-GO.
 - **Test:** `$PY -m pytest -q tests/test_vo_validation.py`. User runs MegaSaM + reviews.
-- **Deps:** blocks B1.12. Blocked-by: B1.7, MegaSaM installed.
+- **Deps:** blocks B1.12. Blocked-by: B1.10d, B1.7, MegaSaM installed.
 
 ---
 
