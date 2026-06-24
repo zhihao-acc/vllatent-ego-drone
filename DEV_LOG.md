@@ -48,7 +48,9 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.8 — CosFly-Track download + adapter | done | 2026-06-24 | Adapter code done. **DESCOPED:** RGB frames (119 GB) skipped — CARLA urban latents useless for skiing latent prediction (domain mismatch). Trajectory JSONs (~6 GB, `--meta-only`) provide GT deltas for L_wp only. 21 tests green |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
 | B1.9b — Per-clip HTML quality report | done | 2026-06-20 | `vllatent/ingest/visualize.py` + `scripts/clip_report.py` — Plotly offline HTML (5 sections: quality timeline, 3D trajectory, body deltas, VO confidence, latent coherence + summary); 15 tests green; all imports lazy |
-| B1.10 — MegaSaM VO validation on pilot clips | pending | — | Phase B-1 Group 2: USER-GATED |
+| B1.10a — VO validation metrics module | done | 2026-06-24 | `vllatent/ingest/vo_validation.py` — PURE: smoothness (jerk, accel disc MAD-robust, angular spikes), physics plausibility (speed/yaw limits), confidence analysis, scale drift, GO/CONDITIONAL-GO/NO-GO verdict. 18 tests green |
+| B1.10b — VO validation CLI + HTML report | done | 2026-06-24 | `scripts/validate_megasam.py` — single-clip + batch mode; Plotly HTML (3D trajectory, speed, yaw rate, confidence, accel); terminal verdict summary; JSON export. Ruff clean |
+| B1.10c — Run MegaSaM on pilot clips + validate | pending | — | **USER-GATED**: install MegaSaM → run on ski01/ski03/ski05 → `validate_megasam.py --batch-dir` → review verdict |
 | B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
 | B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |
 | B1.13 — Sports sliding-window loader | pending | — | Phase B-1 Group 4 |
