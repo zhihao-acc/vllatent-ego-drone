@@ -41,7 +41,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.4 — Add fixed-clip-length cutting | done | 2026-06-19 | clip_length_seconds=10.0 in IngestConfig, cut_fixed_clips() in preprocess |
 | B1.5 — Revise Config for sports pivot | done | 2026-06-19 | vjepa_only default, megasam_vo added, lambda_trust, sports.yaml fixed |
 | B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof, vjepa_surprise)` + `Target` union alias; 94 schema tests green |
-| B1.7 — YouTube pilot: curate + ingest | in_progress | 2026-06-20 | REPLANNED: split into B1.7a (batch encode), B1.7c (FPV segment extract + pilot rework). USER-GATED: user runs reworked script |
+| B1.7 — YouTube pilot: curate + ingest | done | 2026-06-23 | USER-VERIFIED: 15 clips curated (`configs/sports_clips.yaml`), 11 accepted / 4 rejected (ski07/08/14/15), 38 FPV ranges, 173 sub-clips (10s). Filter: motion≥8 AND ¬YOLO(36 classes) AND segment≥10. `--filter-only` run green. `ingest_data/latent_cache/pilot_summary.json` validates. `verify_filter.py` on ski01 confirmed accepted/rejected split |
 | B1.7a — Create vllatent/encode/batch.py | done | 2026-06-20 | `vllatent/encode/batch.py` — `encode_frames(frames_dir, device) → (N, 196, 768) fp16`; lazy torch; 5 tests green (mocked encoder, AST purity) |
 | B1.7b — Content filter implementation | done | 2026-06-20 | **REVISED B1.7c**: CLIP dropped (0.999 within-domain, zero discrimination). Replaced with YOLO-World `yolov8s-worldv2` (74 FPS, 13M params, open-vocab). 36 rejected classes (drone body+parts, camera/gear, electronics, overlays). `filter_short_segments()` discards accepted runs < 10 frames (2s@5fps). `ultralytics>=8.2.0` added to `[torch]`. Filter: `is_fpv = motion≥8 AND ¬YOLO AND segment≥10`. 44 tests green; all imports lazy (AST-verified) |
 | B1.7c — FPV segment extraction + pilot rework | done | 2026-06-20 | **REWORKED**: added `score_frames_from_paths()`, `detect_shot_boundaries_from_paths()`, `filter_video_from_paths()` — path-based memory-efficient filter scoring EVERY frame (no stride sampling). Pilot script uses `filter_video_from_paths()` directly on frame paths; stride variable removed; FPV ranges exact. 35 content filter tests green (8 new path-based) |
@@ -65,6 +65,17 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-23 — B1.7 USER GATE PASSED: YouTube pilot ingest complete
+
+**Status:** B1.7 done (USER-VERIFIED).
+**Result.** 15 skiing FPV clips curated in `configs/sports_clips.yaml`. Pipeline ran with
+`--filter-only`: 11 accepted, 4 rejected (ski07: 0/7 FPV, ski08: 2/9, ski14: 13/44, ski15: 0/1).
+38 FPV ranges extracted → 173 sub-clips (10s each). Content filter verified on ski01 via
+`verify_filter.py` (accepted/rejected split reviewed). `pilot_summary.json` in latent_cache validates.
+**Next:** B1.8 (CosFly-Track adapter, USER-GATED) + Group 2 (B1.9 done, B1.9b done, B1.10 pending).
 
 ---
 
