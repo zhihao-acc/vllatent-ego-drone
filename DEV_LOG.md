@@ -45,7 +45,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.7a — Create vllatent/encode/batch.py | done | 2026-06-20 | `vllatent/encode/batch.py` — `encode_frames(frames_dir, device) → (N, 196, 768) fp16`; lazy torch; 5 tests green (mocked encoder, AST purity) |
 | B1.7b — Content filter implementation | done | 2026-06-20 | **REVISED B1.7c**: CLIP dropped (0.999 within-domain, zero discrimination). Replaced with YOLO-World `yolov8s-worldv2` (74 FPS, 13M params, open-vocab). 36 rejected classes (drone body+parts, camera/gear, electronics, overlays). `filter_short_segments()` discards accepted runs < 10 frames (2s@5fps). `ultralytics>=8.2.0` added to `[torch]`. Filter: `is_fpv = motion≥8 AND ¬YOLO AND segment≥10`. 44 tests green; all imports lazy (AST-verified) |
 | B1.7c — FPV segment extraction + pilot rework | done | 2026-06-20 | **REWORKED**: added `score_frames_from_paths()`, `detect_shot_boundaries_from_paths()`, `filter_video_from_paths()` — path-based memory-efficient filter scoring EVERY frame (no stride sampling). Pilot script uses `filter_video_from_paths()` directly on frame paths; stride variable removed; FPV ranges exact. 35 content filter tests green (8 new path-based) |
-| B1.8 — CosFly-Track download + adapter | in_progress | 2026-06-23 | Adapter + download script done (AUTO); real HF download + conversion USER-GATED |
+| B1.8 — CosFly-Track download + adapter | done | 2026-06-24 | Adapter code done. **DESCOPED:** RGB frames (119 GB) skipped — CARLA urban latents useless for skiing latent prediction (domain mismatch). Trajectory JSONs (~6 GB, `--meta-only`) provide GT deltas for L_wp only. 21 tests green |
 | B1.9 — Data quality report script | done | 2026-06-19 | `scripts/data_quality_report.py` — JSON + terminal, 7 tests green |
 | B1.9b — Per-clip HTML quality report | done | 2026-06-20 | `vllatent/ingest/visualize.py` + `scripts/clip_report.py` — Plotly offline HTML (5 sections: quality timeline, 3D trajectory, body deltas, VO confidence, latent coherence + summary); 15 tests green; all imports lazy |
 | B1.10 — MegaSaM VO validation on pilot clips | pending | — | Phase B-1 Group 2: USER-GATED |
@@ -68,48 +68,20 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 ---
 
-## 2026-06-23 — B1.8: CosFly-Track adapter + download script (code AUTO; HF download USER-GATED)
+## 2026-06-24 — B1.8 DONE (DESCOPED): CosFly-Track adapter — trajectory-only, no RGB
 
-**Status:** B1.8 pending → **in_progress** (adapter + download script AUTONOMOUS; real HF download + conversion USER-GATED).
-**What's done.**
-- `vllatent/ingest/cosfly_adapter.py` (~220 LOC, PURE tier) — full CosFly-Track adapter:
-  - `parse_trajectory(trace_dir)` → `TrajectoryData` with GT 6-DoF poses `(x,y,z,pitch,yaw,roll)` m/deg,
-    timestamps, sorted frame paths, inferred FPS from timestamp deltas.
-  - `poses_to_deltas(poses)` → `(N-1, 4) f32` body-frame deltas `(dx,dy,dz,dyaw_deg)` from GT differences.
-  - `convert_trace(trace_dir, out_dir)` → writes `.npz` with the ingest cache contract: `deltas (N-1,4)`,
-    `vo_confidence (N,) = 1.0` (GT), `frame_quality (N,) = 1.0` (CARLA), `timestamps`, `quality_mask`.
-    Note: `latents` NOT written here — DINOv3 encoding is separate (B1.7a `encode_frames`).
-  - `discover_traces(data_dir)` → finds all trace dirs under `data_v7/` via `trajectory.json` glob.
-  - `convert_dataset(data_dir, out_dir, limit=N)` → bulk conversion with skip-existing + logging.
-  - `build_cosfly_manifest()` → `build_manifest_wild_video` with `motion_method="cosfly_gt"`,
-    `scale_mode="exact"`, `license="Apache-2.0"`. Validates via `validate_manifest`.
-  - Clip IDs: `cosfly_{Town}_{traj_num}_{variant}` (e.g. `cosfly_Town03_0042_ORI`).
-- `scripts/download_cosfly.sh` — HF CLI download wrapper (`huggingface-cli download AutelRobotics/CosFly`).
-- All imports PURE (numpy/json/stdlib only, no torch/cv2). AST-verified in tests.
-**Tested.** `tests/test_cosfly_adapter.py` (21 tests, PURE — synthetic fixtures):
-parse_trajectory (shape, column order, timestamps, frame paths sorted, missing raises, FPS inference);
-poses_to_deltas (shape/dtype, forward motion, yaw deltas, too-few raises); convert_trace (.npz contract,
-vo_confidence=1.0, frame_quality=1.0, clip_id encoding); discover_traces (finds all, empty); manifest
-(valid, cosfly_gt method, Apache-2.0 license); import purity (AST + importable without torch).
-**Full suite:** 417 passed, 11 skipped, 0 regressions. Ruff clean. Blob guard OK.
-**USER GATE:** download CosFly from HF + convert + inspect. See command block:
-```bash
-# 1. Download (needs huggingface_hub installed)
-env -u ALL_PROXY -u all_proxy HF_ENDPOINT=https://hf-mirror.com \
-  bash scripts/download_cosfly.sh --out ingest_data/cosfly
-
-# 2. Convert (limit to 10 traces for pilot)
-python -c "
-from vllatent.ingest.cosfly_adapter import convert_dataset, build_cosfly_manifest
-from vllatent.manifest import validate_manifest, write_manifest
-results = convert_dataset('ingest_data/cosfly/data_v7', 'ingest_data/latent_cache', limit=10)
-print(f'Converted {len(results)} traces')
-m = build_cosfly_manifest(entries=[{'clip_id': r.clip_id, 'n_frames': r.n_frames, 'latent_path': f'{r.clip_id}.npz'} for r in results])
-print(f'Manifest errors: {validate_manifest(m)}')
-write_manifest(m, 'ingest_data/latent_cache')
-print('Done')
-"
-```
+**Status:** B1.8 in_progress → **done** (DESCOPED).
+**Descope rationale.** CosFly RGB frames are CARLA urban simulator renders (119 GB, ~82K PNGs).
+DINOv3 latents of simulated cars and buildings are useless for predicting skiing mountain latents
+(complete domain mismatch). The only value is **GT 6-DoF trajectories** (~6 GB trajectory JSONs)
+for clean L_wp delta supervision (`vo_confidence=1.0`). Download via `--meta-only` flag; skip
+the 119 GB of frames entirely.
+**What ships.** `vllatent/ingest/cosfly_adapter.py` (PURE, 21 tests), `scripts/download_cosfly.sh`
+(`--meta-only` for trajectory JSONs only). Adapter parses `trajectory.json` → GT deltas `(N-1,4)`.
+No latent encoding step — CosFly contributes to L_wp only, not L_latent.
+**Impact on B1.13 loader.** The "oversample CosFly to ~40% of batches" plan item needs revision:
+CosFly provides delta-only samples (no latents), so it can only feed L_wp, not L_latent. The
+loader must handle missing-latent samples or CosFly is L_wp-curriculum only. Revisit in B1.13.
 
 ---
 

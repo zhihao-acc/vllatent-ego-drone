@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # Download CosFly-Track dataset from HuggingFace (AutelRobotics/CosFly).
 #
-# SELECTIVE download: only trajectory.json + rgb.png (~5-10 GB estimate).
-# Skips depth.npy, instance.png, debug.png which make up the bulk of 622 GB.
+# Recommended: --meta-only (~6 GB trajectory JSONs for GT delta supervision).
+# Full RGB is 119 GB of CARLA urban renders — not useful for skiing latent model.
 #
 # Usage:
 #   bash scripts/download_cosfly.sh [--out DIR] [--meta-only]
@@ -47,8 +47,8 @@ if [[ "${META_ONLY}" == true ]]; then
         --include "data_v7/*/trajectory_*/*/trajectory.json" \
                   "data_v7/*/trajectory_*/*/perturbation_report.json"
 else
-    echo "[cosfly] Selective download: trajectory.json + rgb.png only (skipping depth/instance/debug)"
-    echo "[cosfly] Full dataset is ~622 GB; this downloads only what we need (~5-10 GB)"
+    echo "[cosfly] Selective download: trajectory.json + rgb.png (skipping depth/instance/debug)"
+    echo "[cosfly] WARNING: rgb.png alone is ~119 GB. Consider --meta-only instead."
     hf download "AutelRobotics/CosFly" \
         --repo-type dataset \
         --local-dir "${OUT_DIR}" \
