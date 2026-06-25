@@ -10,9 +10,8 @@ This file is loaded automatically by Claude Code. Read it before doing any work 
 > video only (YouTube + custom GoPro+IMU). See vault
 > `[[advisory-sports-following-drift-2026-06-18]]` for the authoritative direction.
 
-A **compact latent world-action model for sports-following drone**; the contribution is **trust-aware
-commitment**. One frozen perception backbone, a small latent predictor, and a trust layer that
-decides how far ahead to commit.
+A **compact latent world-action model for sports-following drone**. One frozen perception backbone,
+a small latent predictor, and a waypoint head that produces continuous 4-DoF commands.
 
 ```
 RGB 224² ─► [DINOv3 ViT-B/16*, FROZEN, CACHED] ─► z_t (196×D fp16)    *D=768 default; 384 if B1.11 gate
@@ -20,9 +19,9 @@ RGB 224² ─► [DINOv3 ViT-B/16*, FROZEN, CACHED] ─► z_t (196×D fp16)    
                                        [latent predictor, block-causal, D from PredictorConfig]
                                                 │  rollout (H=3 history, T=4 horizon)
                           ┌─────────────────────┼──────────────────────────┐
-                          ▼                      ▼                          ▼
-              4-DoF waypoint head       single-pass horizon head     (Phase C) TrackVLA teacher
-              [D→256→128→4]             (trust: how far to commit)    + V-JEPA-2 surprise gate
+                          ▼                                                  ▼
+              4-DoF waypoint head                                    (Phase C) TrackVLA teacher
+              [D→256→128→4]
 ```
 
 Action is **continuous-4DoF** from MegaSaM ego-motion extraction (dx,dy,dz,dyaw). Frozen+cached
@@ -35,9 +34,8 @@ Encoder **DINOv3 ViT-B/16** is the working default (D=768, frozen+cached, RGB-on
 **Encoder gate (B1.11):** if Orin NX benchmark shows ViT-B/16 TRT FP16 > 20ms, switch to ViT-S/16
 (D=384); otherwise keep ViT-B/16. No CosPress distillation training needed either way. ·
 predictor block-causal ViT (depth/heads from PredictorConfig, D=EMBED_DIM) · continuous-action FiLM ·
-frozen-text (CLIP text tower 512->D)→cross-attention language (B-2) · H=3 / T=4 · trust = deployed
-single-pass horizon head; offline **TrackVLA** teacher + V-JEPA-2 surprise = **Phase C** · continuous
-4-DoF waypoint head · **no EMA / no VICReg** (frozen cached encoder = fixed target).
+frozen-text (CLIP text tower 512->D)→cross-attention language (B-2) · H=3 / T=4 · continuous
+4-DoF waypoint head · offline **TrackVLA** teacher = **Phase C** · **no EMA / no VICReg** (frozen cached encoder = fixed target).
 **WorldVLN teacher pipeline is RETIRED** (wrong task domain — language-conditioned navigation, not
 person-following). TrackVLA (CoRL 2025, visual tracking) replaces it. Action extraction = MegaSaM from
 real sports FPV video (not simulator oracle).

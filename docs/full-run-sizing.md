@@ -27,7 +27,6 @@ For an episode with N poses:
 | `teacher_pose6` | (N, 6) | f32 | N × 24 = 4.8 KB |
 | `rollpitch_resid` | (N,) | f32 | N × 4 = 0.8 KB |
 | `disagreement` | (N,) | f32 | N × 4 = 0.8 KB |
-| `vjepa_surprise` | (N,) | f32 | N × 4 = 0.8 KB |
 | **Total per episode** | | | **~61.8 MB** |
 
 Latents dominate (>99.8% of disk). fp16 `(196, 768)` = 294 KB per frame.

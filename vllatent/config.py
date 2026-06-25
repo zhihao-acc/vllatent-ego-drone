@@ -2,17 +2,14 @@
 
 H1/H2/L2/L3: replaces the old untyped ``load_config`` dict. The repo's whole deliverable is
 "flip an ablation via config, not code surgery", so the SWEPT knobs (T/H, predictor
-depth/heads, distillation weights+temperature, trust disagreement-source/K/threshold) live
-here in a frozen, validated dataclass tree. The LOCKED-fixed shapes (DINOv3 PATCH_TOKENS=196 /
-EMBED_DIM=768; N_ACTIONS / DOF) stay constants in ``vllatent.schemas``; the AirVLN action
-step sizes stay constants in ``vllatent.actions`` — neither is duplicated here.
+depth/heads, distillation weights+temperature) live here in a frozen, validated dataclass
+tree. The LOCKED-fixed shapes (DINOv3 PATCH_TOKENS=196 / EMBED_DIM=768; N_ACTIONS / DOF)
+stay constants in ``vllatent.schemas``; the AirVLN action step sizes stay constants in
+``vllatent.actions`` — neither is duplicated here.
 
 Dataclass defaults are the source of truth; ``configs/*.yaml`` provide per-experiment
-OVERRIDES (env-expanded, strict unknown-key rejection). The trust knobs
-(``disagreement_source`` / ``k_rollouts`` / ``vjepa_surprise_threshold``) are FINALIZED
-(A5.9, after the A5.8 WorldVLN probe): A5.8 confirmed WorldVLN inference is stochastic by
-default, so ``disagreement_source = "worldvln_rollout"`` (rollout spread is free) is the chosen
-source. Config snapshot / resume is a Phase-B SOP — NOT built here.
+OVERRIDES (env-expanded, strict unknown-key rejection).
+Config snapshot / resume is a Phase-B SOP — NOT built here.
 
 pyyaml + stdlib + the pure ``schemas`` constants only — CI imports it.
 """
@@ -33,7 +30,6 @@ _DEFAULT_CONFIG = _REPO_ROOT / "configs" / "default.yaml"
 _ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.*?))?\}")
 
 # Allowed enum values (validated at the boundary).
-DISAGREEMENT_SOURCES = ("worldvln_rollout", "airscape_multiseed", "mc_dropout", "megasam_vo", "vjepa_only")
 ENCODER_DTYPES = ("float16", "float32")
 
 
@@ -106,52 +102,14 @@ class DistillConfig:
     lambda_latent: float = 1.0
     lambda_waypoint: float = 1.0
     lambda_horizon: float = 0.0   # Phase C (horizon-distillation)
-    lambda_trust: float = 0.0     # Phase C (trust head)
     temperature: float = 1.0
 
     def __post_init__(self) -> None:
-        for name in ("lambda_latent", "lambda_waypoint", "lambda_horizon", "lambda_trust"):
+        for name in ("lambda_latent", "lambda_waypoint", "lambda_horizon"):
             if getattr(self, name) < 0:
                 raise ValueError(f"distill.{name} must be >= 0, got {getattr(self, name)}")
         if self.temperature <= 0:
             raise ValueError(f"distill.temperature must be > 0, got {self.temperature}")
-
-
-@dataclass(frozen=True)
-class TrustConfig:
-    """SWEPT trust-oracle knobs.
-
-    ``disagreement_source`` defaults to ``"vjepa_only"`` (sports-following pivot 2026-06-19;
-    WorldVLN retired). ``"megasam_vo"`` is available for MegaSaM-based confidence.
-    ``k_rollouts`` is the K for multi-rollout estimates (Phase C). ``vjepa_surprise_threshold``
-    is the independent V-JEPA-2 gate.
-
-    ``vjepa2_model_id`` is the frozen V-JEPA-2 verifier checkpoint (A5.12) — Meta's official HF
-    repo, verified NON-GATED (``gated: False``, MIT, served by hf-mirror). The verifier wrapper
-    and the manifest provenance both read it from here (single source).
-    """
-
-    disagreement_source: str = "vjepa_only"
-    k_rollouts: int = 5
-    vjepa_surprise_threshold: float = 0.5
-    vjepa2_model_id: str = "facebook/vjepa2-vitl-fpc64-256"
-
-    def __post_init__(self) -> None:
-        if self.disagreement_source not in DISAGREEMENT_SOURCES:
-            raise ValueError(
-                f"trust.disagreement_source must be one of {DISAGREEMENT_SOURCES}, "
-                f"got {self.disagreement_source!r}"
-            )
-        if not isinstance(self.k_rollouts, int) or self.k_rollouts < 1:
-            raise ValueError(f"trust.k_rollouts must be a positive int, got {self.k_rollouts!r}")
-        if not 0.0 <= self.vjepa_surprise_threshold <= 1.0:
-            raise ValueError(
-                f"trust.vjepa_surprise_threshold must be in [0, 1], got {self.vjepa_surprise_threshold}"
-            )
-        if not isinstance(self.vjepa2_model_id, str) or not self.vjepa2_model_id:
-            raise ValueError(
-                f"trust.vjepa2_model_id must be a non-empty str, got {self.vjepa2_model_id!r}"
-            )
 
 
 @dataclass(frozen=True)
@@ -229,7 +187,6 @@ _SECTIONS: dict[str, type] = {
     "encoder": EncoderConfig,
     "predictor": PredictorConfig,
     "distill": DistillConfig,
-    "trust": TrustConfig,
     "data": DataConfig,
     "cache": CacheConfig,
 }
@@ -245,7 +202,6 @@ class Config:
     encoder: EncoderConfig = field(default_factory=EncoderConfig)
     predictor: PredictorConfig = field(default_factory=PredictorConfig)
     distill: DistillConfig = field(default_factory=DistillConfig)
-    trust: TrustConfig = field(default_factory=TrustConfig)
     data: DataConfig = field(default_factory=DataConfig)
     cache: CacheConfig = field(default_factory=CacheConfig)
     ingest: IngestConfig | None = None
@@ -287,10 +243,8 @@ __all__ = [
     "EncoderConfig",
     "PredictorConfig",
     "DistillConfig",
-    "TrustConfig",
     "DataConfig",
     "CacheConfig",
     "IngestConfig",
-    "DISAGREEMENT_SOURCES",
     "ENCODER_DTYPES",
 ]

@@ -23,7 +23,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from vllatent.config import DISAGREEMENT_SOURCES, CacheConfig, Config
+from vllatent.config import CacheConfig, Config
 from vllatent.schemas import EMBED_DIM, PATCH_TOKENS, CacheManifestEntry
 
 # Cache-manifest schema version. The single literal lives in CacheConfig.version; this
@@ -36,7 +36,7 @@ _REQUIRED: dict[str, type] = {
     "encoder": dict,      # {model_id, text_model_id, revision, dtype, patch_tokens, dim}
     "dataset": dict,      # {name, variant, split, license}
     "convention": dict,   # {quaternion_order, color_order, frame}
-    "teacher": dict,      # {worldvln_model_id, worldvln_revision, disagreement_source, vjepa2_model_id, render_config_hash}
+    "teacher": dict,      # {worldvln_model_id, worldvln_revision, disagreement_source, render_config_hash}
     "entries": list,      # list of per-episode entries
 }
 
@@ -48,7 +48,6 @@ _REQUIRED_TEACHER = {
     "worldvln_model_id",
     "worldvln_revision",
     "disagreement_source",
-    "vjepa2_model_id",
     "render_config_hash",
 }
 
@@ -65,7 +64,7 @@ def build_manifest(
     The fixed encoder shapes come from ``vllatent.schemas`` (``PATCH_TOKENS`` / ``EMBED_DIM``)
     — NOT re-hardcoded here. The teacher-provenance fields are STUBBED now (empty strings) and
     populated at cache-build time (A5.14); only ``disagreement_source`` is known from
-    ``Config.trust`` today (finalized in A5.9). ``split`` / ``variant`` are per-build labels.
+    ``Config`` today (finalized in A5.9). ``split`` / ``variant`` are per-build labels.
 
     Sports-pivot note: this builder is the AerialVLN path (teacher section with WorldVLN fields).
     Sports data uses ``build_manifest_wild_video()`` which skips the teacher section. The two
@@ -100,8 +99,7 @@ def build_manifest(
             # (worldvln revision pinned at load, render hash) STAY stubbed until the cache build (A5.14).
             "worldvln_model_id": "",        # build-time (pinned when the teacher server loads)
             "worldvln_revision": "",        # build-time
-            "disagreement_source": config.trust.disagreement_source,  # Config (finalized A5.9)
-            "vjepa2_model_id": config.trust.vjepa2_model_id,           # Config (fixed id, A5.12)
+            "disagreement_source": "",      # build-time
             "render_config_hash": "",       # build-time (render settings hash)
         },
         "entries": list(entries) if entries is not None else [],
@@ -163,11 +161,6 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
             missing = _REQUIRED_TEACHER - set(teacher)
             if missing:
                 errors.append(f"teacher missing keys: {sorted(missing)}")
-            src = teacher.get("disagreement_source")
-            if src not in (None, "", *DISAGREEMENT_SOURCES):
-                errors.append(
-                    f"teacher.disagreement_source must be one of {DISAGREEMENT_SOURCES} or '' (stub), got {src!r}"
-                )
 
     if is_wild:
         ms = data.get("motion_source")

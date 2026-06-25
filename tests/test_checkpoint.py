@@ -38,14 +38,14 @@ def test_snapshot_config_writes_yaml(tmp_path):
     assert isinstance(loaded, dict)
     assert loaded["encoder"]["model_id"] == cfg.encoder.model_id
     assert loaded["predictor"]["depth"] == cfg.predictor.depth
-    assert loaded["trust"]["disagreement_source"] == cfg.trust.disagreement_source
+    assert loaded["distill"]["lambda_latent"] == cfg.distill.lambda_latent
 
 
 def test_snapshot_config_round_trips_all_sections(tmp_path):
     cfg = Config()
     path = snapshot_config(cfg, tmp_path)
     loaded = yaml.safe_load(path.read_text())
-    assert set(loaded.keys()) == {"encoder", "predictor", "distill", "trust", "data", "cache"}
+    assert set(loaded.keys()) == {"encoder", "predictor", "distill", "data", "cache"}
 
 
 def test_snapshot_config_with_ingest(tmp_path):

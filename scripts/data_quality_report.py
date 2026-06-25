@@ -67,9 +67,6 @@ def analyze_npz(path: Path) -> dict:
         result["vo_confidence"] = _percentiles(data["vo_confidence"].astype(float))
     if "frame_quality" in data:
         result["frame_quality"] = _percentiles(data["frame_quality"].astype(float))
-    if "vjepa_surprise" in data:
-        result["vjepa_surprise"] = _percentiles(data["vjepa_surprise"].astype(float))
-
     return result
 
 

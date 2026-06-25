@@ -23,15 +23,13 @@
 | `lang_tokens` `L` | `(M, 768)` fp16 | text-embed space | frozen text tower, **cached/episode** |
 | `action_id` (in) | scalar id `∈ {0..7}` | AerialVLN discrete | dataset `actions[t]` |
 | `ẑ_{t+1..t+T}` | `(T=4, 196, 768)` fp16 | DINOv3 space | predictor output |
-| trust readout | `{ p_j∈[0,1]^T, k*∈[0,T], σ∈ℝ_+ }` | — | trust head (1 pass) |
 | waypoint (native) | `(4,)` = `(Δx,Δy,Δz,Δψ)` | **AirSim-NED body, yaw-only** | waypoint head |
 | → remap | `(4,)` body-FLU delta | fly0 convention | remap layer (**Phase D**) |
 | → handoff | `WaypointHandoff.G_world (3,)` ENU **+ Δψ** | **world ENU** | fly0 `frames.py` + odom (**Phase D**) |
 
 > **Typed student seams (Phase A, `vllatent/schemas.py`).** The model-output rows above are frozen,
 > shape/dtype-validated dataclasses (review H3) so an ablation is a config flag, not code surgery:
-> `ẑ_{t+1..t+T}` → `PredictorOutput.predicted_latents` `(T,196,768)` fp16; trust readout →
-> `TrustReadout {p_commit (T,) ∈ [0,1], k_star ∈ [0,T], sigma ≥ 0}`; waypoint (native) →
+> `ẑ_{t+1..t+T}` → `PredictorOutput.predicted_latents` `(T,196,768)` fp16; waypoint (native) →
 > `Waypoint.delta_4dof (4,)` f32, AirSim-NED body. The loader-input tuple is `StepSample` (§2).
 >
 > **Teacher distillation seam (A5.9, post-pivot).** The student distills from a frozen WorldVLN
@@ -39,7 +37,7 @@
 > disagreement is free). `TeacherOutput.rollouts_pose6 (K,6)` holds the K stochastic rollouts;
 > `OracleTarget` is the per-step target paired 1:1 with `StepSample`: `{waypoint_4dof (4,) f32`
 > [6→4-projected: drop roll/pitch + abs→body-delta]`, teacher_pose6 (6,)` provenance`, rollpitch_resid`
-> [≈0 audit]`, disagreement` [K-rollout spread]`, vjepa_surprise` [independent gate]`}`. The 6→4
+> [≈0 audit]`, disagreement` [K-rollout spread]`}`. The 6→4
 > projection + disagreement scalarization execute at cache-build (A5.14).
 
 ---
@@ -79,20 +77,9 @@
 - **Division of labour:** language = global, slow-changing "what/where" → cross-attn; action =
   per-step "motion" → FiLM (seam a).
 
-### (c) Uncertainty readout — deployed **single-pass** horizon head
+### (c) Waypoint → EGO seam — continuous 4-DoF `(Δx,Δy,Δz,Δψ)` in AirSim-NED body
 
-- **Deployed student (the model that ships):** one trust/horizon head over the rollout features →
-  per-step "still-trusted" probability `p_j` → soft expected horizon `k* = Σ_j Π_{i≤j} p_i` + a
-  scalar `σ`. **One forward pass** (arch §9.6).
-- **Offline teacher — Phase C, documented here, NOT built in Phase A:** K=5 predictor ensemble
-  inter-member latent disagreement `u_j` **AND** an independent V-JEPA-2 surprise `s_j`; consensus
-  horizon `k*_teacher = max j s.t. u_j<ε ∧ s_j<δ` (two orthogonal gates). Distilled into the student
-  (Huber on `k*` + BCE on `p_j`), isotonic-calibrated; ECE/UCE + AUROC = the Phase-C GO/NO-GO.
-- **Phase A builds none of the teacher / ensemble / V-JEPA-2** — it is documented for Phase C only.
-
-### (d) Waypoint → EGO seam — continuous 4-DoF `(Δx,Δy,Δz,Δψ)` in AirSim-NED body
-
-- **Waypoint head:** pool predicted patch tokens at the committed step `k*` (soft-weighted by `p_j`)
+- **Waypoint head:** pool predicted patch tokens
   → MLP `[768→512→256→4]` → `(Δx,Δy,Δz,Δψ)` with per-DoF `tanh × max_range`. Native convention =
   **AirSim-NED body, yaw-only** (arch §9.7).
 - **Remap chain — DOCUMENTED ONLY; this remap is `NOT executed in Phase A`:**
@@ -124,7 +111,7 @@ Per step the cached-latent loader (`vllatent/data/loader.py`, step 10) emits the
 | `action_id` | `int ∈ [0, 7]` | AerialVLN discrete `actions[t]` |
 | `z_next` | `(196, 768)` fp16 | DINOv3 latent of the next obs = prediction **target** |
 | `delta_4dof` | `(4,)` float32 | `(Δx,Δy,Δz,Δψ)` **AirSim-NED body, yaw-only**, derived from poses |
-| `future_frame_rgb` | uint8 RGB (optional) | GT future frame for the Phase-C V-JEPA-2 verifier |
+| `future_frame_rgb` | uint8 RGB (optional) | GT future frame (Phase-C teacher) |
 
 Confirms Phase-A DoD item (2): AerialVLN yields `(RGB obs, 4-DoF action/waypoint, next obs, language)`
 tuples.
@@ -180,7 +167,6 @@ flag in the cache manifest**. Wrong channel order silently poisons every cached 
   `DEV_LOG.md` at step 6 when the real slice is fetched.
 - **DINOv3 weights:** Meta custom non-OSI license (commercial OK with attribution; ITAR/military
   prohibited) — fine for academic sim work.
-- **V-JEPA-2** (Phase-C verifier): Apache-2.0.
 
 ---
 

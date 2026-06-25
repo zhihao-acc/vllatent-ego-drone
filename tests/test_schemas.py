@@ -11,7 +11,7 @@ import json
 import numpy as np
 import pytest
 
-from vllatent.config import DISAGREEMENT_SOURCES, Config
+from vllatent.config import Config
 from vllatent.manifest import build_manifest, empty_manifest, validate_manifest
 from vllatent.schemas import (
     DELTA_DTYPE,
@@ -31,7 +31,6 @@ from vllatent.schemas import (
     StepSample,
     Target,
     TeacherOutput,
-    TrustReadout,
     Waypoint,
 )
 
@@ -156,40 +155,6 @@ def test_predictor_output_rejects_bad(arr: np.ndarray) -> None:
         PredictorOutput(predicted_latents=arr)
 
 
-def test_trust_readout_valid() -> None:
-    tr = TrustReadout(p_commit=np.full((HORIZON,), 0.5), k_star=2.0, sigma=0.1)
-    assert tr.p_commit.shape == (HORIZON,)
-    assert 0.0 <= tr.k_star <= HORIZON and tr.sigma >= 0.0
-
-
-def test_trust_readout_accepts_int_scalars() -> None:
-    # k_star/sigma may arrive as ints; both must validate (int is a valid float here).
-    tr = TrustReadout(p_commit=np.zeros((HORIZON,)), k_star=0, sigma=0)
-    assert tr.k_star == 0 and tr.sigma == 0
-
-
-@pytest.mark.parametrize(
-    "kw",
-    [
-        dict(p_commit=np.full((HORIZON,), 1.5)),          # probability above 1
-        dict(p_commit=np.full((HORIZON,), -0.1)),         # probability below 0
-        dict(p_commit=np.zeros((HORIZON + 1,))),          # wrong horizon
-        dict(p_commit=np.zeros((HORIZON,), dtype=int)),   # not float-kind
-        dict(k_star=-1.0),                                # k* below 0
-        dict(k_star=float(HORIZON) + 1.0),                # k* above T
-        dict(k_star=True),                                # bool is not a valid k*
-        dict(sigma=-0.01),                                # sigma negative
-        dict(sigma=float("nan")),                         # sigma must be finite
-        dict(sigma=float("inf")),                         # sigma must be finite
-    ],
-)
-def test_trust_readout_rejects_bad(kw: dict[str, object]) -> None:
-    base: dict[str, object] = dict(p_commit=np.full((HORIZON,), 0.5), k_star=1.0, sigma=0.1)
-    base.update(kw)
-    with pytest.raises((ValueError, TypeError)):
-        TrustReadout(**base)  # type: ignore[arg-type]
-
-
 def test_waypoint_valid_and_rejects_bad() -> None:
     wp = Waypoint(delta_4dof=np.zeros((DOF,), DELTA_DTYPE))
     assert wp.delta_4dof.shape == (DOF,) and wp.delta_4dof.dtype == DELTA_DTYPE
@@ -233,7 +198,6 @@ def _oracle(**over: object) -> OracleTarget:
         teacher_pose6=np.zeros((TEACHER_DOF,)),
         rollpitch_resid=0.0,
         disagreement=0.1,
-        vjepa_surprise=0.2,
     )
     kw.update(over)
     return OracleTarget(**kw)  # type: ignore[arg-type]
@@ -255,7 +219,6 @@ def test_oracle_target_valid_and_immutable() -> None:
         dict(teacher_pose6=np.zeros((4,))),                      # wrong teacher width (must be 6)
         dict(teacher_pose6=np.zeros((TEACHER_DOF,), dtype=int)),  # not float-kind
         dict(disagreement=-0.1),                                # spread must be >= 0
-        dict(vjepa_surprise=float("nan")),                      # must be finite
         dict(rollpitch_resid=float("inf")),                     # must be finite
         dict(disagreement=True),                                # bool is not a valid float
     ],
@@ -270,23 +233,16 @@ def test_oracle_target_rejects_bad(bad: dict[str, object]) -> None:
 def _sports_target(**over: object) -> SportsTarget:
     kw: dict[str, object] = dict(
         waypoint_4dof=np.zeros((DOF,), DELTA_DTYPE),
-        vjepa_surprise=0.0,
     )
     kw.update(over)
     return SportsTarget(**kw)  # type: ignore[arg-type]
 
 
 def test_sports_target_valid_and_immutable() -> None:
-    st = _sports_target(vjepa_surprise=0.3)
-    assert st.waypoint_4dof.shape == (DOF,) and st.waypoint_4dof.dtype == DELTA_DTYPE
-    assert st.vjepa_surprise == 0.3
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        st.vjepa_surprise = 1.0  # type: ignore[misc]
-
-
-def test_sports_target_default_surprise_zero() -> None:
     st = _sports_target()
-    assert st.vjepa_surprise == 0.0
+    assert st.waypoint_4dof.shape == (DOF,) and st.waypoint_4dof.dtype == DELTA_DTYPE
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        st.waypoint_4dof = np.zeros((DOF,), DELTA_DTYPE)  # type: ignore[misc]
 
 
 @pytest.mark.parametrize(
@@ -295,11 +251,6 @@ def test_sports_target_default_surprise_zero() -> None:
         dict(waypoint_4dof=np.zeros((DOF,), np.float16)),    # wrong dtype (must be f32)
         dict(waypoint_4dof=np.zeros((3,), DELTA_DTYPE)),     # wrong DoF
         dict(waypoint_4dof=np.zeros((DOF,), np.int32)),      # wrong dtype
-        dict(vjepa_surprise=-0.1),                           # must be >= 0
-        dict(vjepa_surprise=float("nan")),                   # must be finite
-        dict(vjepa_surprise=float("inf")),                   # must be finite
-        dict(vjepa_surprise=True),                           # bool is not valid
-        dict(vjepa_surprise="nope"),                         # string not valid
     ],
 )
 def test_sports_target_rejects_bad(bad: dict[str, object]) -> None:
@@ -390,24 +341,10 @@ def test_build_manifest_teacher_provenance_is_stubbed() -> None:
         "worldvln_model_id",
         "worldvln_revision",
         "disagreement_source",
-        "vjepa2_model_id",
         "render_config_hash",
     }
-    # Build-time fields stay stubbed until the cache build (A5.14); the Config-known fields
-    # (disagreement_source A5.9, vjepa2_model_id A5.12) are recorded now for a complete audit trail.
     assert t["worldvln_model_id"] == "" and t["worldvln_revision"] == "" and t["render_config_hash"] == ""
-    assert t["disagreement_source"] in DISAGREEMENT_SOURCES
-    assert t["vjepa2_model_id"] == Config().trust.vjepa2_model_id == "facebook/vjepa2-vitl-fpc64-256"
-
-
-def test_build_manifest_reflects_config_sweep_no_code_surgery() -> None:
-    # Flipping a trust knob in Config flows into the manifest — the whole point of the SoT.
-    cfg = dataclasses.replace(
-        Config(), trust=dataclasses.replace(Config().trust, disagreement_source="airscape_multiseed")
-    )
-    m = build_manifest(cfg)
-    assert m["teacher"]["disagreement_source"] == "airscape_multiseed"
-    assert validate_manifest(m) == []
+    assert t["disagreement_source"] == ""
 
 
 def test_build_manifest_with_typed_entries_roundtrips() -> None:
@@ -443,18 +380,6 @@ def test_build_manifest_reads_shapes_from_schemas_not_literals(monkeypatch: pyte
     assert m["encoder"]["dim"] == 1717
 
 
-def test_validate_manifest_rejects_bad_disagreement_source() -> None:
-    m = empty_manifest()
-    m["teacher"]["disagreement_source"] = "bogus_source"
-    assert any("disagreement_source" in e for e in validate_manifest(m))
-
-
-def test_validate_manifest_accepts_empty_disagreement_source_stub() -> None:
-    m = empty_manifest()
-    m["teacher"]["disagreement_source"] = ""  # the allowed stub (provenance populated in A5.14)
-    assert validate_manifest(m) == []
-
-
 def test_validate_manifest_rejects_missing_dataset_key() -> None:
     m = empty_manifest()
     del m["dataset"]["license"]
@@ -463,7 +388,7 @@ def test_validate_manifest_rejects_missing_dataset_key() -> None:
 
 def test_validate_manifest_rejects_missing_teacher_key() -> None:
     m = empty_manifest()
-    del m["teacher"]["vjepa2_model_id"]
+    del m["teacher"]["worldvln_model_id"]
     assert any("teacher missing keys" in e for e in validate_manifest(m))
 
 

@@ -26,7 +26,7 @@ dataset (``__len__`` + ``__getitem__``), which is all ``torch.utils.data.DataLoa
   ``teacher_pose6``   (N, 6)        f32   — OracleTarget: raw teacher pose [roll,yaw,pitch,x,y,z]
   ``rollpitch_resid`` (N,)          f32   — OracleTarget: |roll|+|pitch| audit (>= 0)
   ``disagreement``    (N,)          f32   — OracleTarget: K-rollout spread scalar (>= 0)
-  ``vjepa_surprise``  (N,)          f32   — OracleTarget: V-JEPA-2 surprise (>= 0)
+  ``disagreement``    (N,)          f32   — OracleTarget: K-rollout spread scalar (>= 0)
 
 A training sample exists for each transition ``t in [0, N-2]`` (the terminal STOP at ``t=N-1`` has no
 stored next pose, so it yields no ``z_next`` and is excluded). The per-transition arrays are stored
@@ -169,7 +169,6 @@ class CachedLatentDataset(LatentDatasetBase):
             teacher_pose6=ep["teacher_pose6"][t].astype(np.float32),
             rollpitch_resid=float(ep["rollpitch_resid"][t]),
             disagreement=float(ep["disagreement"][t]),
-            vjepa_surprise=float(ep["vjepa_surprise"][t]),
         )
         return step, oracle
 
@@ -211,7 +210,6 @@ class CachedLatentDataset(LatentDatasetBase):
             teacher_pose6=np.zeros(TEACHER_DOF, dtype=np.float32),
             rollpitch_resid=0.0,
             disagreement=0.0,
-            vjepa_surprise=0.0,
         )
         return step, oracle
 
@@ -226,7 +224,7 @@ def inspect_cache(cache_dir: str | Path, n: int = 4) -> int:
             f"[{i}] z_t {tuple(step.z_t.shape)} {step.z_t.dtype} action={step.action_id} "
             f"hist_mask={step.history_mask.tolist()} lang={tuple(step.lang_tokens.shape)} "
             f"waypoint={np.round(oracle.waypoint_4dof, 3).tolist()} "
-            f"disagree={oracle.disagreement:.4f} surprise={oracle.vjepa_surprise:.4f}"
+            f"disagree={oracle.disagreement:.4f}"
         )
     return 0
 

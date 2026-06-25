@@ -28,7 +28,6 @@ def synthetic_cache(tmp_path: Path) -> Path:
             deltas=np.ones((n, 4), dtype=np.float32) * 0.1 * (i + 1),
             vo_confidence=np.full(n, 0.9, dtype=np.float32),
             frame_quality=np.full(n, 0.7, dtype=np.float32),
-            vjepa_surprise=np.full(n, 0.1, dtype=np.float32),
         )
     manifest = {
         "encoder": {"model_id": "test_encoder", "dtype": "float16", "patch_tokens": 196, "dim": 768},

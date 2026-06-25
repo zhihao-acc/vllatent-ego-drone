@@ -72,7 +72,7 @@ class StepSample:
 
     All latents are the FROZEN DINOv3 patch space; ``delta_4dof`` is AirSim-NED body
     (the model's native convention — the NED->FLU->ENU remap is Phase D, see
-    docs/io-contract.md). ``future_frame_rgb`` is the optional Phase-C V-JEPA-2 target.
+    docs/io-contract.md).
 
     Two padding masks make the variable-validity inputs explicit (M4): ``history_mask``
     marks which of the H history slots are real vs zero-padded (block-causal at an episode
@@ -90,7 +90,7 @@ class StepSample:
     action_id: int               # int in [0,7]     — AerialVLN discrete actions[t]; 0=sentinel for sports
     z_next: np.ndarray           # (196,768) fp16   — DINOv3 latent of next obs = prediction target
     delta_4dof: np.ndarray       # (4,) f32         — (dx,dy,dz,dyaw) AirSim-NED body, yaw-only
-    future_frame_rgb: np.ndarray | None = None  # (H,W,3) uint8 RGB — Phase-C V-JEPA-2 target (optional)
+    future_frame_rgb: np.ndarray | None = None  # (H,W,3) uint8 RGB — optional future frame
     vo_confidence: float | None = None   # MegaSaM VO confidence [0,1] (wild-video ingest only)
     frame_quality: float | None = None   # composite quality [0,1] (wild-video ingest only)
     dt_seconds: float | None = None      # inter-frame time delta >0 (wild-video ingest only)
@@ -134,7 +134,7 @@ class StepSample:
                 raise ValueError(f"dt_seconds: expected > 0, got {v}")
 
 
-# --- Student output seams (H3) — typed so "−trust" / swap-predictor is a config flag, not surgery ---
+# --- Student output seams (H3) ---
 
 @dataclass(frozen=True, eq=False)
 class PredictorOutput:
@@ -154,34 +154,6 @@ class PredictorOutput:
             (HORIZON, PATCH_TOKENS, EMBED_DIM),
             dtype=LATENT_DTYPE,
         )
-
-
-@dataclass(frozen=True, eq=False)
-class TrustReadout:
-    """The deployed single-pass trust/horizon head readout (arch-design §9.6; io-contract §1c).
-
-    ``p_commit`` = per-step "still-trusted" probabilities p_j ∈ [0,1]^T; ``k_star`` = the soft
-    expected horizon k* = Σ_j Π_{i≤j} p_i ∈ [0,T] (how far to commit); ``sigma`` = a scalar
-    predictive uncertainty σ ≥ 0. ONE forward pass — the K=5 ensemble teacher is Phase C.
-    """
-
-    p_commit: np.ndarray  # (T,) float — per-step commit probabilities in [0,1]
-    k_star: float         # soft expected horizon in [0, T]
-    sigma: float          # scalar predictive uncertainty >= 0
-
-    def __post_init__(self) -> None:
-        _check_array("p_commit", self.p_commit, (HORIZON,), kind="f")
-        if not bool(np.all((self.p_commit >= 0.0) & (self.p_commit <= 1.0))):
-            raise ValueError(f"p_commit: expected all values in [0,1], got {self.p_commit}")
-        for name in ("k_star", "sigma"):
-            v = getattr(self, name)
-            if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
-                raise TypeError(f"{name}: expected float, got {type(v).__name__}")
-        if not (0.0 <= float(self.k_star) <= HORIZON):
-            raise ValueError(f"k_star: expected 0..{HORIZON}, got {self.k_star}")
-        # Two-sided/finite, symmetric with k_star + p_commit (a one-sided check would let NaN/inf pass).
-        if not np.isfinite(float(self.sigma)) or float(self.sigma) < 0.0:
-            raise ValueError(f"sigma: expected a finite value >= 0, got {self.sigma}")
 
 
 @dataclass(frozen=True, eq=False)
@@ -206,21 +178,14 @@ class SportsTarget:
     """Per-step target for sports-following training (B1.6, Phase B pivot).
 
     Slim replacement for :class:`OracleTarget` on sports FPV data — only the fields the
-    sports pipeline produces. ``waypoint_4dof`` from MegaSaM ego-motion, ``vjepa_surprise``
-    from the V-JEPA-2 verifier (Phase C; defaults to 0.0 until then). The sports loader
+    sports pipeline produces. ``waypoint_4dof`` from MegaSaM ego-motion. The sports loader
     emits ``(StepSample, SportsTarget)``; AerialVLN legacy keeps ``(StepSample, OracleTarget)``.
     """
 
     waypoint_4dof: np.ndarray   # (4,) f32  — (dx,dy,dz,dyaw) from MegaSaM VO
-    vjepa_surprise: float       # V-JEPA-2 surprise >= 0 (Phase C gate; 0.0 until then)
 
     def __post_init__(self) -> None:
         _check_array("waypoint_4dof", self.waypoint_4dof, (DOF,), dtype=DELTA_DTYPE)
-        v = self.vjepa_surprise
-        if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
-            raise TypeError(f"vjepa_surprise: expected float, got {type(v).__name__}")
-        if not np.isfinite(float(v)) or float(v) < 0.0:
-            raise ValueError(f"vjepa_surprise: expected a finite value >= 0, got {v}")
 
 
 # --- Teacher distillation seam (A5.9) — the (StepSample, OracleTarget) the student trains against ---
@@ -262,8 +227,7 @@ class OracleTarget:
     """Per-step distillation TARGET (frozen seam, A5.9) the student trains against.
 
     Pairs 1:1 with a :class:`StepSample` (the loader emits ``(StepSample, OracleTarget)``; A5.15).
-    Combines the frozen WorldVLN teacher (waypoint + rollout disagreement) with the independent
-    V-JEPA-2 surprise gate. ``waypoint_4dof`` is the 6->4-projected (drop roll/pitch + abs->body-delta)
+    ``waypoint_4dof`` is the 6->4-projected (drop roll/pitch + abs->body-delta)
     student target; ``teacher_pose6`` + ``rollpitch_resid`` are kept as provenance + a
     lossless-projection audit (roll/pitch are ≈0 on AerialVLN by construction — verify, don't assume).
     """
@@ -271,13 +235,12 @@ class OracleTarget:
     waypoint_4dof: np.ndarray   # (4,) f32  — student target (dx,dy,dz,dyaw), AirSim-NED body
     teacher_pose6: np.ndarray   # (6,) float — raw teacher pose [roll,yaw,pitch,x,y,z] (provenance)
     rollpitch_resid: float      # |roll| + |pitch| of teacher_pose6 (>= 0; ≈0 audit on AerialVLN)
-    disagreement: float         # K-rollout spread scalar (>= 0) — trust-horizon distillation target
-    vjepa_surprise: float       # V-JEPA-2 surprise (>= 0) — independent second gate
+    disagreement: float         # K-rollout spread scalar (>= 0)
 
     def __post_init__(self) -> None:
         _check_array("waypoint_4dof", self.waypoint_4dof, (DOF,), dtype=DELTA_DTYPE)
         _check_array("teacher_pose6", self.teacher_pose6, (TEACHER_DOF,), kind="f")
-        for name in ("rollpitch_resid", "disagreement", "vjepa_surprise"):
+        for name in ("rollpitch_resid", "disagreement"):
             v = getattr(self, name)
             if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
                 raise TypeError(f"{name}: expected float, got {type(v).__name__}")
@@ -382,7 +345,6 @@ __all__ = [
     "MASK_DTYPE",
     "StepSample",
     "PredictorOutput",
-    "TrustReadout",
     "Waypoint",
     "TeacherOutput",
     "OracleTarget",

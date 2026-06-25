@@ -43,11 +43,10 @@ def _episode_arrays(n: int, base: int) -> dict[str, np.ndarray]:
     pose6 = np.zeros((n, 6), dtype=np.float32)
     rollpitch = np.zeros((n,), dtype=np.float32)                       # >= 0
     disagree = np.array([0.1 * (k + 1) for k in range(n)], dtype=np.float32)  # >= 0
-    surprise = np.array([0.2 * (k + 1) for k in range(n)], dtype=np.float32)  # >= 0
     return {
         "latents": latents, "actions": actions, "deltas": deltas, "lang_tokens": lang,
         "waypoint_4dof": waypoint, "teacher_pose6": pose6, "rollpitch_resid": rollpitch,
-        "disagreement": disagree, "vjepa_surprise": surprise,
+        "disagreement": disagree,
     }
 
 
@@ -94,7 +93,7 @@ def test_sample_shapes_and_dtypes(tmp_path) -> None:
     assert isinstance(step.action_id, int) and 0 <= step.action_id < N_ACTIONS
     assert oracle.waypoint_4dof.shape == (DOF,) and oracle.waypoint_4dof.dtype == DELTA_DTYPE
     assert oracle.teacher_pose6.shape == (TEACHER_DOF,)
-    assert oracle.disagreement >= 0.0 and oracle.vjepa_surprise >= 0.0 and oracle.rollpitch_resid >= 0.0
+    assert oracle.disagreement >= 0.0 and oracle.rollpitch_resid >= 0.0
 
 
 def test_block_causal_history_padding_at_episode_start(tmp_path) -> None:

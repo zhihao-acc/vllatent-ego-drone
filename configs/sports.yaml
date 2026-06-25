@@ -1,5 +1,5 @@
 # Sports-following pipeline config override (Phase B1).
-# Activates ingest for sports FPV data. Override trust for sports pivot.
+# Activates ingest for sports FPV data.
 ingest:
   name: sports_following
   sport: skiing
@@ -10,9 +10,3 @@ ingest:
   resolution_h: 720
   resolution_w: 1280
   quality_threshold: 0.3
-
-trust:
-  disagreement_source: vjepa_only
-
-distill:
-  lambda_trust: 0.0

@@ -55,19 +55,15 @@ arrow(9.0, 5.2, 9.0, 3.9, "H=3 history", color="#58a6ff")
 
 # Row 3: Heads
 box(6.5, 1.3, "4-DoF Waypoint", "Δx,Δy,Δz,Δψ\nNED-body", HEAD)
-box(9.0, 1.3, "Trust Head", "p_commit, k*, σ\nsingle-pass", HEAD)
-box(11.8, 1.3, "K=5 Ensemble\n+ V-JEPA-2", "offline oracle\n(Phase C)", TEACH)
 
 arrow(8.2, 2.8, 6.5, 1.9, color="#3fb950")
-arrow(9.0, 2.8, 9.0, 1.9, color="#3fb950")
-arrow(9.8, 2.8, 11.8, 1.9, color="#bc8cff")
 
 # Teacher (distillation)
 box(12.5, 4.3, "TrackVLA", "frozen teacher\n(Phase C)", TEACH)
 arrow(12.5, 3.8, 11.8, 1.9, "distill", color="#bc8cff")
 
 # Title
-ax.text(7, 6.7, "vllatent-ego-drone — Trust-Aware Latent Predictor for Sports-Following Drone",
+ax.text(7, 6.7, "vllatent-ego-drone — Latent Predictor for Sports-Following Drone",
         color="white", fontsize=12, ha="center", fontweight="bold")
 
 # Legend

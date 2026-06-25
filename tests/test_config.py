@@ -16,7 +16,6 @@ from vllatent.config import (
     EncoderConfig,
     IngestConfig,
     PredictorConfig,
-    TrustConfig,
 )
 from vllatent.schemas import HISTORY, HORIZON
 
@@ -31,12 +30,6 @@ def test_defaults_construct_and_match_schemas_constants() -> None:
     assert cfg.encoder.model_id == "vit_base_patch16_dinov3.lvd1689m"
     # Frozen CLIP ViT-B/32 text tower for lang_tokens (A5.13b) — NON-GATED.
     assert cfg.encoder.text_model_id == "openai/clip-vit-base-patch32"
-    # Trust: sports-following pivot default (WorldVLN retired 2026-06-19).
-    assert cfg.trust.disagreement_source == "vjepa_only"
-    assert cfg.trust.k_rollouts == 5
-    assert 0.0 <= cfg.trust.vjepa_surprise_threshold <= 1.0
-    # V-JEPA-2 verifier checkpoint (A5.12) — Meta's NON-GATED ViT-L (gated:false, MIT; unlike DINOv3).
-    assert cfg.trust.vjepa2_model_id == "facebook/vjepa2-vitl-fpc64-256"
 
 
 def test_from_yaml_default_builds() -> None:
@@ -91,10 +84,6 @@ def test_from_yaml_rejects_unknown_key(tmp_path) -> None:
         lambda: PredictorConfig(heads=7),  # 768 % 7 != 0
         lambda: DistillConfig(temperature=0.0),
         lambda: DistillConfig(lambda_latent=-1.0),
-        lambda: TrustConfig(disagreement_source="nope"),
-        lambda: TrustConfig(k_rollouts=0),
-        lambda: TrustConfig(vjepa_surprise_threshold=1.5),
-        lambda: TrustConfig(vjepa2_model_id=""),  # must be a non-empty model id
         lambda: EncoderConfig(dtype="float64"),
         lambda: EncoderConfig(input_hw=0),
         lambda: EncoderConfig(text_model_id=""),  # must be a non-empty model id
