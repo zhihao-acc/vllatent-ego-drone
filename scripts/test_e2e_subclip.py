@@ -188,9 +188,9 @@ def main(argv: list[str] | None = None) -> int:
 
     # ── Step 3: Quality scoring → segment extraction ──
     _step(3, "Quality scoring → accepted segments")
-    from vllatent.io import load_rgb
-    from vllatent.ingest.quality import composite_quality, filter_frames, find_accepted_segments
     from vllatent.ingest.pipeline import MIN_SEGMENT_FRAMES
+    from vllatent.ingest.quality import composite_quality, filter_frames, find_accepted_segments
+    from vllatent.io import load_rgb
 
     qualities = np.zeros(len(target_paths), dtype=np.float32)
     for i, fp in enumerate(target_paths):
@@ -224,12 +224,13 @@ def main(argv: list[str] | None = None) -> int:
 
     import shutil
     seg_frames_dir = out_dir / "frames" / segment_id
-    seg_frames_dir.mkdir(parents=True, exist_ok=True)
+    if seg_frames_dir.exists():
+        shutil.rmtree(seg_frames_dir)
+    seg_frames_dir.mkdir(parents=True)
     seg_frame_paths: list[Path] = []
     for i, src_idx in enumerate(range(seg_start, seg_end)):
         dst = seg_frames_dir / f"{i:06d}.jpg"
-        if not dst.exists():
-            shutil.copy2(target_paths[src_idx], dst)
+        shutil.copy2(target_paths[src_idx], dst)
         seg_frame_paths.append(dst)
     _log(f"Copied {len(seg_frame_paths)} segment frames to {seg_frames_dir}")
 

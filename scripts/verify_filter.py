@@ -41,7 +41,7 @@ def main(argv: list[str] | None = None) -> int:
     print("[verify] Running YOLO-World object detection...")
     rejected = detect_rejected_objects_from_paths(frame_paths, device=args.device)
 
-    print(f"\n[verify] Per-frame diagnostics (first 30 frames):")
+    print("\n[verify] Per-frame diagnostics (first 30 frames):")
     print(f"  {'frame':<14} {'motion':>8} {'objects':>8} {'decision'}")
     print(f"  {'─' * 14} {'─' * 8} {'─' * 8} {'─' * 10}")
     for i in range(min(30, len(frame_paths))):
@@ -57,7 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         obj_str = "YES" if has_obj else "---"
         print(f"  {frame_paths[i].name:<14} {motion:8.1f} {obj_str:>8} {tag}")
 
-    print(f"\n[verify] Running full filter pipeline...")
+    print("\n[verify] Running full filter pipeline...")
     result = filter_video_from_paths(frame_paths, device=args.device)
 
     print(f"[verify] Verdict: {result.verdict.value}")
@@ -85,11 +85,11 @@ def main(argv: list[str] | None = None) -> int:
     print(f"\n[verify] Results written to {out_dir}/")
     print(f"  accepted/  — {result.n_fpv_frames} frames")
     print(f"  rejected/  — {result.n_frames - result.n_fpv_frames} frames")
-    print(f"\n[verify] FPV ranges (frame indices):")
+    print("\n[verify] FPV ranges (frame indices):")
     for start, end in fpv_ranges:
         print(f"  [{start}–{end}) = {end - start} frames")
 
-    print(f"\n[verify] Shot breakdown:")
+    print("\n[verify] Shot breakdown:")
     for s in result.shots:
         label = "FPV" if s.is_fpv else "---"
         print(f"  [{s.start}–{s.end})  {label}  score={s.mean_score:.3f}")

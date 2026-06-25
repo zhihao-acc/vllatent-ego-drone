@@ -53,6 +53,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.10d — Rework MegaSaM parser for real output | done | 2026-06-24 | Parser handles real format: `(T,7)` Lie group w2c → c2w inversion, `motion_prob.npy (T,H,W)` → per-frame confidence, `(T,4)` intrinsics → K matrix. Also `droid.npz` with `cam_c2w`. Legacy fallback kept. 37 tests green |
 | B1.10e — MegaSaM 3-step automation script | done | 2026-06-24 | `scripts/run_megasam_pipeline.sh` — DepthAnything → UniDepth → camera_tracking; `run_megasam()` rewired to use it instead of nonexistent `run.py` |
 | B1.10c — E2E pipeline test on one sub-clip | done | 2026-06-24 | **USER-VERIFIED GO** on `ski03_fpv00_c000` (50 frames). Full chain: content filter → FPV → subclip → quality gate → MegaSaM → DINOv3 → .npz. Bugs fixed: stale `model=` kwarg, conda `--no-banner`, per-frame fpv_mask leak, xformers sm_120 shims, socks→socks5 proxy |
+| B1.10f — Fix shot boundary detection for consistent VO | done | 2026-06-25 | AdaptiveDetector threshold 3.0→2.0 catches all camera switches (ski03: 54→55 BEV cut was missed). Deleted edit_detection.py (hand-crafted heuristics failed twice — histogram+slowmo+block-patterns all false-positive on skiing). E2E stale-dir bug fixed (rmtree before copy). 462 tests green |
 | B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
 | B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |
 | B1.13 — Sports sliding-window loader | pending | — | Phase B-1 Group 4 |
@@ -69,6 +70,32 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-25 — B1.10f: Fix shot boundary detection for consistent VO trajectories
+
+**Status:** new sub-step **done**.
+
+**Problem:** AdaptiveDetector (PySceneDetect) at threshold=3.0 missed obvious hard cuts in skiing
+footage — e.g. ski03 frame 54 (behind-skier FPV) → 55 (bird's-eye-view) was NOT detected as a shot
+boundary. MegaSaM processed both camera angles as one continuous segment → physically impossible
+trajectory leap.
+
+**Root cause:** Skiing footage has high natural frame-to-frame variation (motion 19-28 typical). A cut
+between two snowy scenes (motion spike to 38) didn't exceed 3× the local average.
+
+**Fix:** `adaptive_threshold` 3.0 → **2.0** across all `detect_shot_boundaries*` and `filter_video*`
+functions. At 2.0, ski03 produces 7 boundaries (was 4) — all verified as real camera switches. No
+false positives observed.
+
+**Deleted:** `vllatent/ingest/edit_detection.py` + `tests/test_edit_detection.py`. Two rounds of
+hand-crafted edit detection (histogram correlation, motion spikes, slow-mo, block-pattern consistency)
+all produced catastrophic false-positive rates on real skiing footage (80+ frames flagged out of 254).
+The entire "edit detection" problem was actually just an under-tuned AdaptiveDetector threshold.
+
+**Bug fix:** `scripts/test_e2e_subclip.py` — stale frame directory not cleaned before copy (previous
+run's 50 frames persisted; MegaSaM saw 50 instead of 39). Fixed with `shutil.rmtree` before copy.
 
 ---
 

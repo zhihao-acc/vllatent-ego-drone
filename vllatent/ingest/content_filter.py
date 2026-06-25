@@ -113,7 +113,7 @@ class FilterResult:
 def detect_shot_boundaries(
     frames: list[np.ndarray],
     *,
-    adaptive_threshold: float = 3.0,
+    adaptive_threshold: float = 2.0,
     min_scene_len: int = 2,
     fps: float = 30.0,
 ) -> list[int]:
@@ -148,7 +148,7 @@ def detect_shot_boundaries(
 def detect_shot_boundaries_from_paths(
     frame_paths: list,
     *,
-    adaptive_threshold: float = 3.0,
+    adaptive_threshold: float = 2.0,
     min_scene_len: int = 2,
     fps: float = 30.0,
 ) -> list[int]:
@@ -478,7 +478,7 @@ def filter_video_from_paths(
     frame_paths: list,
     *,
     device: str = "cpu",
-    adaptive_threshold: float = 3.0,
+    adaptive_threshold: float = 2.0,
     motion_threshold: float = _MOTION_THRESHOLD,
     min_segment_frames: int = _MIN_SEGMENT_FRAMES,
     yolo_confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
@@ -490,6 +490,10 @@ def filter_video_from_paths(
     1. Motion: reject static frames (below ``motion_threshold``).
     2. YOLO-World: reject frames containing drones, cameras, gear, etc.
     3. Minimum segment: discard accepted runs shorter than ``min_segment_frames``.
+
+    Shot boundaries (AdaptiveDetector, threshold=2.0) split the video
+    into independent camera recordings.  Each shot is classified as FPV
+    or non-FPV via majority vote.
 
     The FPV mask covers EVERY frame — no stride sampling.
     """
@@ -528,7 +532,7 @@ def filter_video(
     frames: list[np.ndarray],
     *,
     device: str = "cpu",
-    adaptive_threshold: float = 3.0,
+    adaptive_threshold: float = 2.0,
     motion_threshold: float = _MOTION_THRESHOLD,
     min_segment_frames: int = _MIN_SEGMENT_FRAMES,
     yolo_confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
