@@ -40,7 +40,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.3 — Stub GPS Sim(3) alignment | done | 2026-06-19 | AlignmentResult type + NotImplementedError stub |
 | B1.4 — Add fixed-clip-length cutting | done | 2026-06-19 | clip_length_seconds=10.0 in IngestConfig, cut_fixed_clips() in preprocess |
 | B1.5 — Revise Config for sports pivot | done | 2026-06-19 | vjepa_only default, megasam_vo added, lambda_trust, sports.yaml fixed |
-| B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof, vjepa_surprise)` + `Target` union alias; 94 schema tests green |
+| B1.6 — Create SportsTarget in schemas.py | done | 2026-06-19 | `SportsTarget(waypoint_4dof)` + `Target` union alias; trust mechanism removed 2026-06-25 |
 | B1.7 — YouTube pilot: curate + ingest | done | 2026-06-23 | USER-VERIFIED: 15 clips curated (`configs/sports_clips.yaml`), 11 accepted / 4 rejected (ski07/08/14/15), 38 FPV ranges, 173 sub-clips (10s). Filter: motion≥8 AND ¬YOLO(36 classes) AND segment≥10. `--filter-only` run green. `ingest_data/latent_cache/pilot_summary.json` validates. `verify_filter.py` on ski01 confirmed accepted/rejected split |
 | B1.7a — Create vllatent/encode/batch.py | done | 2026-06-20 | `vllatent/encode/batch.py` — `encode_frames(frames_dir, device) → (N, 196, 768) fp16`; lazy torch; 5 tests green (mocked encoder, AST purity) |
 | B1.7b — Content filter implementation | done | 2026-06-20 | **REVISED B1.7c**: CLIP dropped (0.999 within-domain, zero discrimination). Replaced with YOLO-World `yolov8s-worldv2` (74 FPS, 13M params, open-vocab). 36 rejected classes (drone body+parts, camera/gear, electronics, overlays). `filter_short_segments()` discards accepted runs < 10 frames (2s@5fps). `ultralytics>=8.2.0` added to `[torch]`. Filter: `is_fpv = motion≥8 AND ¬YOLO AND segment≥10`. 44 tests green; all imports lazy (AST-verified) |
@@ -59,7 +59,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.13 — Sports sliding-window loader | pending | — | Phase B-1 Group 4 |
 | B1.14 — Collate function for batched training | pending | — | Phase B-1 Group 4 |
 | B1.15 — Block-causal ViT predictor + FiLM | pending | — | Phase B-1 Group 5 |
-| B1.16 — Waypoint head + trust head stub | pending | — | Phase B-1 Group 5 |
+| B1.16 — Waypoint head | pending | — | Phase B-1 Group 5 |
 | B1.17 — Full model assembly | pending | — | Phase B-1 Group 5 |
 | B1.18 — Loss functions: L_latent + L_wp | pending | — | Phase B-1 Group 6 |
 | B1.19 — Checkpoint save/load + config snapshot | done | 2026-06-19 | `vllatent/train/checkpoint.py` — save/load + config snapshot + seed_everything; 10 torch tests green; lazy torch import (AST-verified) |
@@ -70,6 +70,21 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-25 — Remove trust mechanism entirely
+
+**Status:** done (user decision).
+
+Deleted `vllatent/verify/` (V-JEPA-2 surprise verifier), `TrustReadout` from schemas,
+`TrustConfig` + `DISAGREEMENT_SOURCES` from config, `vjepa_surprise` from `SportsTarget` /
+`OracleTarget` / loader / data quality report, trust section from `sports.yaml`, trust references
+from CLAUDE.md / io-contract / arch_diagram / full-run-sizing. Cleaned all tests (420 passed,
+11 skipped). Manifest validation no longer checks `disagreement_source` enum.
+
+**Rationale:** User abandoned the trust/commitment-horizon concept. The project focus is
+now purely on the latent predictor + waypoint head.
 
 ---
 
