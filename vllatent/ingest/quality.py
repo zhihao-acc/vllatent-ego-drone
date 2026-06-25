@@ -97,6 +97,30 @@ def clip_quality_summary(qualities: np.ndarray, threshold: float = 0.3) -> dict[
     }
 
 
+def find_accepted_segments(
+    mask: np.ndarray,
+    min_length: int,
+) -> list[tuple[int, int]]:
+    """Find contiguous runs of True in *mask* that are at least *min_length* long.
+
+    Returns a list of ``(start, end)`` index pairs (half-open, like ``range``).
+    Short runs are discarded — they can't produce a training sample.
+    """
+    segments: list[tuple[int, int]] = []
+    n = len(mask)
+    i = 0
+    while i < n:
+        if mask[i]:
+            run_start = i
+            while i < n and mask[i]:
+                i += 1
+            if i - run_start >= min_length:
+                segments.append((run_start, i))
+        else:
+            i += 1
+    return segments
+
+
 __all__ = [
     "motion_blur_score",
     "exposure_score",
@@ -104,5 +128,6 @@ __all__ = [
     "composite_quality",
     "score_frames",
     "filter_frames",
+    "find_accepted_segments",
     "clip_quality_summary",
 ]

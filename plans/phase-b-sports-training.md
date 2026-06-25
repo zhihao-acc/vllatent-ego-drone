@@ -209,16 +209,57 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 - **Test:** `$PY -m pytest -q tests/test_content_filter.py`
 - **Deps:** blocks B1.7. Blocked-by: none.
 
-**B1.8 — CosFly-Track download + adapter.**
+**B1.8 — CosFly-Track download + adapter.** ✅ DONE 2026-06-24 (DESCOPED)
 - Tier TOOL+PURE / USER-GATED (HF download)
-- Download 526-trace subset from `AutelRobotics/CosFly`. Write adapter that converts CosFly
-  format (CARLA, GT 6-DoF, 2 Hz) to ingest `.npz` cache. CosFly has GT waypoints, so adapter
-  writes `deltas` from GT poses, `vo_confidence = 1.0`. Uses `build_manifest_wild_video`
-  with `motion_method="cosfly_gt"`.
-- **Files:** `vllatent/ingest/cosfly_adapter.py` (new), `scripts/download_cosfly.sh` (new), `tests/test_cosfly_adapter.py` (new)
-- **DoD:** Adapter converts entries to `.npz`. Manifest built. 10+ traces converted and inspected.
-- **Test:** `$PY -m pytest -q tests/test_cosfly_adapter.py`. User verifies real download + conversion.
-- **Deps:** blocks B1.10, B1.12. Blocked-by: none.
+- Download 526-trace subset from `AutelRobotics/CosFly`. Adapter converts CosFly
+  format (CARLA, GT 6-DoF, 2 Hz) to ingest `.npz` cache with `motion_method="cosfly_gt"`.
+- **DESCOPED:** RGB frames skipped (119 GB). Trajectory-only (6 GB). No DINOv3 encoding.
+  See **CosFly Suitability Assessment** below for full rationale.
+- **Files:** `vllatent/ingest/cosfly_adapter.py`, `scripts/download_cosfly.sh`, `tests/test_cosfly_adapter.py` (21 tests)
+- **Status:** Adapter code complete. Download script functional. Integration into training
+  loop **deferred** — CosFly contributes to L_wp only (no latents), and two issues must be
+  resolved before integration: (1) world-frame vs body-frame deltas, (2) scale mismatch
+  (metric vs normalized). See assessment below.
+- **Deps:** ~~blocks B1.10, B1.12~~ No longer blocking. Blocked-by: none.
+
+---
+
+**B1.8b — Pipeline redesign: quality-gate before MegaSaM + per-segment processing.** ✅ DONE 2026-06-24 (HOTFIX)
+- Tier PURE+ORCH / AUTO
+- **Problem:** `process_clip()` runs MegaSaM and DINOv3 on ALL frames including quality-
+  rejected ones. `quality_mask` is passive metadata, never a gate. Bad frames produce
+  unreliable VO poses and waste compute on encoding. Also, `extract_fpv_ranges()` was
+  merging consecutive FPV shots across editing cuts (FIXED 2026-06-24).
+- **Corrected pipeline flow per sub-clip:**
+  ```
+  Stage 1-2:  Download + extract frames (unchanged)
+  Stage 2b:   Undistort (unchanged)
+  Stage 3:    Quality score ALL frames → quality_mask
+  Stage 3b:   Find contiguous accepted segments from quality_mask (NEW)
+              - min segment length = HISTORY + HORIZON + 1 = 8 frames
+              - segments shorter than this → discarded (can't produce a training sample)
+              - if NO segments survive → reject clip, return early
+  Stage 4-7:  For EACH accepted segment:
+              - Copy/symlink segment frames to segment sub-directory
+              - MegaSaM on segment (continuous, no temporal gaps)
+              - SE(3) → body-frame deltas
+              - DINOv3 encode segment frames only
+              - Cache as separate .npz (segment_id = {clip_id}_seg{N:02d})
+  ```
+- **Key changes:**
+  1. `quality.py`: add `find_accepted_segments(mask, min_length) → list[(start, end)]`
+  2. `pipeline.py`: `process_clip()` returns `list[ClipPipelineResult]` (one per segment)
+  3. `content_filter.py`: `extract_fpv_ranges()` no longer merges shots (already fixed)
+  4. `ingest_youtube_pilot.py`: handle list of results per sub-clip
+- **Rationale:** Quality filtering is a gate, not a label. MegaSaM needs continuous frames
+  but should never process frames we've already decided are bad. DINOv3 should never encode
+  frames that won't enter training. Disk stores only useful data.
+- **Files:** `vllatent/ingest/quality.py`, `vllatent/ingest/pipeline.py`,
+  `scripts/ingest_youtube_pilot.py`, `tests/test_ingest_pipeline.py`
+- **DoD:** Quality-rejected frames never reach MegaSaM or DINOv3. Segments are continuous.
+  Tests cover: all-accepted (1 segment), split at bad block, all-rejected (0 segments).
+- **Test:** `$PY -m pytest -q tests/test_ingest_pipeline.py tests/test_quality.py`
+- **Deps:** none. Blocked-by: none.
 
 ---
 
@@ -260,13 +301,13 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 - **Test:** `$PY -m pytest -q tests/test_visualize.py`
 - **Deps:** none (runs on any cached .npz). Blocked-by: none.
 
-**B1.10 — MegaSaM VO validation on pilot clips.**
+**B1.10 — MegaSaM VO validation on pilot clips.** ✅ DONE 2026-06-24
 - Tier RESEARCH+TOOL / USER-GATED
 - **Objective.** Validate MegaSaM monocular VO on skiing FPV video. No ground truth available
   (no GPS/IMU), so use physics-plausibility + smoothness proxies. Produce GO / CONDITIONAL-GO
   / NO-GO verdict.
 
-- **B1.10a — Validation metrics module (AUTO).**
+- **B1.10a — Validation metrics module (AUTO).** ✅ DONE
   `vllatent/ingest/vo_validation.py` — pure numpy, no MegaSaM dependency. Functions:
   - `trajectory_smoothness(poses) → SmoothnessReport` — jerk (3rd derivative of position),
     acceleration discontinuity count (jumps > 3σ), angular velocity spikes (> 300°/s).
@@ -285,7 +326,7 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   Tests: `tests/test_vo_validation.py` (synthetic trajectories: smooth descent, jerky,
   stationary, circular, physically implausible).
 
-- **B1.10b — Validation visualization (AUTO).**
+- **B1.10b — Validation visualization (AUTO).** ✅ DONE
   `scripts/validate_megasam.py` — CLI that runs the full validation pipeline:
   1. Parse MegaSaM output (`parse_megasam_output` from `megasam.py`)
   2. Convert to body-frame deltas (`se3_sequence_to_deltas` from `ego_motion.py`)
@@ -301,7 +342,7 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   Usage: `python scripts/validate_megasam.py --frames-dir ingest_data/frames/ski01
     --megasam-dir ingest_data/frames/ski01_megasam --fps 5 --out reports/ski01_vo.html`
 
-- **B1.10d — Rework MegaSaM parser for real output format (AUTO).**
+- **B1.10d — Rework MegaSaM parser for real output format (AUTO).** ✅ DONE
   The existing `parse_megasam_output()` was written against a guessed output format that doesn't
   match MegaSaM's actual 3-step pipeline output. Five critical mismatches:
 
@@ -338,7 +379,7 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   **Test:** `$PY -m pytest -q tests/test_ingest_megasam.py`
   **Deps:** blocks B1.10c, B1.10e. Blocked-by: B1.10a, B1.10b (done).
 
-- **B1.10e — End-to-end MegaSaM automation script (AUTO).**
+- **B1.10e — End-to-end MegaSaM automation script (AUTO).** ✅ DONE
   `scripts/run_megasam_pipeline.sh` — one-command wrapper for the 3-step MegaSaM pipeline:
   ```bash
   bash scripts/run_megasam_pipeline.sh --clip-id ski01 \
@@ -357,66 +398,30 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   **Test:** Manual run on ski01 (USER-GATED verify).
   **Deps:** blocks future batch ingest. Blocked-by: B1.10d.
 
-- **B1.10c — Run MegaSaM + validate (USER-GATED).**
-  Run on 3 pilot clips of varying difficulty:
-  - `ski01` (335 frames, ~67s) — short, likely clean
-  - `ski03` (254 frames, ~51s) — shortest accepted
-  - `ski05` (768 frames, ~154s) — medium length, single FPV range
-  MegaSaM is a **3-step pipeline** (all run from `~/CODE/MegaSaM`, conda `mega_sam`):
-  ```bash
-  # Step 1 — DepthAnything (mono disparity)
-  CUDA_VISIBLE_DEVICES=0 python Depth-Anything/run_videos.py --encoder vitl \
-    --load-from Depth-Anything/checkpoints/depth_anything_vitl14.pth \
-    --img-path ~/CODE/vllatent-ego-drone/ingest_data/frames/ski01 \
-    --outdir Depth-Anything/video_visualization/ski01
+- **B1.10c — End-to-end pipeline test on one sub-clip.** ✅ DONE 2026-06-24 (USER-VERIFIED)
+  Verdict: **GO** on `ski03_fpv00_c000` (50 frames). Full chain verified:
+  content filter → FPV shot detection → 10s subclip → quality gate →
+  MegaSaM VO (3 steps) → DINOv3 encoding → .npz cache.
+  Output: `reports/e2e_test/cache/ski03_fpv00_c000.npz`
+  — latents (50, 196, 768) fp16, deltas (49, 4) float32, all quality >= threshold.
 
-  # Step 2 — UniDepth (metric depth + FoV)
-  export PYTHONPATH="${PYTHONPATH}:$(pwd)/UniDepth"
-  CUDA_VISIBLE_DEVICES=0 python UniDepth/scripts/demo_mega-sam.py \
-    --scene-name ski01 \
-    --img-path ~/CODE/vllatent-ego-drone/ingest_data/frames/ski01 \
-    --outdir UniDepth/outputs
+  **Bugs found & fixed during E2E:**
+  - `run_megasam()` called with stale `model=` kwarg (removed)
+  - `run_megasam_pipeline.sh`: `--no-banner` unsupported by conda version (removed)
+  - `extract_fpv_ranges()` ignored per-frame `fpv_mask` → non-FPV frames leaked
+    into sub-clips (fixed: now splits within shots at frame-level rejections)
+  - MegaSaM `mega_sam` env: `pip install xformers` upgraded PyTorch 2.0→2.12,
+    breaking all C++ extensions + xformers CUDA kernels (sm_120 unsupported).
+    Fixed via: `scripts/megasam_shims/nystrom_shim.py` (NystromAttention replacement +
+    `memory_efficient_attention` → PyTorch SDPA monkey-patch), CUDA 13.0 toolkit,
+    `.type()` → `.scalar_type()`, `torch.cuda.amp.autocast` → `torch.amp.autocast("cuda")`,
+    sm_120 gencode flags, libcudart 13.0 runtime linkage.
+  - DINOv3 encoder: socks:// → socks5:// proxy URL normalization.
 
-  # Step 3 — Camera tracking
-  CUDA_VISIBLE_DEVICES=0 python camera_tracking_scripts/test_demo.py \
-    --datapath ~/CODE/vllatent-ego-drone/ingest_data/frames/ski01 \
-    --weights checkpoints/megasam_final.pth \
-    --scene_name ski01 \
-    --mono_depth_path Depth-Anything/video_visualization \
-    --metric_depth_path UniDepth/outputs \
-    --disable_vis
-  ```
-  Output lands in `reconstructions/ski01/` (poses.npy, motion_prob.npy, intrinsics.npy)
-  and `outputs/ski01_droid.npz` (cam_c2w, depths, intrinsic).
-
-  Then validate with the reworked parser (B1.10d):
-  ```bash
-  python scripts/validate_megasam.py \
-    --megasam-dir ~/CODE/MegaSaM/reconstructions/ski01 \
-    --fps 5 --clip-id ski01 --out reports/ski01_vo.html
-  ```
-  **Known failure modes for skiing FPV:**
-  - Homogeneous snow texture → feature-poor → drift
-  - Fast motion blur during acceleration/jumps
-  - Large dynamic foreground (followed skier, 20-40% of frame) — MegaSaM handles
-    this via dynamic-object downweighting, but skiing has unusually large foreground
-  - Rapid yaw during turns → rotation estimation failure
-
-- **Verdict criteria.**
-  - **GO:** ≥2/3 clips pass all checks. Trajectories visually resemble downhill descent.
-    Minor smoothness warnings acceptable.
-  - **CONDITIONAL-GO:** 1/3 clips fail hard OR systematic drift detected but trajectories
-    are directionally correct. Proceed with confidence-weighted L_wp (low-confidence
-    frames contribute less via `vo_confidence` floor at 0.05).
-  - **NO-GO:** Majority of clips produce degenerate trajectories (stationary, random walk,
-    physically impossible speeds). Evaluate DPVO fallback before proceeding.
-
-- **Files:** `vllatent/ingest/vo_validation.py`, `scripts/validate_megasam.py`,
-  `tests/test_vo_validation.py`, `reports/*.html` (gitignored)
-- **DoD:** Validation module tested. 3 clips run through MegaSaM + validated. HTML reports
-  generated. Terminal verdict printed. User reviews and confirms GO/CONDITIONAL-GO/NO-GO.
-- **Test:** `$PY -m pytest -q tests/test_vo_validation.py`. User runs MegaSaM + reviews.
-- **Deps:** blocks B1.12. Blocked-by: B1.10d, B1.7, MegaSaM installed.
+  **Files:** `scripts/test_e2e_subclip.py`, `scripts/megasam_shims/nystrom_shim.py`,
+  `scripts/megasam_shims/run_unidepth.py`, `scripts/run_megasam_pipeline.sh`,
+  `scripts/validate_megasam.py` (kept for standalone VO validation)
+- **Deps:** blocks B1.12. Blocked-by: B1.10d (done), B1.10e (done), B1.8b (done).
 
 ---
 
@@ -476,8 +481,9 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 - **Augmentation** (training only, disabled for val):
   - Temporal jitter: shift window start by +/-1 frame randomly
   - Gaussian noise on deltas: `N(0, 0.05 * std_per_dim)` during training
-- **Batch construction:** mix CosFly + YouTube sources; oversample CosFly-Track to ~40% of
-  batches (CosFly has GT deltas = implicit clean-data curriculum).
+- **Batch construction:** YouTube-only for B-1. ~~mix CosFly + YouTube sources; oversample
+  CosFly-Track to ~40% of batches~~ CosFly integration deferred — see CosFly Suitability
+  Assessment. Revisit after B1.20 if L_wp undertrains.
 - Clips pre-cut to `clip_length_seconds` (from B1.4), so windows are within 10s segments.
 - Reuses manifest reading from existing `vllatent/manifest.py`.
 - **Files:** `vllatent/data/sports_loader.py` (new), `tests/test_sports_loader.py` (new)
@@ -615,16 +621,16 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 
 ### Group 8 — Full Training + Verification
 
-**B1.22 — Full training run: CosFly-Track + YouTube pilot.**
+**B1.22 — Full training run: YouTube pilot (+ CosFly if revisited).**
 - Tier TORCH / USER-GATED (H20)
-- Train on all available data (CosFly 526 traces + YouTube pilot clips). Scene-split sacred
+- Train on all available data (YouTube pilot clips; CosFly deferred). Scene-split sacred
   val: hold out 2-3 complete clips. AdamW, cosine LR, batch size fit to GPU. Log train/val
   loss, per-step cosine sim, waypoint L1 error, speed (steps/sec). Run on AutoDL H20.
   Training playbook: "scene-split sacred val", "boring HP", "track speed."
 - **DoD:** Trained checkpoint. Val loss plateaus. Latent cosine sim > 0.7 on val. Waypoint L1
   within 2x of training-set L1 on val.
 - **Test:** User monitors H20. Reviews val metrics.
-- **Deps:** blocks B1.23. Blocked-by: B1.20, B1.8.
+- **Deps:** blocks B1.23. Blocked-by: B1.20. (B1.8 no longer blocking — CosFly deferred.)
 
 **B1.23 — Jetson inference speed check.**
 - Tier RESEARCH / USER-GATED (Orin NX access)
@@ -680,7 +686,7 @@ PARALLEL TRACK A (pipeline fixes + content filter, can start immediately):
   B1.6 (SportsTarget)  ---+                                                                |
                                                                                             |
 PARALLEL TRACK B (data + quality dashboards, can start immediately):                       |
-  B1.8 (CosFly adapter) ---------------------------------------------------------------+  |
+  B1.8 (CosFly adapter) ✅ DONE, DEFERRED from training loop (no longer blocking)       |  |
   B1.9 (quality report) ---------------------------------------------------------------+  |
   B1.9b (HTML clip report) — no deps, runs on any .npz --------------------------------+  |
                                                                                         |  |
@@ -703,7 +709,7 @@ GROUP 6 (training):                             |                               
   B1.21 (sanity+viz) <-- B1.13,B1.18           |                                    |  |  |
                                                 |                                    |  |  |
 GROUP 8 (full training + verify):              |                                    |  |  |
-  B1.22 (full train) <-- B1.20, B1.8          -+                                    |  |  |
+  B1.22 (full train) <-- B1.20                 -+     (B1.8 no longer blocking)                                    |  |  |
   B1.23 (Jetson speed) <-- B1.22               |                                    |  |  |
   B1.24 (B-1 DoD) <-- ALL <-------------------+------------------------------------+--+--+
 ```
@@ -736,7 +742,12 @@ GROUP 8 (full training + verify):              |                                
 - **TrackVLA remains unreleased** — B-1 trains without teacher (L_latent + L_wp only).
 - **L_latent beta:** smooth L1 with beta=0.1 (DINO-world 2025 precedent).
 - **Mixed FPS:** velocity normalization (delta/dt) + FiLM on dt_seconds. Joint training,
-  no separate stages. Oversample CosFly-Track to ~40% of batches.
+  no separate stages. ~~Oversample CosFly-Track to ~40% of batches.~~ CosFly deferred from
+  B-1 training loop (see CosFly Suitability Assessment). YouTube-only for B-1.
+- **CosFly-Track:** DEFERRED from B-1 training. Adapter code done (trajectory-only, no RGB).
+  Two blockers before integration: (1) `poses_to_deltas()` computes world-frame diffs, must
+  rotate by yaw for body-frame; (2) scale mismatch (metric vs normalized). Revisit post-B1.20
+  if L_wp undertrains. See assessment section.
 
 ## Open Decisions
 
@@ -749,9 +760,22 @@ GROUP 8 (full training + verify):              |                                
 3. ~~**L_latent loss type.**~~ **RESOLVED:** Smooth L1 with **beta=0.1** (DINO-world 2025
    precedent, not default beta=1.0). Log cosine sim as diagnostic.
 
-4. ~~**CosFly-Track FPS (2 Hz vs 5 Hz).**~~ **RESOLVED:** Velocity normalization (delta/dt) +
-   FiLM conditioning on `dt_seconds` in the predictor. Joint training (no separate stages).
-   Oversample CosFly-Track to ~40% of batches via weighted sampling.
+4. ~~**CosFly-Track FPS (2 Hz vs 5 Hz).**~~ **RESOLVED (mechanism), MOOT for B-1:** Velocity
+   normalization (delta/dt) + FiLM conditioning on `dt_seconds` in the predictor. Joint
+   training (no separate stages). ~~Oversample CosFly-Track to ~40% of batches.~~ CosFly
+   deferred from B-1 — YouTube-only. Mechanism ready if CosFly is revisited post-B1.20.
+
+8. **CosFly integration (DEFERRED).** Adapter done, training integration deferred. Two technical
+   blockers: world-frame deltas + scale mismatch. Revisit if B1.20 overfit-tiny-batch shows
+   L_wp is undertrained on YouTube-only data. See CosFly Suitability Assessment.
+
+9. **Data sufficiency for YouTube-only B-1.** Per vault research §1.3, V-JEPA 2-AC trained a
+   300M predictor on 62 hrs (~890K frames, 3 samples/param). Our 22M model needs far less.
+   YouTube pilot (173 sub-clips) is small (~8.6K frames) but sufficient for overfit-tiny-batch
+   and initial convergence. Full YouTube curation (30-80 hrs, 3.2-8.6M frames) in B-3 brings
+   us to 0.15-0.39 samples/param — below the 0.5 minimum viable. **Ego-Exo4D (B-3, ~26M
+   frames) is required to reach the comfortable zone.** B-1 validates the architecture; B-3
+   scales the data. CosFly adds ~210K frames of L_wp-only signal — helpful but not load-bearing.
 
 5. **Scheduled sampling (B-2).** B-1 uses GT history. Deployment needs auto-regressive.
    B-2 introduces curriculum mixing GT and predicted history.
@@ -761,6 +785,72 @@ GROUP 8 (full training + verify):              |                                
 
 7. **Custom data collection timing.** Southern Hemisphere ski season July-Oct 2026. If starting
    now, plan logistics for B-3.
+
+---
+
+## CosFly Suitability Assessment (2026-06-24)
+
+> Based on vault research `sports-data-pipeline-research-2026-06-19.md` §1-2, CosFly-Track
+> paper (arXiv 2605.17776), and adapter implementation review.
+
+### What CosFly-Track provides
+
+CosFly-Track (Autel Robotics, May 2026, Apache 2.0) is 526 traces of drone-following-
+pedestrian in CARLA simulator. 7 channels: RGB 1280x720, metric depth, semantic seg, GT
+6-DoF pose `(x,y,z,pitch,yaw,roll)` Euler, target bbox/state, bilingual instructions,
+trajectory-pair metadata. 2 Hz, ~82K frames, 16 urban town variants.
+
+### Why CosFly is deferred from B-1
+
+| Aspect | YouTube FPV | CosFly-Track | Verdict |
+|---|---|---|---|
+| **L_latent** (predict next DINOv3 latent) | Yes — real skiing frames | **No** — CARLA urban renders domain-mismatch | CosFly unusable |
+| **L_wp** (predict waypoint delta) | Yes — MegaSaM VO (noisy) | Yes — GT exact (perfect) | CosFly useful |
+| **Delta frame** | Body-frame (SE3 decomposition) | World-frame (simple diffs) | **Inconsistent** |
+| **Scale** | Normalized (monocular, ambiguous) | Metric exact (CARLA GT) | **Incompatible** |
+| **Frame count** | ~8.6K (pilot), 3.2-8.6M (full curation) | ~82K (2 Hz) | Small addition |
+
+**Three blockers for training integration:**
+
+1. **No latents.** `.npz` files have no `latents` key. Loader crashes on `z_t`/`z_next`
+   unpacking. Must add a missing-latent code path in B1.13 and skip L_latent for these samples.
+
+2. **World-frame vs body-frame deltas.** `poses_to_deltas()` computes `dx = x[i+1] - x[i]`
+   in CARLA world frame. YouTube's `ego_motion.py` produces body-frame deltas (rotated by
+   heading). Mixing both in the same L_wp batch teaches inconsistent coordinate semantics.
+   **Fix:** rotate each world-frame delta by the negative of that frame's yaw.
+
+3. **Scale mismatch.** CosFly `scale_mode="exact"` (metres). YouTube `scale_mode="normalized"`
+   (median speed = 1.0). Cannot mix in the same L_wp batch without alignment. **Fix:** either
+   normalize CosFly to median speed too, or add per-sample scale_mode flag and branch in loss.
+
+### Data sufficiency without CosFly
+
+Per vault research §1.2-1.3:
+- **Minimum viable:** ~10-20M frames (0.5-1 sample/param for 22M params)
+- **Comfortable:** ~30-50M frames (1.4-2.3 samples/param)
+- **V-JEPA 2-AC precedent:** 62 hrs (~890K frames) for 300M predictor → 3 samples/param
+
+**B-1 scope (YouTube pilot only):** ~8.6K frames. Far below minimum viable for a converged
+model, but **sufficient for overfit-tiny-batch (B1.20) and architecture validation.** The
+purpose of B-1 is proving the pipeline and architecture work, not training a deployable model.
+
+**Full data budget (B-3):** YouTube 3.2-8.6M + Ego-Exo4D ~26M + CosFly ~82K = ~30-35M
+frames → 1.4-1.6 samples/param (comfortable zone). **Ego-Exo4D is the load-bearing data
+source, not CosFly.** CosFly adds <1% of total frames.
+
+**V-JEPA 2-AC quality argument:** "Clean action labels are disproportionately valuable."
+CosFly's GT deltas are perfectly clean, but serve only L_wp (which is the simpler head).
+The hard part (latent prediction) gets zero benefit from CosFly. YouTube + MegaSaM with
+confidence weighting is the better investment for B-1.
+
+### Decision
+
+- **B-1:** YouTube-only. CosFly adapter code preserved. No training integration.
+- **Post-B1.20 gate:** If overfit-tiny-batch shows L_wp undertrained, revisit CosFly.
+  Fix body-frame rotation + scale alignment first.
+- **B-3:** CosFly is a small bonus (~82K / ~30M = 0.3% of total). Ego-Exo4D integration
+  is the priority for scaling data.
 
 ---
 
@@ -807,7 +897,10 @@ Sources informing B-1 design decisions. Full research notes in vault.
   thresholds for ego-centric video curation.
 - **DINO-WM** (ICLR 2025): ViT-S/14, D=384, L2 loss, no augmentation, simulator only.
   Earlier baseline; superseded by DINO-world for loss choice.
-- **CosFly-Track**: ~100K frames public (HF `AutelRobotics/CosFly`), 2 Hz, CARLA GT.
-  Primary synthetic data source for B-1.
+- **CosFly-Track** (arXiv 2605.17776 + 2605.19120, Autel Robotics): ~82K frames public
+  (HF `AutelRobotics/CosFly`), 2 Hz, CARLA urban GT. 526 traces, 7 channels, Apache 2.0.
+  **Deferred from B-1 training** — trajectory-only adapter done, but domain mismatch (urban
+  pedestrian ≠ skiing), missing latents, world-frame delta + scale issues. L_wp-only
+  contribution ≈ 0.3% of full B-3 data budget. Revisit post-B1.20 if L_wp undertrains.
 - **TrackVLA** (CoRL 2025): Visual tracking for autonomous agents. Inference code only; no
   weights/training released as of 2026-06. B-1 trains without teacher.

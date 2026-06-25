@@ -3,19 +3,20 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from pathlib import Path
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import numpy as np
 import pytest
 
 from vllatent.config import IngestConfig
 from vllatent.ingest.pipeline import (
+    MIN_SEGMENT_FRAMES,
     ClipPipelineResult,
     _build_clip_npz,
     _write_clip_npz,
     update_manifest_from_results,
 )
-from vllatent.schemas import EMBED_DIM, LATENT_DTYPE, MASK_DTYPE, PATCH_TOKENS
+from vllatent.schemas import EMBED_DIM, LATENT_DTYPE, PATCH_TOKENS
 
 
 class TestBuildClipNpz:
@@ -26,13 +27,13 @@ class TestBuildClipNpz:
             vo_confidence=np.ones(n, dtype=np.float32),
             frame_quality=np.ones(n, dtype=np.float32),
             timestamps=np.arange(n, dtype=np.float64),
-            quality_mask=np.ones(n, dtype=MASK_DTYPE),
         )
 
     def test_valid(self) -> None:
         result = _build_clip_npz(**self._arrays(5))
         assert result["latents"].shape == (5, PATCH_TOKENS, EMBED_DIM)
         assert result["deltas"].shape == (4, 4)
+        assert "quality_mask" not in result
 
     def test_bad_latent_shape(self) -> None:
         a = self._arrays(5)
@@ -101,7 +102,9 @@ class TestUndistortWiring:
     def test_pipeline_accepts_camera_params(self) -> None:
         """process_clip accepts camera_K and camera_D keyword args."""
         import inspect
+
         from vllatent.ingest.pipeline import process_clip
+
         sig = inspect.signature(process_clip)
         assert "camera_K" in sig.parameters
         assert "camera_D" in sig.parameters
@@ -137,3 +140,51 @@ class TestUpdateManifestFromResults:
             update_manifest_from_results(results, cfg)
         call_kwargs = mock_build.call_args
         assert len(call_kwargs.kwargs.get("entries", [])) == 0
+
+
+class TestFindAcceptedSegments:
+    """Quality mask → contiguous accepted segments for MegaSaM."""
+
+    def test_all_accepted_single_segment(self) -> None:
+        from vllatent.ingest.quality import find_accepted_segments
+        mask = np.ones(20, dtype=bool)
+        assert find_accepted_segments(mask, min_length=8) == [(0, 20)]
+
+    def test_all_rejected_empty(self) -> None:
+        from vllatent.ingest.quality import find_accepted_segments
+        mask = np.zeros(20, dtype=bool)
+        assert find_accepted_segments(mask, min_length=8) == []
+
+    def test_split_at_bad_block(self) -> None:
+        from vllatent.ingest.quality import find_accepted_segments
+        mask = np.ones(30, dtype=bool)
+        mask[10:15] = False
+        result = find_accepted_segments(mask, min_length=8)
+        assert result == [(0, 10), (15, 30)]
+
+    def test_short_segment_discarded(self) -> None:
+        from vllatent.ingest.quality import find_accepted_segments
+        mask = np.ones(30, dtype=bool)
+        mask[3:25] = False
+        result = find_accepted_segments(mask, min_length=8)
+        assert result == []
+
+    def test_mixed_keeps_only_long(self) -> None:
+        from vllatent.ingest.quality import find_accepted_segments
+        mask = np.zeros(40, dtype=bool)
+        mask[0:5] = True
+        mask[10:25] = True
+        mask[30:35] = True
+        result = find_accepted_segments(mask, min_length=8)
+        assert result == [(10, 25)]
+
+    def test_empty_mask(self) -> None:
+        from vllatent.ingest.quality import find_accepted_segments
+        mask = np.array([], dtype=bool)
+        assert find_accepted_segments(mask, min_length=8) == []
+
+
+class TestMinSegmentFrames:
+    def test_value(self) -> None:
+        from vllatent.schemas import HISTORY, HORIZON
+        assert MIN_SEGMENT_FRAMES == HISTORY + HORIZON + 1

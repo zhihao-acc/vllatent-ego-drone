@@ -85,7 +85,7 @@ fi
 # Step 1: Depth-Anything (mono disparity)
 echo ""
 echo "[megasam] === Step 1/3: Depth-Anything ==="
-CUDA_VISIBLE_DEVICES="$GPU" conda run -n "$CONDA_ENV" --no-banner \
+CUDA_VISIBLE_DEVICES="$GPU" XFORMERS_DISABLED=1 conda run -n "$CONDA_ENV" \
     python Depth-Anything/run_videos.py \
         --encoder "$ENCODER" \
         --load-from "$DA_CKPT" \
@@ -96,9 +96,11 @@ echo "[megasam] Step 1 done."
 # Step 2: UniDepth (metric depth + FoV)
 echo ""
 echo "[megasam] === Step 2/3: UniDepth ==="
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+UNIDEPTH_WRAPPER="${SCRIPT_DIR}/megasam_shims/run_unidepth.py"
 export PYTHONPATH="${PYTHONPATH:-}:${MEGASAM_DIR}/UniDepth"
-CUDA_VISIBLE_DEVICES="$GPU" conda run -n "$CONDA_ENV" --no-banner \
-    python UniDepth/scripts/demo_mega-sam.py \
+CUDA_VISIBLE_DEVICES="$GPU" conda run -n "$CONDA_ENV" \
+    python "$UNIDEPTH_WRAPPER" \
         --scene-name "$CLIP_ID" \
         --img-path "$FRAMES_DIR" \
         --outdir UniDepth/outputs
@@ -107,7 +109,7 @@ echo "[megasam] Step 2 done."
 # Step 3: Camera tracking
 echo ""
 echo "[megasam] === Step 3/3: Camera tracking ==="
-CUDA_VISIBLE_DEVICES="$GPU" conda run -n "$CONDA_ENV" --no-banner \
+CUDA_VISIBLE_DEVICES="$GPU" conda run -n "$CONDA_ENV" \
     python camera_tracking_scripts/test_demo.py \
         --datapath "$FRAMES_DIR" \
         --weights "$MEGASAM_CKPT" \

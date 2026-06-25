@@ -162,7 +162,7 @@ def main(argv: list[str] | None = None) -> int:
 
         fpv_ranges: list[tuple[int, int]] = []
         if filter_result is not None:
-            fpv_ranges = extract_fpv_ranges(filter_result.shots)
+            fpv_ranges = extract_fpv_ranges(filter_result.shots, filter_result.fpv_mask)
 
         if not fpv_ranges:
             fpv_ranges = [(0, n_frames)]
@@ -207,7 +207,7 @@ def main(argv: list[str] | None = None) -> int:
 
             _log(f"    pipeline {sub_id} ({len(seg_paths)} frames)...")
             try:
-                pipeline_result = process_clip(
+                segment_results = process_clip(
                     url=url,
                     clip_id=sub_id,
                     cfg=cfg,
@@ -216,24 +216,25 @@ def main(argv: list[str] | None = None) -> int:
                     device=args.device,
                 )
 
-                if pipeline_result.errors:
-                    _log(f"    PIPELINE ERRORS: {pipeline_result.errors}")
-                    results_summary.append({
-                        "clip_id": sub_id,
-                        "status": "pipeline_error",
-                        "errors": pipeline_result.errors,
-                    })
-                    n_clip_err += 1
-                else:
-                    _log(f"    OK: {pipeline_result.n_accepted}/{pipeline_result.n_frames} frames")
-                    results_summary.append({
-                        "clip_id": sub_id,
-                        "status": "ok",
-                        "n_frames": pipeline_result.n_frames,
-                        "n_accepted": pipeline_result.n_accepted,
-                        "latent_path": pipeline_result.latent_path,
-                    })
-                    n_clip_ok += 1
+                for seg_result in segment_results:
+                    if seg_result.errors:
+                        _log(f"    PIPELINE ERRORS ({seg_result.clip_id}): {seg_result.errors}")
+                        results_summary.append({
+                            "clip_id": seg_result.clip_id,
+                            "status": "pipeline_error",
+                            "errors": seg_result.errors,
+                        })
+                        n_clip_err += 1
+                    else:
+                        _log(f"    OK: {seg_result.clip_id} — {seg_result.n_accepted}/{seg_result.n_frames} frames")
+                        results_summary.append({
+                            "clip_id": seg_result.clip_id,
+                            "status": "ok",
+                            "n_frames": seg_result.n_frames,
+                            "n_accepted": seg_result.n_accepted,
+                            "latent_path": seg_result.latent_path,
+                        })
+                        n_clip_ok += 1
 
             except Exception as e:
                 _log(f"    PIPELINE FAILED: {e}")

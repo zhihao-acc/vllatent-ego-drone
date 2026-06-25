@@ -337,9 +337,9 @@ class TestThumbnailGrid:
 # ---------------------------------------------------------------------------
 
 class TestExtractFpvRanges:
-    """Merging consecutive FPV shots into contiguous frame ranges."""
+    """Each FPV shot is its own range — never merge across shot boundaries."""
 
-    def test_all_fpv_merge_single_range(self) -> None:
+    def test_all_fpv_separate_ranges(self) -> None:
         from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
 
         shots = [
@@ -347,9 +347,9 @@ class TestExtractFpvRanges:
             ShotInfo(start=10, end=20, is_fpv=True, mean_score=0.7),
             ShotInfo(start=20, end=30, is_fpv=True, mean_score=0.9),
         ]
-        assert extract_fpv_ranges(shots) == [(0, 30)]
+        assert extract_fpv_ranges(shots) == [(0, 10), (10, 20), (20, 30)]
 
-    def test_mixed_fpv_produces_separate_ranges(self) -> None:
+    def test_mixed_fpv_skips_non_fpv(self) -> None:
         from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
 
         shots = [
@@ -358,7 +358,7 @@ class TestExtractFpvRanges:
             ShotInfo(start=20, end=30, is_fpv=False, mean_score=0.1),
             ShotInfo(start=30, end=40, is_fpv=True, mean_score=0.9),
         ]
-        assert extract_fpv_ranges(shots) == [(0, 20), (30, 40)]
+        assert extract_fpv_ranges(shots) == [(0, 10), (10, 20), (30, 40)]
 
     def test_no_fpv_returns_empty(self) -> None:
         from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
@@ -390,6 +390,43 @@ class TestExtractFpvRanges:
             ShotInfo(start=30, end=40, is_fpv=True, mean_score=0.9),
         ]
         assert extract_fpv_ranges(shots) == [(0, 10), (30, 40)]
+
+    def test_fpv_mask_splits_within_shot(self) -> None:
+        """Per-frame mask splits a single FPV shot at rejected frames."""
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [ShotInfo(start=0, end=20, is_fpv=True, mean_score=0.8)]
+        mask = np.ones(20, dtype=np.bool_)
+        mask[8:12] = False  # 4 rejected frames mid-shot
+        assert extract_fpv_ranges(shots, mask) == [(0, 8), (12, 20)]
+
+    def test_fpv_mask_removes_trailing_rejects(self) -> None:
+        """Rejected frames at the end of an FPV shot are excluded."""
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [ShotInfo(start=0, end=15, is_fpv=True, mean_score=0.7)]
+        mask = np.ones(15, dtype=np.bool_)
+        mask[12:15] = False
+        assert extract_fpv_ranges(shots, mask) == [(0, 12)]
+
+    def test_fpv_mask_all_rejected_in_fpv_shot(self) -> None:
+        """If fpv_mask rejects every frame in an FPV shot, range is empty."""
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [ShotInfo(start=5, end=15, is_fpv=True, mean_score=0.6)]
+        mask = np.zeros(20, dtype=np.bool_)
+        assert extract_fpv_ranges(shots, mask) == []
+
+    def test_fpv_mask_none_falls_back_to_shot_level(self) -> None:
+        """Without fpv_mask, behaves like before (shot-level only)."""
+        from vllatent.ingest.content_filter import ShotInfo, extract_fpv_ranges
+
+        shots = [
+            ShotInfo(start=0, end=10, is_fpv=True, mean_score=0.8),
+            ShotInfo(start=10, end=20, is_fpv=False, mean_score=0.1),
+        ]
+        assert extract_fpv_ranges(shots, None) == [(0, 10)]
+        assert extract_fpv_ranges(shots) == [(0, 10)]
 
 
 # ---------------------------------------------------------------------------

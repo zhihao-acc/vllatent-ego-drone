@@ -52,7 +52,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.10b — VO validation CLI + HTML report | done | 2026-06-24 | `scripts/validate_megasam.py` — single-clip + batch mode; Plotly HTML (3D trajectory, speed, yaw rate, confidence, accel); terminal verdict summary; JSON export. Ruff clean |
 | B1.10d — Rework MegaSaM parser for real output | done | 2026-06-24 | Parser handles real format: `(T,7)` Lie group w2c → c2w inversion, `motion_prob.npy (T,H,W)` → per-frame confidence, `(T,4)` intrinsics → K matrix. Also `droid.npz` with `cam_c2w`. Legacy fallback kept. 37 tests green |
 | B1.10e — MegaSaM 3-step automation script | done | 2026-06-24 | `scripts/run_megasam_pipeline.sh` — DepthAnything → UniDepth → camera_tracking; `run_megasam()` rewired to use it instead of nonexistent `run.py` |
-| B1.10c — Run MegaSaM on pilot clips + validate | pending | — | **USER-GATED**: run 3-step pipeline on ski01/ski03/ski05 → `validate_megasam.py` → review verdict |
+| B1.10c — E2E pipeline test on one sub-clip | done | 2026-06-24 | **USER-VERIFIED GO** on `ski03_fpv00_c000` (50 frames). Full chain: content filter → FPV → subclip → quality gate → MegaSaM → DINOv3 → .npz. Bugs fixed: stale `model=` kwarg, conda `--no-banner`, per-frame fpv_mask leak, xformers sm_120 shims, socks→socks5 proxy |
 | B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
 | B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |
 | B1.13 — Sports sliding-window loader | pending | — | Phase B-1 Group 4 |
@@ -69,6 +69,40 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-24 — B1.10 DONE: MegaSaM VO validation — full E2E pipeline verified
+
+**Status:** B1.10c pending → **done** (USER-VERIFIED). All B1.10 sub-steps (a,b,c,d,e) complete.
+**Verdict:** **GO** on `ski03_fpv00_c000` — 50 frames, latents `(50,196,768)` fp16, deltas `(49,4)` f32,
+all `frame_quality >= threshold`. Output: `reports/e2e_test/cache/ski03_fpv00_c000.npz`.
+
+**B1.10c was redefined** as a full end-to-end pipeline test on one sub-clip (was: run MegaSaM on 3 pilot
+clips). Script `scripts/test_e2e_subclip.py` orchestrates: content filter → FPV shot detection → 10s
+sub-clip → quality gate → `find_accepted_segments()` → MegaSaM VO (3-step) → DINOv3 encode → `.npz` cache
+→ shape/dtype/quality validation.
+
+**Bugs found and fixed during E2E:**
+- `pipeline.py`: `run_megasam(..., model=megasam_model)` — stale kwarg from pre-B1.10e signature; fixed
+  to `clip_id=segment_id`.
+- `run_megasam_pipeline.sh`: `--no-banner` unsupported by user's conda; removed from all 3 `conda run`.
+- `content_filter.py`: `extract_fpv_ranges()` ignored per-frame `fpv_mask` — non-FPV frames within FPV
+  shots leaked into sub-clips. Fixed: added `fpv_mask` parameter that splits ranges at frame-level
+  YOLO/motion rejections. 4 new tests.
+- MegaSaM `mega_sam` env: xformers upgrade (0.0.35) broke all C++ extensions + CUDA kernels (sm_120 on
+  RTX 5060 Ti unsupported). Fixed via `scripts/megasam_shims/nystrom_shim.py` (NystromAttention replacement
+  + `memory_efficient_attention` → PyTorch SDPA monkey-patch + `unbind` shim) + CUDA 13.0 toolkit +
+  `.type()→.scalar_type()` + `torch.cuda.amp.autocast→torch.amp.autocast("cuda")` + sm_120 gencode flags.
+- DINOv3 encoder: socks:// → socks5:// proxy URL normalization.
+
+**New files:** `scripts/test_e2e_subclip.py`, `scripts/megasam_shims/nystrom_shim.py`,
+`scripts/megasam_shims/run_unidepth.py`, `vllatent/io.py`.
+**Modified:** `vllatnet/ingest/pipeline.py` (stale kwarg + segment-based processing), `content_filter.py`
+(fpv_mask), `quality.py` (find_accepted_segments), `scripts/run_megasam_pipeline.sh` (shims + no-banner),
+`scripts/ingest_youtube_pilot.py` + `scripts/verify_filter.py` (pass fpv_mask), `vllatnet/encode/dinov3.py`
+(proxy fix), `tests/test_content_filter.py` + `tests/test_ingest_pipeline.py` (new tests).
+**Next:** B1.11 (Benchmark DINOv3 ViT-B/16 on Orin NX — CRITICAL GATE, USER-GATED).
 
 ---
 

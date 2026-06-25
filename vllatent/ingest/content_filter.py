@@ -372,25 +372,38 @@ def thumbnail_grid_data(
 # ---------------------------------------------------------------------------
 
 
-def extract_fpv_ranges(shots: list[ShotInfo]) -> list[tuple[int, int]]:
-    """Merge consecutive FPV shots into contiguous frame ranges."""
+def extract_fpv_ranges(
+    shots: list[ShotInfo],
+    fpv_mask: np.ndarray | None = None,
+) -> list[tuple[int, int]]:
+    """Return contiguous FPV frame ranges, respecting both shot and frame verdicts.
+
+    Shot boundaries are editing cuts — frames on either side are NOT
+    temporally continuous. MegaSaM needs continuous sequences, so we
+    must NOT merge across shot boundaries even when consecutive shots
+    are both FPV.
+
+    When *fpv_mask* is provided (per-frame bool from motion + YOLO), each FPV
+    shot is further split at frame-level rejections. This prevents individual
+    non-FPV frames (YOLO-detected gear, static frames) from leaking into
+    sub-clips that MegaSaM and DINOv3 process.
+    """
+    if fpv_mask is None:
+        return [(shot.start, shot.end) for shot in shots if shot.is_fpv]
+
     ranges: list[tuple[int, int]] = []
-    current_start: int | None = None
-    current_end: int = 0
-
     for shot in shots:
-        if shot.is_fpv:
-            if current_start is None:
-                current_start = shot.start
-            current_end = shot.end
-        else:
-            if current_start is not None:
-                ranges.append((current_start, current_end))
-                current_start = None
-
-    if current_start is not None:
-        ranges.append((current_start, current_end))
-
+        if not shot.is_fpv:
+            continue
+        i = shot.start
+        while i < shot.end:
+            if fpv_mask[i]:
+                run_start = i
+                while i < shot.end and fpv_mask[i]:
+                    i += 1
+                ranges.append((run_start, i))
+            else:
+                i += 1
     return ranges
 
 

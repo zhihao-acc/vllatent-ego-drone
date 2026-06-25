@@ -73,9 +73,15 @@ def _load_backbone(model_id: str, device: str, dtype: str) -> BackboneForward:
     the contract test (so no real weights are downloaded in CI). The returned closure maps an RGB
     uint8 ``(H,W,3)`` frame -> token sequence ``(1,T,768)`` (T = 1 CLS + 4 registers + 196 patches).
     """
+    import os
     import timm
     import torch
     from timm.data import resolve_model_data_config
+
+    for k in ("ALL_PROXY", "all_proxy"):
+        v = os.environ.get(k)
+        if v and v.startswith("socks://"):
+            os.environ[k] = v.replace("socks://", "socks5://", 1)
 
     try:
         model = timm.create_model(model_id, pretrained=True, num_classes=0)

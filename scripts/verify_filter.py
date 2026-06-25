@@ -80,7 +80,7 @@ def main(argv: list[str] | None = None) -> int:
         dst = accepted_dir if result.fpv_mask[i] else rejected_dir
         shutil.copy2(path, dst / path.name)
 
-    fpv_ranges = extract_fpv_ranges(result.shots)
+    fpv_ranges = extract_fpv_ranges(result.shots, result.fpv_mask)
 
     print(f"\n[verify] Results written to {out_dir}/")
     print(f"  accepted/  — {result.n_fpv_frames} frames")
