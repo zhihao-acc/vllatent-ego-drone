@@ -64,12 +64,31 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.18 — Loss functions: L_latent + L_wp | done | 2026-06-26 | L_latent smooth L1 beta=0.1 quality-weighted + L_wp confidence-weighted + cosine diag; 15 torch tests green |
 | B1.19 — Checkpoint save/load + config snapshot | done | 2026-06-19 | `vllatent/train/checkpoint.py` — save/load + config snapshot + seed_everything; 10 torch tests green; lazy torch import (AST-verified) |
 | B1.20 — Training script: overfit-tiny-batch | pending | — | Phase B-1 Group 6: USER-GATED |
-| B1.21 — Pre-train sanity check + viz | pending | — | Phase B-1 Group 7 |
+| B1.21 — Pre-train sanity check + viz | done | 2026-06-26 | run_sanity_check (7 pure tests) + TrainingLogger JSONL (6 torch tests) green |
 | B1.22 — Full training run | pending | — | Phase B-1 Group 8: USER-GATED (H20) |
 | B1.23 — Jetson inference speed check | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-26 — B1.21: Pre-train sanity check + viz
+
+**Status:** B1.21 pending → **done** (AUTO).
+**What's done.**
+
+- **`vllatent/train/sanity.py`** — `run_sanity_check(dataset, n_samples=5)`: reads N random samples
+  from `SportsTrainingDataset`, validates z_t/history/mask/target shapes+dtypes, checks history_mask[-1]
+  is True (z_t slot real), target_deltas finite, dt_seconds positive. Raises `ValueError` on any breach.
+  Empty dataset → immediate raise. 7 pure tests.
+
+- **`vllatent/train/viz.py`** — `TrainingLogger`: append-only JSONL logger. `log_step()` records
+  step/epoch/loss_total/loss_latent/loss_waypoint/cosine_sim/lr, plus optional per-horizon-step
+  cosine similarity and waypoint L1 error breakdowns. `should_log(step)` for periodic logging.
+  6 torch tests.
+
+**Tested.** 7 sanity (pure) + 6 viz (torch) = 13 total. Ruff clean.
 
 ---
 
