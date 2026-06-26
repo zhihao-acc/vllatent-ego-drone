@@ -63,13 +63,37 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.17 — Full model assembly | done | 2026-06-26 | SportsFollowingModel = predictor + waypoint head; config-driven; 8 torch tests green |
 | B1.18 — Loss functions: L_latent + L_wp | done | 2026-06-26 | L_latent smooth L1 beta=0.1 quality-weighted + L_wp confidence-weighted + cosine diag; 15 torch tests green |
 | B1.19 — Checkpoint save/load + config snapshot | done | 2026-06-19 | `vllatent/train/checkpoint.py` — save/load + config snapshot + seed_everything; 10 torch tests green; lazy torch import (AST-verified) |
-| B1.20 — Training script: overfit-tiny-batch | pending | — | Phase B-1 Group 6: USER-GATED |
+| B1.20 — Training script: overfit-tiny-batch | in_progress | 2026-06-26 | Script written (AUTO); USER-GATED: run on dev box, verify loss < baseline in 200 steps |
 | B1.21 — Pre-train sanity check + viz | done | 2026-06-26 | run_sanity_check (7 pure tests) + TrainingLogger JSONL (6 torch tests) green |
 | B1.22 — Full training run | pending | — | Phase B-1 Group 8: USER-GATED (H20) |
 | B1.23 — Jetson inference speed check | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-26 — B1.20: Training script (AUTO half — script written)
+
+**Status:** B1.20 pending → **in_progress** (script AUTONOMOUS; run USER-GATED).
+**What's done.** `scripts/train_sports.py` — full training script with `--overfit-tiny` mode:
+
+- Loads `SportsTrainingDataset` from cache dir, runs sanity check
+- Builds `SportsFollowingModel` from `PredictorConfig` (depth/heads/dropout args)
+- Dumb baseline: `loss(zeros, GT)` — must beat within 200 steps
+- AdamW + cosine LR schedule + gradient clipping
+- `combined_loss` (L_latent beta=0.1 + L_wp, per-sample quality/confidence weighting)
+- Per-step logging via `TrainingLogger` (JSONL with per-horizon cosine + L1)
+- Checkpoint save every N steps + resume from checkpoint
+- Prints baseline comparison (YES/no) at each log step
+
+**USER GATE:** Run on dev box (RTX 5060 Ti) with pilot cache data:
+```bash
+conda run -n vllatent-ego-drone python scripts/train_sports.py \
+    --overfit-tiny --cache-dir ingest_data/latent_cache \
+    --run-dir runs/overfit_tiny --device cuda --max-steps 500
+```
+**DoD:** Loss drops below baseline within 200 steps. Checkpoint saved + resume-tested.
 
 ---
 
