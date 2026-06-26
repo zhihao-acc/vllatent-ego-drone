@@ -57,7 +57,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | done | 2026-06-26 | DEFAULT ASSUMPTION: ViT-B/16 fast enough. D=768 stays. Orin NX benchmark deferred — revisit B1.23 |
 | B1.12 — Lock EMBED_DIM + PredictorConfig | done | 2026-06-26 | NO-OP: D=768 confirmed by default assumption. depth=6 (arch research). No code change needed |
 | B1.13 — Sports sliding-window loader | done | 2026-06-26 | SportsTrainingDataset + preprocessing pipeline; 30 tests green |
-| B1.14 — Collate function for batched training | pending | — | Phase B-1 Group 4 |
+| B1.14 — Collate function for batched training | done | 2026-06-26 | TrainingBatch NamedTuple + collate_sports_batch; 6 torch tests green |
 | B1.15 — Block-causal ViT predictor + FiLM | pending | — | Phase B-1 Group 5 |
 | B1.16 — Waypoint head | pending | — | Phase B-1 Group 5 |
 | B1.17 — Full model assembly | pending | — | Phase B-1 Group 5 |
