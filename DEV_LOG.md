@@ -59,7 +59,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.13 — Sports sliding-window loader | done | 2026-06-26 | SportsTrainingDataset + preprocessing pipeline; 30 tests green |
 | B1.14 — Collate function for batched training | done | 2026-06-26 | TrainingBatch NamedTuple + collate_sports_batch; 6 torch tests green |
 | B1.15 — Block-causal ViT predictor + FiLM | done | 2026-06-26 | LatentPredictor depth=6 D=768 ~57M params; action+dt FiLM; 10 torch tests green |
-| B1.16 — Waypoint head | pending | — | Phase B-1 Group 5 |
+| B1.16 — Waypoint head | done | 2026-06-26 | WaypointHead MLP D→256→128→4; no TrustHead (removed); 5 torch tests green |
 | B1.17 — Full model assembly | pending | — | Phase B-1 Group 5 |
 | B1.18 — Loss functions: L_latent + L_wp | pending | — | Phase B-1 Group 6 |
 | B1.19 — Checkpoint save/load + config snapshot | done | 2026-06-19 | `vllatent/train/checkpoint.py` — save/load + config snapshot + seed_everything; 10 torch tests green; lazy torch import (AST-verified) |
