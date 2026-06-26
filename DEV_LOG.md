@@ -61,7 +61,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.15 — Block-causal ViT predictor + FiLM | done | 2026-06-26 | LatentPredictor depth=6 D=768 ~57M params; action+dt FiLM; 10 torch tests green |
 | B1.16 — Waypoint head | done | 2026-06-26 | WaypointHead MLP D→256→128→4; no TrustHead (removed); 5 torch tests green |
 | B1.17 — Full model assembly | done | 2026-06-26 | SportsFollowingModel = predictor + waypoint head; config-driven; 8 torch tests green |
-| B1.18 — Loss functions: L_latent + L_wp | pending | — | Phase B-1 Group 6 |
+| B1.18 — Loss functions: L_latent + L_wp | done | 2026-06-26 | L_latent smooth L1 beta=0.1 quality-weighted + L_wp confidence-weighted + cosine diag; 15 torch tests green |
 | B1.19 — Checkpoint save/load + config snapshot | done | 2026-06-19 | `vllatent/train/checkpoint.py` — save/load + config snapshot + seed_everything; 10 torch tests green; lazy torch import (AST-verified) |
 | B1.20 — Training script: overfit-tiny-batch | pending | — | Phase B-1 Group 6: USER-GATED |
 | B1.21 — Pre-train sanity check + viz | pending | — | Phase B-1 Group 7 |
@@ -70,6 +70,25 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-26 — B1.18: Loss functions
+
+**Status:** B1.18 pending → **done** (AUTO).
+**What's done.** `vllatent/train/losses.py` — three loss functions:
+
+- **`latent_loss`**: smooth L1 (beta=0.1, DINO-world precedent) between predicted and GT future
+  latents, quality-weighted per sample (`frame_quality.clamp(min=0.1)`).
+- **`waypoint_loss`**: smooth L1 between predicted and GT deltas, confidence-weighted per sample
+  (`vo_confidence.mean(1).clamp(min=0.05)`). **NOT weighted by frame_quality** (waypoint head
+  needs to learn from fast/blurry frames too).
+- **`combined_loss`**: `L_total = lambda_latent * L_latent + lambda_waypoint * L_wp`. Returns
+  `LossOutput(total, latent, waypoint, cosine_sim)`. Cosine sim is diagnostic (no gradient).
+
+**Tested.** `tests/test_losses.py` (15): scalar output, beta=0.1 vs default, quality/confidence
+weighting, zero on identical, differentiable, LossOutput type, floor clamps, lambda scaling,
+cosine sim range + perfect, frame_quality NOT applied to L_wp. Ruff clean.
 
 ---
 
