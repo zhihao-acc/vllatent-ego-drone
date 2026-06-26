@@ -60,7 +60,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.14 — Collate function for batched training | done | 2026-06-26 | TrainingBatch NamedTuple + collate_sports_batch; 6 torch tests green |
 | B1.15 — Block-causal ViT predictor + FiLM | done | 2026-06-26 | LatentPredictor depth=6 D=768 ~57M params; action+dt FiLM; 10 torch tests green |
 | B1.16 — Waypoint head | done | 2026-06-26 | WaypointHead MLP D→256→128→4; no TrustHead (removed); 5 torch tests green |
-| B1.17 — Full model assembly | pending | — | Phase B-1 Group 5 |
+| B1.17 — Full model assembly | done | 2026-06-26 | SportsFollowingModel = predictor + waypoint head; config-driven; 8 torch tests green |
 | B1.18 — Loss functions: L_latent + L_wp | pending | — | Phase B-1 Group 6 |
 | B1.19 — Checkpoint save/load + config snapshot | done | 2026-06-19 | `vllatent/train/checkpoint.py` — save/load + config snapshot + seed_everything; 10 torch tests green; lazy torch import (AST-verified) |
 | B1.20 — Training script: overfit-tiny-batch | pending | — | Phase B-1 Group 6: USER-GATED |
@@ -70,6 +70,22 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-26 — B1.17: Full model assembly
+
+**Status:** B1.17 pending → **done** (AUTO).
+**What's done.** `vllatent/model/sports_model.py` — `SportsFollowingModel(nn.Module)` assembles
+`LatentPredictor` + `WaypointHead`. Forward takes `TrainingBatch` → `ModelOutput(predicted_latents,
+predicted_deltas)`. Encoder NOT part of forward (latents cached). Config-driven via `PredictorConfig`
+(depth/heads/mlp_ratio/dropout/history/horizon). `from_config()` class method for convenience.
+
+Waypoint head receives patch-mean-pooled predictor output `(B,T,D)` → `(B,T,4)`.
+
+**Tested.** `tests/test_model.py` (8): output shapes D=768 + D=384, ModelOutput type, from_config,
+differentiable (gradients flow), param count depth=6 (40-70M range), config-driven depth (more depth
+= more params), eval deterministic. 450 pure + 8 model torch tests green. Ruff clean.
 
 ---
 
