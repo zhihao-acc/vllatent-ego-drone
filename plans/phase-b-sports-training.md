@@ -196,7 +196,10 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   - **Minimum segment filter**: after per-frame masking, contiguous accepted runs shorter
     than `min_segment_frames` (default 10 = 2s at 5fps) are discarded. Prevents tiny
     fragments between rejected regions from leaking into training data.
-  - PySceneDetect `AdaptiveDetector` for shot boundary detection (SBD)
+  - PySceneDetect `AdaptiveDetector(adaptive_threshold=2.0)` for shot boundary detection (SBD).
+    **Threshold tuned in B1.10f** — default 3.0 missed obvious hard cuts in skiing footage
+    (high natural frame variation makes cut spikes blend in). 2.0 catches all real camera
+    switches with no false positives on pilot data.
   - Per-shot majority vote → ACCEPT (>=60% FPV) / REJECT (<30%) / PARTIAL
   - Thumbnail grid generator for human review
 - **CLIP DROPPED (B1.7c finding):** CLIP zero-shot scores 0.999 on all frames within the same
@@ -423,6 +426,31 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   `scripts/validate_megasam.py` (kept for standalone VO validation)
 - **Deps:** blocks B1.12. Blocked-by: B1.10d (done), B1.10e (done), B1.8b (done).
 
+- **B1.10f — Fix shot boundary detection for consistent VO trajectories (AUTO).**
+  `adaptive_threshold` 3.0 → **2.0** across all `detect_shot_boundaries*` and `filter_video*`
+  functions. Root cause: skiing footage has high natural frame-to-frame variation (motion 19-28
+  typical); a cut between two snowy scenes (spike to ~38) doesn't exceed 3× the local average
+  at threshold=3.0. At 2.0, ski03 produces 7 boundaries (was 4) — all verified as real camera
+  switches, no false positives.
+
+  **Deleted:** `vllatent/ingest/edit_detection.py` + `tests/test_edit_detection.py`. Two rounds
+  of hand-crafted edit detection (histogram correlation + slow-mo + motion spikes; MAD-robust
+  spikes + block-pattern consistency) produced catastrophic false-positive rates on real skiing
+  footage (80+ frames out of 254 flagged). The entire "edit detection" problem was an under-tuned
+  AdaptiveDetector threshold — no separate module needed.
+
+  **Bug fix:** `scripts/test_e2e_subclip.py` stale frame directory not cleaned before copy
+  (previous run's frames persisted; MegaSaM saw 50 instead of 39). Fixed with `shutil.rmtree`
+  before fresh copy.
+
+  **Files:** `vllatent/ingest/content_filter.py` (threshold in all 4 functions),
+  `scripts/test_e2e_subclip.py`, `scripts/verify_filter.py` (removed edit_mask refs)
+  **Impact:** Content filter is now a clean **three-stage pipeline**: motion ≥8.0 → YOLO-World
+  object rejection → AdaptiveDetector@2.0 shot boundary split. Each shot = one continuous
+  camera recording. MegaSaM runs per-shot segments → no trajectory leaps from camera switches.
+  **Test:** `$PY -m pytest -q tests/test_content_filter.py` (462 total green)
+  **Deps:** none (hotfix on existing pipeline). Blocked-by: none.
+
 ---
 
 ### Group 3 — Encoder Decision Gate
@@ -432,9 +460,9 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 - The advisory is contradictory: section 5.2 says 50-80ms, but section 4 says ~6-10ms based on NVIDIA
   benchmarks. Must measure empirically. Run `DinoV3Encoder` with TensorRT FP16 export.
   Measure median/p99 latency at batch=1.
-- **Decision:** If ViT-B/16 TRT FP16 < 20ms then keep ViT-B/16, D=768, predictor depth 6 (~50M).
+- **Decision:** If ViT-B/16 TRT FP16 < 20ms then keep ViT-B/16, D=768, predictor depth 6 (~28M).
   If > 20ms then use Meta's pre-distilled ViT-S/16 (`vit_small_patch16_dinov3.lvd1689m` via timm),
-  D=384, predictor depth 8 (~25M). No CosPress training needed either way.
+  D=384, predictor depth 8 (~14M). No CosPress training needed either way.
 - **Files:** `scripts/benchmark_encoder_orin.py` (new)
 - **DoD:** Written benchmark with latencies. EMBED_DIM decision locked.
 - **Test:** User runs on Orin NX.
@@ -523,30 +551,34 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
   - **dt FiLM:** `dt_embedding = MLP(dt_seconds)` → `(scale, shift)` per block, applied
     alongside action FiLM. Lets the model handle mixed FPS (CosFly 2 Hz vs YouTube 5 Hz)
     in a single training run without separate stages (DINO-world precedent).
-  D, depth, heads from `PredictorConfig`. No language cross-attention in B-1.
+  D, depth, heads, dropout from `PredictorConfig`. Default depth=6 (DINO-WM precedent;
+  sweep 6-vs-8), dropout=0.1. No language cross-attention in B-1.
+  **Architecture research (2026-06-25):** depth=6 chosen over 12 because (a) DINO-WM (closest
+  analogue — same frozen DINOv2 encoder, same patch-level prediction) uses depth=6 successfully,
+  (b) ~28M params is better matched to our pilot data scale (~8.6K frames), (c) all spatial
+  tokens (196) retained — no downsampling (universal in DINO-WM / DINO-world / V-JEPA 2-AC).
 - **Files:** `vllatent/model/predictor.py` (new), `tests/test_predictor.py` (new)
-- **DoD:** Output shape correct. Param count matches expected (~25M at D=384 or ~50M at D=768).
+- **DoD:** Output shape correct. Param count matches expected (~14M at D=384 or ~28M at D=768).
   Block-causal mask verified (future can't attend to later future). Action FiLM changes output.
-  dt FiLM changes output when dt varies.
+  dt FiLM changes output when dt varies. Dropout applied during training.
 - **Test:** `$PY -m pytest -q tests/test_predictor.py -m torch`
 - **Deps:** blocks B1.17. Blocked-by: B1.12.
 
-**B1.16 — Waypoint head + trust head stub.**
+**B1.16 — Waypoint head.**
 - Tier TORCH / AUTO
 - `vllatent/model/heads.py`:
   - `WaypointHead`: MLP `D->256->128->4`. Takes `(B,T,D)` -> `(B,T,4)` predicted deltas.
-  - `TrustHead` (stub): Returns `TrustReadout(p_commit=ones(T), k_star=T, sigma=0)`.
-    Phase C replaces with real head.
+  - ~~TrustHead stub~~ — trust mechanism REMOVED (commit `125576f`). No stub needed.
 - **Files:** `vllatent/model/heads.py` (new), `tests/test_heads.py` (new)
-- **DoD:** Shapes correct. Trust stub outputs all-commit.
+- **DoD:** Shapes correct. MLP produces (B,T,4) from (B,T,D).
 - **Test:** `$PY -m pytest -q tests/test_heads.py -m torch`
 - **Deps:** blocks B1.17. Blocked-by: B1.12.
 
 **B1.17 — Full model assembly.**
 - Tier TORCH / AUTO
 - `vllatent/model/sports_model.py` with `SportsFollowingModel(nn.Module)`. Assembles predictor
-  + waypoint head + trust head. Forward takes `TrainingBatch` -> `(PredictorOutput,
-  predicted_deltas (B,T,4), TrustReadout)`. Encoder is NOT part of forward (latents cached).
+  + waypoint head. Forward takes `TrainingBatch` -> `(PredictorOutput,
+  predicted_deltas (B,T,4))`. Encoder is NOT part of forward (latents cached).
   Config-driven construction from `PredictorConfig`.
 - **Files:** `vllatent/model/sports_model.py` (new), `tests/test_model.py` (new)
 - **DoD:** End-to-end forward on random input. Output shapes correct.
@@ -677,47 +709,46 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 ## Dependency Graph (B-1)
 
 ```
-PARALLEL TRACK A (pipeline fixes + content filter, can start immediately):
-  B1.1 (undistort wire) ---+
-  B1.2 (megasam conf)  ---+
-  B1.3 (GPS Sim3)      ---+      B1.7a (batch encode) --+
-  B1.4 (clip length)   ---+---> B1.7b (content filter) -+--> B1.7c (FPV extract) --> B1.7 (pilot) --> B1.10
-  B1.5 (config revise) ---+                                                                |
-  B1.6 (SportsTarget)  ---+                                                                |
-                                                                                            |
-PARALLEL TRACK B (data + quality dashboards, can start immediately):                       |
-  B1.8 (CosFly adapter) ✅ DONE, DEFERRED from training loop (no longer blocking)       |  |
-  B1.9 (quality report) ---------------------------------------------------------------+  |
-  B1.9b (HTML clip report) — no deps, runs on any .npz --------------------------------+  |
-                                                                                        |  |
-PARALLEL TRACK C (CRITICAL -- start ASAP):                                             |  |
-  B1.11 (Orin NX bench) ---> B1.12 (lock D) --+---------------------------------------+  |
-                                                |                                       |  |
-GROUP 4 (loader, needs D locked + schema):     |                                       |  |
-  B1.13 (sports loader) <-- B1.4,B1.6,B1.12   |                                       |  |
-  B1.14 (collate) <-- B1.13                    |                                       |  |
-                                                |                                       |  |
-GROUP 5 (model, needs D locked):               |                                       |  |
-  B1.15 (predictor) <-- B1.12                  |                                       |  |
-  B1.16 (heads) <-- B1.12                      |                                       |  |
-  B1.17 (assembly) <-- B1.15, B1.16            |                                       |  |
-                                                |                                       |  |
-GROUP 6 (training):                             |                                       |  |
-  B1.18 (losses) <-- B1.17                     |                                       |  |
-  B1.19 (checkpoint) -- no block                |                                       |  |
-  B1.20 (overfit-tiny) <-- B1.14,B1.17,B1.18,B1.19,data ---------------------------+  |  |
-  B1.21 (sanity+viz) <-- B1.13,B1.18           |                                    |  |  |
-                                                |                                    |  |  |
-GROUP 8 (full training + verify):              |                                    |  |  |
-  B1.22 (full train) <-- B1.20                 -+     (B1.8 no longer blocking)                                    |  |  |
-  B1.23 (Jetson speed) <-- B1.22               |                                    |  |  |
-  B1.24 (B-1 DoD) <-- ALL <-------------------+------------------------------------+--+--+
+DONE — TRACK A (pipeline fixes + content filter):
+  B1.1 ✓ B1.2 ✓ B1.3 ✓ B1.4 ✓ B1.5 ✓ B1.6 ✓
+  B1.7a ✓ B1.7b ✓ (+ B1.10f threshold patch) B1.7c ✓ B1.7 ✓
+
+DONE — TRACK B (data + quality dashboards):
+  B1.8 ✓ (DESCOPED) B1.8b ✓ B1.9 ✓ B1.9b ✓
+
+DONE — VO VALIDATION:
+  B1.10a ✓ B1.10b ✓ B1.10d ✓ B1.10e ✓ B1.10c ✓ (E2E GO) B1.10f ✓ (SBD threshold fix)
+
+DONE — TRAINING INFRA:
+  B1.19 ✓ (checkpoint)
+
+REMAINING — CRITICAL PATH (blocked on B1.11 encoder gate):
+  B1.11 (Orin NX bench) ---> B1.12 (lock D) --+
+                                                |
+  GROUP 4 (loader):                            |
+    B1.13 (sports loader) <-- B1.12            |
+    B1.14 (collate) <-- B1.13                  |
+                                                |
+  GROUP 5 (model):                             |
+    B1.15 (predictor) <-- B1.12                |
+    B1.16 (heads) <-- B1.12                    |
+    B1.17 (assembly) <-- B1.15, B1.16          |
+                                                |
+  GROUP 6 (training):                          |
+    B1.18 (losses) <-- B1.17                   |
+    B1.20 (overfit-tiny) <-- B1.14,B1.17,B1.18,B1.19✓,data✓
+    B1.21 (sanity+viz) <-- B1.13,B1.18         |
+                                                |
+  GROUP 8 (full training + verify):            |
+    B1.22 (full train) <-- B1.20               |
+    B1.23 (Jetson speed) <-- B1.22             |
+    B1.24 (B-1 DoD) <-- ALL                   |
 ```
 
-**Critical path:** B1.11 -> B1.12 -> B1.15 -> B1.17 -> B1.18 -> B1.20 -> B1.22 -> B1.24
-(unchanged — B1.7b is on the data track, not the critical path)
+**Critical path:** B1.11 → B1.12 → B1.15 → B1.17 → B1.18 → B1.20 → B1.22 → B1.24
 
-**Parallel tracks before encoder gate:** Track A (B1.1-B1.7b(motion+YOLO)-B1.7c-B1.7), Track B (B1.8-B1.9-B1.9b), Track C (B1.11)
+**All data-track and pipeline prerequisites are satisfied.** The only remaining gate before
+the model+training track can proceed is B1.11 (Orin NX encoder benchmark, USER-GATED).
 
 ---
 
@@ -727,11 +758,19 @@ GROUP 8 (full training + verify):              |                                
   frames/clip. Training samples are sliding windows of H+T=7 frames within each clip.
 - **Encoder working default:** ViT-B/16 (D=768). Code against D=768 now. Change to ViT-S/16
   (D=384) only if the Orin NX benchmark (B1.11) shows ViT-B/16 > 20ms.
+- **Predictor depth (2026-06-25 arch research):** Default depth=6 (was 12). Sweep range 6-vs-8
+  (was 8-vs-12). DINO-WM (closest analogue) uses depth=6 on DINOv2 latents. ~28M params at
+  D=768 (was ~50M). dropout=0.1 added (DINO-WM precedent). 196 spatial tokens retained — no
+  downsampling (universal in DINO-WM/DINO-world/V-JEPA-2-AC). Waypoint head stays MLP for B-1;
+  PI Prober deferred to B-2 when autoregressive rollout matters.
 - **GPS Sim(3):** Stub with interface only. `normalize_scale(mode="median_speed")` is the
   active path for B-1.
-- **Content filter (B-1):** Motion (primary) + YOLO-World `yolov8s-worldv2.pt` (semantic object
-  rejection) + PySceneDetect `AdaptiveDetector` (SBD). CLIP zero-shot DROPPED — scores 0.999
-  within-domain, no discriminative power. YOLO-World: 74 FPS V100, ~1.5 GB VRAM, text cached.
+- **Content filter (B-1):** Three-stage pipeline: motion ≥8.0 (primary) + YOLO-World
+  `yolov8s-worldv2.pt` (semantic object rejection) + PySceneDetect `AdaptiveDetector`
+  `adaptive_threshold=2.0` (SBD — tuned from 3.0; B1.10f). Each detected shot = one
+  continuous camera recording; MegaSaM runs per-shot → no trajectory leaps. CLIP zero-shot
+  DROPPED (scores 0.999 within-domain). Hand-crafted edit detection DELETED (histogram/motion
+  spikes/block-patterns all catastrophic FP on skiing). YOLO-World: 74 FPS V100, text cached.
 - **Visualization:** Self-contained Plotly HTML per clip, integrated as pipeline post-hook.
 - **Delta preprocessing:** physics hard clip → median filter k=3 → velocity normalize
   (delta/dt) → per-dimension z-score normalize. Store mean/std for inference denormalization.
@@ -780,8 +819,10 @@ GROUP 8 (full training + verify):              |                                
 5. **Scheduled sampling (B-2).** B-1 uses GT history. Deployment needs auto-regressive.
    B-2 introduces curriculum mixing GT and predicted history.
 
-6. **MegaSaM GO/NO-GO (B1.10).** If skiing VO is unusably noisy, evaluate DPVO fallback.
-   Escalate before training.
+6. ~~**MegaSaM GO/NO-GO (B1.10).**~~ **RESOLVED: GO.** B1.10c E2E verified on `ski03_fpv00_c000`
+   (50 frames). B1.10f fixed shot boundary detection (AdaptiveDetector 3.0→2.0) — each shot
+   is now one continuous camera recording, eliminating trajectory leaps from undetected cuts.
+   MegaSaM produces usable VO on per-shot skiing segments.
 
 7. **Custom data collection timing.** Southern Hemisphere ski season July-Oct 2026. If starting
    now, plan logistics for B-3.
@@ -856,11 +897,13 @@ confidence weighting is the better investment for B-1.
 
 ## Ralph Loop Hand-off
 
-- Start at **B1.1** (pipeline bug fix, pure-tier cheap-win).
-- **B1.7b (content filter, motion+YOLO-World) is AUTO** — can run immediately, unblocks B1.7.
-- **B1.9b (HTML report) is AUTO** — can run anytime, no blockers.
-- **B1.11 (Orin NX benchmark) can run in parallel** with Group 0-2.
-- User-gated steps: B1.7, B1.8, B1.10, B1.11, B1.20, B1.22, B1.23, B1.24.
+**Current position (2026-06-25):** Groups 0-2 complete (B1.1-B1.10f all done, B1.19 done).
+The ingest pipeline is fully operational: three-stage content filter (motion + YOLO + SBD@2.0)
+→ per-shot FPV extraction → quality gate → MegaSaM VO → DINOv3 encode → .npz cache.
+
+- **Next:** B1.11 (Orin NX benchmark — **CRITICAL GATE**, USER-GATED). Blocks B1.12→B1.15→model track.
+- **Parallel with B1.11:** Nothing left to parallelize — Groups 0-2 are done. B1.13+ all blocked on B1.12.
+- Remaining user-gated steps: B1.11, B1.20, B1.22, B1.23, B1.24.
 - Always set `--max-iterations` backstop.
 - STOP CHECK at `started_step + 3`.
 

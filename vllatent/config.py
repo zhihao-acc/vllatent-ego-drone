@@ -82,9 +82,10 @@ class PredictorConfig:
 
     history: int = HISTORY      # H — history frames (single literal in schemas)
     horizon: int = HORIZON      # T — prediction horizon (single literal in schemas)
-    depth: int = 12             # swept (8-vs-12 in Phase B)
+    depth: int = 6              # swept (6-vs-8 in Phase B; DINO-WM precedent)
     heads: int = 12             # swept (must divide EMBED_DIM; 6 for D=384)
     mlp_ratio: int = 4          # FFN ratio (4 * D)
+    dropout: float = 0.1        # predictor dropout (DINO-WM precedent; helps with small pilot)
 
     def __post_init__(self) -> None:
         for name in ("history", "horizon", "depth", "heads", "mlp_ratio"):
@@ -93,6 +94,8 @@ class PredictorConfig:
                 raise ValueError(f"predictor.{name} must be a positive int, got {v!r}")
         if EMBED_DIM % self.heads != 0:
             raise ValueError(f"predictor.heads ({self.heads}) must divide EMBED_DIM ({EMBED_DIM})")
+        if not (0.0 <= self.dropout < 1.0):
+            raise ValueError(f"predictor.dropout must be in [0, 1), got {self.dropout}")
 
 
 @dataclass(frozen=True)

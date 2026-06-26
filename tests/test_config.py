@@ -25,7 +25,8 @@ def test_defaults_construct_and_match_schemas_constants() -> None:
     # Swept defaults reference the single schemas literals (no duplication).
     assert cfg.predictor.history == HISTORY
     assert cfg.predictor.horizon == HORIZON
-    assert cfg.predictor.depth == 12 and cfg.predictor.heads == 12
+    assert cfg.predictor.depth == 6 and cfg.predictor.heads == 12
+    assert cfg.predictor.dropout == 0.1
     # timm's NON-GATED DINOv3 ViT-B/16 re-host (Meta's gated repo rejected our access 2026-06-09).
     assert cfg.encoder.model_id == "vit_base_patch16_dinov3.lvd1689m"
     # Frozen CLIP ViT-B/32 text tower for lang_tokens (A5.13b) — NON-GATED.
