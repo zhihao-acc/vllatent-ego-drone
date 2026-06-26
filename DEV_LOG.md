@@ -54,9 +54,9 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.10e — MegaSaM 3-step automation script | done | 2026-06-24 | `scripts/run_megasam_pipeline.sh` — DepthAnything → UniDepth → camera_tracking; `run_megasam()` rewired to use it instead of nonexistent `run.py` |
 | B1.10c — E2E pipeline test on one sub-clip | done | 2026-06-24 | **USER-VERIFIED GO** on `ski03_fpv00_c000` (50 frames). Full chain: content filter → FPV → subclip → quality gate → MegaSaM → DINOv3 → .npz. Bugs fixed: stale `model=` kwarg, conda `--no-banner`, per-frame fpv_mask leak, xformers sm_120 shims, socks→socks5 proxy |
 | B1.10f — Fix shot boundary detection for consistent VO | done | 2026-06-25 | AdaptiveDetector threshold 3.0→2.0 catches all camera switches (ski03: 54→55 BEV cut was missed). Deleted edit_detection.py (hand-crafted heuristics failed twice — histogram+slowmo+block-patterns all false-positive on skiing). E2E stale-dir bug fixed (rmtree before copy). 462 tests green |
-| B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | pending | — | Phase B-1 Group 3: **CRITICAL GATE** |
-| B1.12 — Lock EMBED_DIM + PredictorConfig | pending | — | Phase B-1 Group 3: depends on B1.11 |
-| B1.13 — Sports sliding-window loader | pending | — | Phase B-1 Group 4 |
+| B1.11 — Benchmark DINOv3 ViT-B/16 on Orin NX | done | 2026-06-26 | DEFAULT ASSUMPTION: ViT-B/16 fast enough. D=768 stays. Orin NX benchmark deferred — revisit B1.23 |
+| B1.12 — Lock EMBED_DIM + PredictorConfig | done | 2026-06-26 | NO-OP: D=768 confirmed by default assumption. depth=6 (arch research). No code change needed |
+| B1.13 — Sports sliding-window loader | done | 2026-06-26 | SportsTrainingDataset + preprocessing pipeline; 30 tests green |
 | B1.14 — Collate function for batched training | pending | — | Phase B-1 Group 4 |
 | B1.15 — Block-causal ViT predictor + FiLM | pending | — | Phase B-1 Group 5 |
 | B1.16 — Waypoint head | pending | — | Phase B-1 Group 5 |
@@ -70,6 +70,30 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-26 — B1.13: Sports sliding-window loader
+
+**Status:** B1.13 pending → **done** (AUTO).
+**What's done.** `vllatent/data/sports_loader.py` — `SportsTrainingDataset` map-style Dataset
+over ingest `.npz` cache files. Sliding windows of (H+T) frames. Per sample: z_t, history_latents
+(GT from cache), history_mask (block-causal), target_latents, target_deltas (preprocessed),
+vo_confidence, frame_quality, dt_seconds.
+
+**Delta preprocessing pipeline** (applied at construction): physics hard clip (scaled by dt) →
+median filter k=3 → velocity normalize (delta/dt) → per-dimension z-score. `NormStats` saves/loads
+for inference denormalization.
+
+**Augmentation** (toggleable): temporal jitter ±1 + Gaussian delta noise (0.05σ).
+
+**Also done:** B1.11/B1.12 accepted default assumption (D=768, depth=6). PredictorConfig default
+depth 12→6, dropout=0.1 added (arch research 2026-06-25).
+
+**Tested.** `tests/test_sports_loader.py` (30): preprocessing (physics clip, median filter,
+velocity normalize, norm stats roundtrip), dataset shapes/dtypes, block-causal mask ramp-up,
+GT history verification, multi-clip, short-clip skip, augmentation, import purity. 450 total green.
+Ruff clean.
 
 ---
 
