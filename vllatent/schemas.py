@@ -1,7 +1,7 @@
 """Loader output-tuple SCHEMAS (PURE tier) — Phase-A step 3.
 
 Frozen dataclasses for the tuple the cached-latent loader emits (arch-design §6
-item 5), the **student output seams** (predictor rollout / trust readout / waypoint
+item 5), the **student output seams** (predictor rollout / waypoint
 — H3, typed so an ablation is a config flag not code surgery), the **teacher
 distillation seam** (``TeacherOutput`` / ``OracleTarget`` — A5.9, the per-step target the
 student distills against), the parsed AerialVLN episode (output of
@@ -195,7 +195,7 @@ class TeacherOutput:
     """Raw frozen-WorldVLN inference for one step: K stochastic rollouts of the 6-DoF action (A5.9).
 
     A5.8 confirmed WorldVLN inference is STOCHASTIC by default (top_k/top_p sampling), so K rollouts
-    of the same input DIFFER — that spread is the trust-oracle disagreement signal, FREE (no
+    of the same input DIFFER — that spread is the rollout disagreement signal, FREE (no
     MC-dropout). A5.11 (live-API re-probe) refined two facts: the released config locks the seed
     across a session's segments, so **K rollouts = K sessions with distinct seeds** (the teacher
     wrapper owns that); and the wire emits per-step **DELTAS** ``[dx,dy,dz,droll,dyaw,dpitch]``

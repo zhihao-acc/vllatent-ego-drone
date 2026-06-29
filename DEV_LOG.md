@@ -66,7 +66,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.20 — Training script: overfit-tiny-batch | in_progress | 2026-06-26 | Script written (AUTO); USER-GATED: run on dev box, verify loss < baseline in 200 steps |
 | B1.21 — Pre-train sanity check + viz | done | 2026-06-26 | run_sanity_check (7 pure tests) + TrainingLogger JSONL (6 torch tests) green |
 | B1.22 — Full training run | superseded | 2026-06-29 | **REPLANNED → B1.21b + B1.22a–e (B-1 = latent only)**; head → B-2a; see plan Group 8 |
-| B1.21b — Trust cleanup + remove verify/ | pending | — | Group 8 (replan): AUTO |
+| B1.21b — Trust cleanup + remove verify/ | done | 2026-06-29 | dangling trust refs removed from schemas.py docstrings + CLAUDE.md L44 + plan scope rows; empty `vllatent/verify/` (only `__pycache__`) removed; docs-only, 465 pure green |
 | B1.22a — train_sports.py upgrade (val/scene-split/warmup/bf16/--latent-only) | pending | — | Group 8 (replan): AUTO |
 | B1.22b — Full pilot DINOv3 encode (173 .npz) | pending | — | Group 8 (replan): USER-GATED (H20); only ski03 cached today |
 | B1.22c — Curate + ingest more REAL YouTube FPV | pending | — | Group 8 (replan): USER-GATED; ~5h/~90K frames target [parallel] |
@@ -78,6 +78,27 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-29 — B1.21b: stale trust-reference cleanup + remove empty verify/
+
+**Status:** B1.21b pending → **done** (AUTO, docs-only — no behaviour change).
+**What.** Removed leftover references to the trust mechanism (deleted 2026-06-25, commit `125576f`):
+- `vllatent/schemas.py` docstrings: dropped "trust readout" from the student-output-seams list (L4);
+  "trust-oracle disagreement signal" → "rollout disagreement signal" (L198, TeacherOutput).
+- `CLAUDE.md` OPEN-list L44: "TrackVLA teacher K + trust thresholds + calibration" → "… K + calibration".
+- `plans/phase-b-sports-training.md`: post-pivot scoping row A5.12 `SURVIVES`→`REMOVED` (verifier deleted);
+  removed "trust head training (Phase C)" from the B-1-does-NOT-cover list.
+- Deleted empty `vllatent/verify/` (only stale `__pycache__`, untracked).
+- Kept (correctly): tombstones (plan L571, `heads.py` L6), the completed-B1.5 historical record
+  (plan L120), and the B1.21b step/label self-references (plan L812–817, L904, L1049).
+**Tests.** 465 pure green (documented cmd `pytest -m "not torch and not sim" --ignore=tests/test_data_shapes.py`);
+`schemas.py` clean under ruff + mypy.
+**Flagged (pre-existing, NOT introduced by B1.21b — cleared in the following chore commit):** `make test`
+errored on stale `tests/test_data_shapes.py`→`vllatent/data/loader.py`→missing `base_loader` (legacy
+A5.15 loader); `make lint` had 33 ruff findings (13 in `_archived/`, rest scripts/tests + 4 live files,
+mostly `I001` from ruff-version drift); `make typecheck` had 1 mypy error (`manifest.py:176`).
 
 ---
 

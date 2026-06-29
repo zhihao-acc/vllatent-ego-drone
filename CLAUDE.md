@@ -41,7 +41,7 @@ person-following). TrackVLA (CoRL 2025, visual tracking) replaces it. Action ext
 real sports FPV video (not simulator oracle).
 
 **OPEN — keep the lean:** predictor depth/FiLM-vs-interleave (Phase B);
-TrackVLA teacher K + trust thresholds + calibration (Phase C); closed-loop seam (Phase D).
+TrackVLA teacher K + calibration (Phase C); closed-loop seam (Phase D).
 
 ## The reused repo (reuse, do NOT fork) — Phase D only
 

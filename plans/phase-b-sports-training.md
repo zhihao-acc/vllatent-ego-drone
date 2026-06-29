@@ -35,7 +35,7 @@ quality must be visible/verifiable; (c) fixed clip length (e.g. 10s) matching in
 | A5.9 (TeacherOutput/OracleTarget) | **NEEDS REVISION** | `TeacherOutput` retired. `OracleTarget` needs slimming: drop `teacher_pose6`, `rollpitch_resid`, `disagreement` (WorldVLN fields). Keep `waypoint_4dof` (from MegaSaM) + `vjepa_surprise` (Phase C). |
 | A5.10 (DINOv3 encoder) | **SURVIVES** | Works for both ViT-B/16 and ViT-S/16 via timm. |
 | A5.11 (WorldVLN teacher) | **INVALIDATED** | WorldVLN retired. `vllatent/teacher/worldvln.py` is dead code — keep as historical, don't import/test. |
-| A5.12 (V-JEPA-2 verifier) | **SURVIVES** | Independent of teacher choice. Phase C trust oracle. |
+| A5.12 (V-JEPA-2 verifier) | **REMOVED** | Trust/verifier mechanism deleted 2026-06-25 (commit `125576f`); `vllatent/verify/` gone. |
 | A5.13 (render harness) | **SURVIVES (Phase D only)** | Not used for sports FPV data. |
 | A5.13b (CLIP text tower) | **SURVIVES** | Feeds language cross-attention in B-2. |
 | A5.14 (render→cache) | **NEEDS REVISION** | AerialVLN cache pipeline replaced by ingest pipeline (`vllatent/ingest/`). `cache.py` kept for historical AerialVLN compat only. |
@@ -54,8 +54,8 @@ loader with GT history latents, predictor + waypoint head, L_latent + L_wp train
 overfit-tiny-batch, full training run on available data.
 
 **B-1 does NOT cover:** Language cross-attention (B-2), auto-captioning (B-2), RefCOCOg
-pre-train (B-2), Ego-Exo4D integration (B-3), scheduled sampling (B-2/B-3), trust head
-training (Phase C), closed-loop deployment (Phase D), CosPress distillation training (only if
+pre-train (B-2), Ego-Exo4D integration (B-3), scheduled sampling (B-2/B-3),
+closed-loop deployment (Phase D), CosPress distillation training (only if
 encoder gate says ViT-B/16 is too slow — and even then, use Meta's pre-distilled ViT-S/16
 from timm first).
 
