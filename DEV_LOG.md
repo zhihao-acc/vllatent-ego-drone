@@ -81,6 +81,30 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 ---
 
+## 2026-06-29 — B1.22c: curation tooling + FOLLOW-CAM data decision + 45 candidates
+
+**Status:** B1.22c tooling DONE (AUTO); curation run produced 45 candidates (USER review/ingest pending).
+**Data decision (user, load-bearing):** B-1 trains on **FOLLOW-CAM footage — the followed skier IN
+FRAME, from behind** (a drone chasing/following a skier), NOT subject-free egocentric POV/helmet-cam.
+Why: the model must learn the SUBJECT's dynamics (how the followed person moves/appears), which only
+exists when the subject is in frame; pure-POV is a wrong-viewpoint, subject-free distribution and the
+domain-blind predictor would be polluted toward subject-free predictions (same logic as game footage).
+Pure-POV is at most a conditional environment-dynamics aux later — default EXCLUDE.
+
+**Tooling.** `vllatent/ingest/curate.py` (PURE — gates + 3-level dedup + negative-title filter;
+16 tests) + `scripts/curate_sports_clips.py` (yt-dlp search→metadata→gate→dedup; proxy via `--proxy`
++ ALL_PROXY popped). Gates: ≥720p, ≥23fps, aspect 1.3–2.1, 30–1200s, no live. Negative-title filter
+drops off-domain "ski" homographs (jet/water-ski, snowmobile), subject-free POV (pov/helmet-cam/
+first-person/point-of-view/gopro-line), and review/tutorial/gear meta. Keywords = follow/chase only.
+
+**Result.** 120 raw → 64 deduped → **45 accepted** → `configs/sports_clips_candidates.yaml`
+(cand01–45) for review→promotion into `sports_clips.yaml`. ~28 are clean FPV-drone-chase / cinematic-
+ski-FPV / auto-follow-drone; ~rest are drone-reviews (real follow footage + talking heads the YOLO
+filter salvages) or FPs (e.g. "Chase Jarvis" = a name). Open option: a frame-level person-in-frame
+gate in the YOLO content filter for stronger "subject must be present" enforcement (tune permissively).
+
+---
+
 ## 2026-06-29 — Data-generation strategy + undistorted preprocessing (user decisions)
 
 **Status:** strategy decided (user); one code change (center-square-crop) shipped; plan revised.
