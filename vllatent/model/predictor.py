@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 
 from vllatent.schemas import DOF, EMBED_DIM, HISTORY, HORIZON, PATCH_TOKENS
 
@@ -43,12 +44,21 @@ class FiLMProjection(nn.Module):
 
 
 class PredictorBlock(nn.Module):
-    """One transformer block with FiLM-modulated LayerNorm."""
+    """One transformer block with FiLM-modulated LayerNorm.
+
+    Uses F.scaled_dot_product_attention (flash/memory-efficient kernels)
+    instead of nn.MultiheadAttention to avoid materializing the full
+    S×S attention matrix (1568×1568 at H=3,T=4,P=196).
+    """
 
     def __init__(self, dim: int, heads: int, mlp_ratio: int, dropout: float) -> None:
         super().__init__()
+        self.heads = heads
+        self.head_dim = dim // heads
         self.norm1 = nn.LayerNorm(dim)
-        self.attn = nn.MultiheadAttention(dim, heads, dropout=dropout, batch_first=True)
+        self.qkv = nn.Linear(dim, 3 * dim)
+        self.out_proj = nn.Linear(dim, dim)
+        self.attn_dropout = dropout
         self.norm2 = nn.LayerNorm(dim)
         self.mlp = nn.Sequential(
             nn.Linear(dim, dim * mlp_ratio),
@@ -67,9 +77,21 @@ class PredictorBlock(nn.Module):
         scale2: torch.Tensor,
         shift2: torch.Tensor,
     ) -> torch.Tensor:
+        B, S, D = x.shape
         h = self.norm1(x)
         h = h * (1 + scale1) + shift1
-        h, _ = self.attn(h, h, h, attn_mask=mask)
+
+        qkv = self.qkv(h).reshape(B, S, 3, self.heads, self.head_dim)
+        qkv = qkv.permute(2, 0, 3, 1, 4)  # (3, B, heads, S, head_dim)
+        q, k, v = qkv.unbind(0)
+
+        h = F.scaled_dot_product_attention(
+            q, k, v,
+            attn_mask=mask,
+            dropout_p=self.attn_dropout if self.training else 0.0,
+        )
+        h = h.transpose(1, 2).reshape(B, S, D)
+        h = self.out_proj(h)
         x = x + h
 
         h = self.norm2(x)
@@ -140,29 +162,21 @@ class LatentPredictor(nn.Module):
     def _build_block_causal_mask(
         self, n_frames: int, device: torch.device
     ) -> torch.Tensor:
-        """Build block-causal attention mask for patch-level tokens.
+        """Build block-causal attention mask for SDPA.
 
-        Each frame's patches can attend to all patches in the same or
-        earlier frames, but NOT to patches in later frames. History + z_t
-        frames are always visible. Horizon frames are causally masked.
+        Returns a boolean mask where True = CAN attend (SDPA convention).
+        Each frame's patches attend to all patches in the same or earlier
+        frames. History + z_t are always visible. Horizon frames are
+        causally masked (can't see future horizon steps).
         """
-        mask = torch.zeros(
-            n_frames * self.n_patches,
-            n_frames * self.n_patches,
-            device=device,
-            dtype=torch.bool,
-        )
         n_visible = self.history + 1
+        frame_mask = torch.zeros(n_frames, n_frames, device=device, dtype=torch.bool)
         for i in range(n_frames):
             for j in range(n_frames):
-                if j <= i or j < n_visible:
-                    continue
-                r_start = i * self.n_patches
-                r_end = (i + 1) * self.n_patches
-                c_start = j * self.n_patches
-                c_end = (j + 1) * self.n_patches
-                mask[r_start:r_end, c_start:c_end] = True
-        return mask
+                if j < n_visible or j <= i:
+                    frame_mask[i, j] = True
+        return frame_mask.repeat_interleave(self.n_patches, dim=0) \
+                         .repeat_interleave(self.n_patches, dim=1)
 
     def forward(
         self,

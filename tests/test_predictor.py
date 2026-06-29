@@ -48,6 +48,7 @@ class TestLatentPredictor:
         assert mask.shape == (total_tokens, total_tokens)
 
     def test_block_causal_mask_history_visible(self) -> None:
+        """SDPA convention: True = CAN attend."""
         model = LatentPredictor(dim=EMBED_DIM, depth=2, heads=12)
         n_frames = HISTORY + 1 + HORIZON
         mask = model._build_block_causal_mask(n_frames, torch.device("cpu"))
@@ -56,11 +57,12 @@ class TestLatentPredictor:
             for j in range(n_visible):
                 r = f * PATCH_TOKENS
                 c = j * PATCH_TOKENS
-                assert not mask[r, c], (
+                assert mask[r, c], (
                     f"Frame {f} should see history frame {j}"
                 )
 
     def test_block_causal_mask_future_blocked(self) -> None:
+        """SDPA convention: False = blocked."""
         model = LatentPredictor(dim=EMBED_DIM, depth=2, heads=12)
         n_frames = HISTORY + 1 + HORIZON
         mask = model._build_block_causal_mask(n_frames, torch.device("cpu"))
@@ -69,7 +71,7 @@ class TestLatentPredictor:
             for j in range(f + 1, n_frames):
                 r = f * PATCH_TOKENS
                 c = j * PATCH_TOKENS
-                assert mask[r, c], (
+                assert not mask[r, c], (
                     f"Frame {f} should NOT see future frame {j}"
                 )
 

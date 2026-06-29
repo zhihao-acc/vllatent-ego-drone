@@ -150,6 +150,8 @@ def train(args: argparse.Namespace) -> None:
 
     logger = TrainingLogger(log_dir=run_dir, log_every=args.log_every)
 
+    use_amp = device == "cuda" and not args.no_amp
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
     model.train()
     step = start_step
     epoch = start_epoch
@@ -174,21 +176,24 @@ def train(args: argparse.Namespace) -> None:
                 sample_weight=batch.sample_weight.to(device),
             )
 
-            out = model(batch)
-            loss_out = combined_loss(
-                out.predicted_latents, batch.target_latents,
-                out.predicted_deltas, batch.target_deltas,
-                batch.frame_quality, batch.vo_confidence,
-                lambda_latent=args.lambda_latent,
-                lambda_waypoint=args.lambda_waypoint,
-                beta=0.1,
-            )
+            with torch.amp.autocast("cuda", enabled=use_amp):
+                out = model(batch)
+                loss_out = combined_loss(
+                    out.predicted_latents, batch.target_latents,
+                    out.predicted_deltas, batch.target_deltas,
+                    batch.frame_quality, batch.vo_confidence,
+                    lambda_latent=args.lambda_latent,
+                    lambda_waypoint=args.lambda_waypoint,
+                    beta=0.1,
+                )
 
             optimizer.zero_grad()
-            loss_out.total.backward()
+            scaler.scale(loss_out.total).backward()
             if args.grad_clip > 0:
+                scaler.unscale_(optimizer)
                 torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_clip)
-            optimizer.step()
+            scaler.step(optimizer)
+            scaler.update()
             scheduler.step()
 
             if logger.should_log(step):
@@ -264,6 +269,7 @@ def main() -> None:
     parser.add_argument("--dropout", type=float, default=0.1)
 
     parser.add_argument("--resume", type=str, default=None, help="Path to checkpoint to resume from")
+    parser.add_argument("--no-amp", action="store_true", help="Disable mixed precision (fp32 only)")
 
     args = parser.parse_args()
     train(args)
