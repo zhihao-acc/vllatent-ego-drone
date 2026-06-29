@@ -6,6 +6,7 @@ which avoids version coupling and is more robust for long-running downloads.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -81,11 +82,23 @@ def download_clip(
         "--no-playlist",
         "--write-info-json",
     ]
+    # Proxy: yt-dlp chokes on a socks:// ALL_PROXY (needs socks5://). Pass an explicit --proxy
+    # from the http(s) proxy env and pop ALL_PROXY in the subprocess so it can't interfere.
+    proxy = (
+        os.environ.get("YTDLP_PROXY")
+        or os.environ.get("https_proxy")
+        or os.environ.get("HTTPS_PROXY")
+    )
+    if proxy:
+        cmd.extend(["--proxy", proxy])
     if sponsorblock:
         cmd.extend(["--sponsorblock-remove", "all"])
     cmd.append(url)
 
-    subprocess.run(cmd, check=True, timeout=600)
+    env = dict(os.environ)
+    env.pop("ALL_PROXY", None)
+    env.pop("all_proxy", None)
+    subprocess.run(cmd, check=True, timeout=600, env=env)
 
     info = probe_clip(url)
 

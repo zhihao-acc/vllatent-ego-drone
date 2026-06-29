@@ -45,6 +45,21 @@ class TestDownloadClip:
         assert meta.clip_id == "test_clip"
         assert meta.path == video
 
+    def test_passes_proxy_and_pops_all_proxy(self, tmp_path: Path, monkeypatch) -> None:
+        """yt-dlp gets an explicit --proxy; the socks:// ALL_PROXY is popped from its env."""
+        (tmp_path / "test_clip.mp4").write_bytes(b"x")
+        monkeypatch.setenv("https_proxy", "http://127.0.0.1:7890")
+        monkeypatch.setenv("ALL_PROXY", "socks://127.0.0.1:7890")
+        info = {"title": "T", "duration": 30, "fps": 30, "width": 1280, "height": 720, "id": "test_clip"}
+        with patch("subprocess.run") as mock_run, \
+             patch("vllatent.ingest.acquire.probe_clip", return_value=info):
+            mock_run.return_value = MagicMock(returncode=0)
+            download_clip("https://example.com", str(tmp_path), clip_id="test_clip")
+        cmd = mock_run.call_args.args[0]
+        assert "--proxy" in cmd and "http://127.0.0.1:7890" in cmd
+        assert "ALL_PROXY" not in mock_run.call_args.kwargs["env"]
+        assert "all_proxy" not in mock_run.call_args.kwargs["env"]
+
 
 @pytest.mark.tool
 class TestValidateClip:
