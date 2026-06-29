@@ -64,6 +64,24 @@ def bgr_to_rgb(frame: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(frame[..., ::-1])
 
 
+def _center_square_crop(t: torch.Tensor) -> torch.Tensor:
+    """Center-crop a ``(1,3,H,W)`` tensor to its largest centered square ``(1,3,m,m)``.
+
+    DINOv3 was pretrained on square crops; wild FPV frames are 16:9. Cropping (vs stretching to
+    224²) keeps the aspect ratio undistorted. No-op for already-square input (e.g. a 224² render).
+
+    **DEPLOY CONSISTENCY (foot-gun):** the on-drone preprocessing (Jetson / RealSense, Phase D)
+    MUST apply this exact center-square-crop before the 224² resize, or live latents won't match
+    the trained ones. Torch ops only (slicing on the passed tensor) — no module-level torch import.
+    """
+    h, w = t.shape[-2], t.shape[-1]
+    if h == w:
+        return t
+    m = min(h, w)
+    top, left = (h - m) // 2, (w - m) // 2
+    return t[..., top:top + m, left:left + m]
+
+
 def _load_backbone(model_id: str, device: str, dtype: str) -> BackboneForward:
     """Lazy-load the frozen DINOv3 ViT-B/16 backbone via **timm**; return its forward callable.
 
@@ -109,6 +127,7 @@ def _load_backbone(model_id: str, device: str, dtype: str) -> BackboneForward:
 
     def _forward(frame_rgb: np.ndarray) -> torch.Tensor:
         t = torch.from_numpy(np.ascontiguousarray(frame_rgb)).permute(2, 0, 1)[None].float().div_(255.0)
+        t = _center_square_crop(t)  # undistorted square crop (MUST match on-drone deploy); no-op if square
         if t.shape[-2:] != target_hw:
             t = torch.nn.functional.interpolate(t, size=target_hw, mode="bicubic", align_corners=False)
         t = ((t - mean) / std).to(device=device, dtype=compute_dtype)

@@ -95,3 +95,42 @@ def test_encode_rgb_rejects_bad_input(monkeypatch: pytest.MonkeyPatch) -> None:
         enc.encode_rgb(np.zeros((224, 224, 4), dtype=np.uint8))   # wrong channel count
     with pytest.raises(TypeError):
         enc.encode_rgb([[1, 2, 3]])  # type: ignore[arg-type]     # not an ndarray
+
+
+# --- center-square-crop (B1: undistorted 224² preprocessing; must match on-drone deploy) ---
+
+
+class TestCenterSquareCrop:
+    def test_16x9_cropped_to_square(self) -> None:
+        import torch
+
+        t = torch.randn(1, 3, 720, 1280)
+        out = dinov3._center_square_crop(t)
+        assert out.shape == (1, 3, 720, 720)
+
+    def test_tall_cropped_to_square(self) -> None:
+        import torch
+
+        t = torch.randn(1, 3, 1280, 720)
+        out = dinov3._center_square_crop(t)
+        assert out.shape == (1, 3, 720, 720)
+
+    def test_already_square_is_noop(self) -> None:
+        import torch
+
+        t = torch.randn(1, 3, 224, 224)
+        out = dinov3._center_square_crop(t)
+        assert out.shape == (1, 3, 224, 224)
+        assert torch.equal(out, t)
+
+    def test_crop_is_centered(self) -> None:
+        import torch
+
+        # width 1280 -> keep cols [280:1000); a marker at the center column survives, edges don't
+        t = torch.zeros(1, 3, 720, 1280)
+        t[..., 640] = 1.0   # center column
+        t[..., 10] = 1.0    # far-left column (must be cropped away)
+        out = dinov3._center_square_crop(t)
+        assert out.shape == (1, 3, 720, 720)
+        assert out[..., 360].sum() > 0          # center column preserved (now col 360)
+        assert out[..., 0].sum() == 0           # left edge of crop is empty (col 280 of original)
