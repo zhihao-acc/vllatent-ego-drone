@@ -74,6 +74,7 @@ def _load_backbone(model_id: str, device: str, dtype: str) -> BackboneForward:
     uint8 ``(H,W,3)`` frame -> token sequence ``(1,T,768)`` (T = 1 CLS + 4 registers + 196 patches).
     """
     import os
+
     import timm
     import torch
     from timm.data import resolve_model_data_config

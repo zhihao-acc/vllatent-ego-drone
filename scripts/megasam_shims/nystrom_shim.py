@@ -23,7 +23,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-
 # ── 1. NystromAttention (xformers.components.attention) ──────────────────
 
 class NystromAttention(nn.Module):

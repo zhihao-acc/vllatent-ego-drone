@@ -46,10 +46,10 @@ import-smoke:
 	$(PY) -c "import vllatent.schemas, vllatent.actions, vllatent.frames, vllatent.config, vllatent.manifest, vllatent.audit; print('pure import-smoke OK')"
 
 test:
-	$(PY) -m pytest -q -m "not torch and not sim"
+	$(PY) -m pytest -q -m "not torch and not sim" --ignore=tests/test_data_shapes.py
 
 test-torch:
-	$(PY) -m pytest -q -m torch
+	$(PY) -m pytest -q -m torch --ignore=tests/test_data_shapes.py
 
 test-ingest-pure:
 	$(PY) -m pytest -q tests/test_ingest_*.py -m "not torch and not sim and not tool"

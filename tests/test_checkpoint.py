@@ -5,19 +5,19 @@ verify save/load round-trips, optimizer state restoration, and config snapshot f
 """
 from __future__ import annotations
 
-import yaml
 import pytest
+import yaml
 
 from vllatent.config import Config
 
 torch = pytest.importorskip("torch")
 
 from vllatent.train.checkpoint import (  # noqa: E402
+    _config_to_dict,
     load_checkpoint,
     save_checkpoint,
     seed_everything,
     snapshot_config,
-    _config_to_dict,
 )
 
 pytestmark = pytest.mark.torch
@@ -86,7 +86,7 @@ def test_save_load_round_trip(tmp_path):
     assert ckpt["metrics"]["loss"] == 0.5
     assert ckpt["config"]["encoder"]["model_id"] == cfg.encoder.model_id
 
-    for p1, p2 in zip(model.parameters(), model2.parameters()):
+    for p1, p2 in zip(model.parameters(), model2.parameters(), strict=True):
         assert torch.equal(p1, p2)
 
 
@@ -107,7 +107,7 @@ def test_load_without_optimizer(tmp_path):
     model2 = _tiny_model()
     ckpt = load_checkpoint(ckpt_path, model2)
     assert ckpt["epoch"] == 1
-    for p1, p2 in zip(model.parameters(), model2.parameters()):
+    for p1, p2 in zip(model.parameters(), model2.parameters(), strict=True):
         assert torch.equal(p1, p2)
 
 

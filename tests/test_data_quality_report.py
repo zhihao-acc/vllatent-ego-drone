@@ -1,14 +1,13 @@
 """Tests for scripts/data_quality_report.py (PURE tier)."""
 from __future__ import annotations
 
+# Import the script as a module
+import importlib.util
 import json
 from pathlib import Path
 
 import numpy as np
 import pytest
-
-# Import the script as a module
-import importlib.util
 
 _SCRIPT = Path(__file__).resolve().parent.parent / "scripts" / "data_quality_report.py"
 _spec = importlib.util.spec_from_file_location("data_quality_report", _SCRIPT)

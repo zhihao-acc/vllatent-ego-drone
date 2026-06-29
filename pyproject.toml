@@ -27,6 +27,8 @@ include = ["vllatent*"]
 [tool.ruff]
 line-length = 120
 target-version = "py310"
+# _archived/ holds retired pre-pivot code kept for historical reference only — not linted.
+exclude = ["_archived"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

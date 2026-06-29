@@ -81,6 +81,27 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 ---
 
+## 2026-06-29 — chore: restore green quality gates (lint / typecheck / test)
+
+**Status:** done (loop-health chore; clears the pre-existing debt flagged in the B1.21b entry below).
+Not a B1.x step — restores the three ralph gates so B1.22a's verification is meaningful.
+- **lint** (`ruff check .`): was 33 findings. Added `exclude = ["_archived"]` to `[tool.ruff]`
+  (retired pre-pivot code, not linted; −13); `ruff --fix` auto-fixed `I001`/`F401`/`F541` in live
+  scripts/tests + 3 live pkg files (`data/loader.py` drop unused `DOF`,`PATCH_TOKENS`; `ingest/
+  ego_motion.py` drop unused `wrap_pi`; `encode/dinov3.py` import grouping — all behaviour-neutral);
+  manual `strict=True` on two `zip()`s (`tests/test_checkpoint.py`, B905) + removed a dead
+  `median_mag` assign (`tests/test_ingest_ego_motion.py`, F841). → **All checks passed.**
+- **typecheck** (`mypy` pure tier): `manifest.py:176` widened `required_entry_keys: tuple[str, ...]`
+  (was inferred `tuple[str,str,str]` from the wild-video branch). → **Success, 8 files.**
+- **test** (`make test`): added `--ignore=tests/test_data_shapes.py` to the `test`/`test-torch`
+  Makefile targets (matches the long-documented pure command). → **465 pure green.**
+- **Flagged (NOT fixed here — separate dead-code decision):** `vllatent/data/loader.py` still imports
+  the never-created `vllatent.data.base_loader` (legacy A5.15 `CachedLatentDataset`, plan-marked
+  "NEEDS REVISION"); it can't import, so `vllatent/data/__main__` + `test_data_shapes.py` are dead.
+  The **live** training path uses `data/sports_loader.py` and is unaffected.
+
+---
+
 ## 2026-06-29 — B1.21b: stale trust-reference cleanup + remove empty verify/
 
 **Status:** B1.21b pending → **done** (AUTO, docs-only — no behaviour change).

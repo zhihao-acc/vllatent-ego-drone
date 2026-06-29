@@ -5,8 +5,8 @@ import numpy as np
 import pytest
 
 from vllatent.ingest.ego_motion import (
-    AlignmentResult,
     R_BODY_FROM_CAM,
+    AlignmentResult,
     align_to_gps,
     camera_to_drone_body,
     normalize_scale,
@@ -101,7 +101,6 @@ class TestNormalizeScale:
         normed = normalize_scale(deltas, mode="median_speed")
         assert normed.shape == deltas.shape
         assert normed.dtype == deltas.dtype
-        median_mag = np.median(np.linalg.norm(deltas[:, :3], axis=1))
         assert abs(np.median(np.linalg.norm(normed[:, :3], axis=1)) - 1.0) < 1e-6
 
     def test_unit_max(self) -> None:

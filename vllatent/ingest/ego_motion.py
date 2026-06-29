@@ -16,7 +16,6 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from vllatent.frames import wrap_pi
 from vllatent.schemas import DELTA_DTYPE
 
 R_BODY_FROM_CAM = np.array([

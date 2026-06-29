@@ -47,12 +47,10 @@ from vllatent.config import Config
 from vllatent.data.base_loader import LatentDatasetBase
 from vllatent.schemas import (
     DELTA_DTYPE,
-    DOF,
     EMBED_DIM,
     HISTORY,
     LATENT_DTYPE,
     MASK_DTYPE,
-    PATCH_TOKENS,
     TEACHER_DOF,
     OracleTarget,
     StepSample,

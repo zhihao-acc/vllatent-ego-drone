@@ -171,7 +171,7 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
             for k in _REQUIRED_MOTION_SOURCE:
                 if k not in ms:
                     errors.append(f"motion_source missing key: {k}")
-        required_entry_keys = _REQUIRED_WILD_VIDEO_ENTRY
+        required_entry_keys: tuple[str, ...] = _REQUIRED_WILD_VIDEO_ENTRY
     else:
         required_entry_keys = CacheManifestEntry.required_keys()
 

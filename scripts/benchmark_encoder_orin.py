@@ -139,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
     print()
 
     pt_result = benchmark_pytorch(model_id, args.warmup, args.iters)
-    print(f"  [PyTorch FP16]")
+    print("  [PyTorch FP16]")
     print(f"    median = {pt_result['median_ms']:.2f} ms")
     print(f"    p99    = {pt_result['p99_ms']:.2f} ms")
     print(f"    mean   = {pt_result['mean_ms']:.2f} ms")
@@ -149,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
 
     trt_result = benchmark_trt(model_id, args.warmup, args.iters)
     if trt_result is not None:
-        print(f"  [TensorRT FP16]")
+        print("  [TensorRT FP16]")
         print(f"    median = {trt_result['median_ms']:.2f} ms")
         print(f"    p99    = {trt_result['p99_ms']:.2f} ms")
         print(f"    mean   = {trt_result['mean_ms']:.2f} ms")

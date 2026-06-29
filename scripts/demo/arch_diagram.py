@@ -1,9 +1,11 @@
 """Generate architecture diagram as a PNG using matplotlib (no external deps)."""
 import matplotlib
+
 matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-import matplotlib.patches as mpatches
 from pathlib import Path
+
+import matplotlib.patches as mpatches
+import matplotlib.pyplot as plt
 
 OUT = Path(__file__).resolve().parent / "arch_diagram.png"
 
