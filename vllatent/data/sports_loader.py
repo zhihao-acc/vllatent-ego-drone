@@ -135,6 +135,58 @@ def _load_clip(path: Path) -> dict[str, np.ndarray]:
         return {k: data[k] for k in data.files}
 
 
+def _clip_domain(clip: dict[str, np.ndarray]) -> str:
+    """Read the provenance domain tag from a clip (default 'real').
+
+    Game footage (B1.22d) writes ``domain='game'`` into the .npz so the training
+    mix can down-weight it; real FPV clips omit the key and default to 'real'.
+    """
+    if "domain" in clip:
+        return str(clip["domain"])
+    return "real"
+
+
+def clip_source(stem: str) -> str:
+    """Source-video id for a clip stem: ``ski03_fpv00_c000`` -> ``ski03``.
+
+    Sub-clips of one source video share the prefix before the first ``_``; they MUST
+    NOT be split across train/val (windows of one video leak). See ``split_clips_by_source``.
+    """
+    return stem.split("_")[0]
+
+
+def split_clips_by_source(
+    clip_stems: list[str], val_frac: float, seed: int = 42
+) -> tuple[list[str], list[str]]:
+    """Scene-split clip stems into (train, val) holding out WHOLE source videos.
+
+    Groups stems by :func:`clip_source` and holds out entire sources for validation, so
+    no sub-clip of a train source ever appears in val (the #1 leak in this pipeline).
+
+    Returns ``(train_stems, val_stems)``, each sorted. Guarantees at least one train
+    source. ``val_frac == 0`` (or a single source) yields an empty val list.
+    """
+    if not (0.0 <= val_frac < 1.0):
+        raise ValueError(f"val_frac must be in [0, 1), got {val_frac}")
+
+    sources: dict[str, list[str]] = {}
+    for stem in clip_stems:
+        sources.setdefault(clip_source(stem), []).append(stem)
+
+    source_ids = sorted(sources)
+    n_sources = len(source_ids)
+    if n_sources <= 1 or val_frac == 0.0:
+        return sorted(clip_stems), []
+
+    n_val = min(max(1, round(val_frac * n_sources)), n_sources - 1)
+    order = np.random.default_rng(seed).permutation(n_sources)
+    val_sources = {source_ids[i] for i in order[:n_val]}
+
+    train_stems = [s for s in clip_stems if clip_source(s) not in val_sources]
+    val_stems = [s for s in clip_stems if clip_source(s) in val_sources]
+    return sorted(train_stems), sorted(val_stems)
+
+
 class SportsTrainingDataset:
     """Map-style Dataset over sports ingest .npz cache files.
 
@@ -172,6 +224,7 @@ class SportsTrainingDataset:
         self._clips: list[dict[str, np.ndarray]] = []
         self._clip_velocities: list[np.ndarray] = []
         self._clip_dt: list[np.ndarray] = []
+        self._clip_domains: list[str] = []
 
         for p in npz_paths:
             clip = _load_clip(p)
@@ -186,6 +239,7 @@ class SportsTrainingDataset:
             self._clips.append(clip)
             self._clip_velocities.append(velocities)
             self._clip_dt.append(dt)
+            self._clip_domains.append(_clip_domain(clip))
 
         if not self._clips:
             raise ValueError("No clips with enough frames (need >= H+T+1)")
@@ -196,10 +250,12 @@ class SportsTrainingDataset:
             self._norm_stats = compute_norm_stats(self._clip_velocities)
 
         self._samples: list[tuple[int, int]] = []
+        self.sample_domains: list[str] = []   # domain per sample index (parallel to _samples)
         for clip_idx, clip in enumerate(self._clips):
             n = clip["latents"].shape[0]
             for t in range(n - HORIZON):
                 self._samples.append((clip_idx, t))
+                self.sample_domains.append(self._clip_domains[clip_idx])
 
     def _discover_clips(self, clip_ids: list[str] | None) -> list[Path]:
         if clip_ids is not None:

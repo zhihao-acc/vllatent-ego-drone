@@ -76,12 +76,14 @@ def save_checkpoint(
     metrics: dict[str, float],
     path: str | Path,
     scheduler: Any | None = None,
+    val_metrics: dict[str, Any] | None = None,
 ) -> Path:
     """Save a training checkpoint.
 
     The checkpoint dict contains: ``model_state_dict``, ``optimizer_state_dict``,
-    ``epoch``, ``global_step``, ``config`` (plain dict), ``metrics``,
-    and optionally ``scheduler_state_dict``.
+    ``epoch``, ``global_step``, ``config`` (plain dict), ``metrics``, optionally
+    ``scheduler_state_dict``, and optionally ``val_metrics`` (the per-horizon val
+    cosine / persistence / margin dict from ``vllatent.train.evaluate``).
     """
     import torch as _torch
 
@@ -97,6 +99,8 @@ def save_checkpoint(
     }
     if scheduler is not None:
         ckpt_dict["scheduler_state_dict"] = scheduler.state_dict()
+    if val_metrics is not None:
+        ckpt_dict["val_metrics"] = dict(val_metrics)
     _torch.save(ckpt_dict, out)
     return out
 

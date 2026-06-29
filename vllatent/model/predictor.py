@@ -120,6 +120,9 @@ class LatentPredictor(nn.Module):
         Number of history frames (H).
     horizon : int
         Number of future prediction steps (T).
+    use_action_film : bool
+        If False the action-FiLM path is skipped (dt-FiLM only) — the
+        action-free predictor ablation (B-1 sub-decision). Default True.
     """
 
     def __init__(
@@ -131,12 +134,14 @@ class LatentPredictor(nn.Module):
         dropout: float = 0.1,
         history: int = HISTORY,
         horizon: int = HORIZON,
+        use_action_film: bool = True,
     ) -> None:
         super().__init__()
         self.dim = dim
         self.depth = depth
         self.history = history
         self.horizon = horizon
+        self.use_action_film = use_action_film
         self.n_patches = PATCH_TOKENS
 
         self.blocks = nn.ModuleList([
@@ -231,11 +236,15 @@ class LatentPredictor(nn.Module):
         dt_mean = dt_seconds.mean(dim=1, keepdim=True)
 
         for i, block in enumerate(self.blocks):
-            a_scale, a_shift = self.action_film[i](action_4dof)
             d_scale, d_shift = self.dt_film[i](dt_mean)
-
-            scale1 = (a_scale + d_scale).unsqueeze(1)
-            shift1 = (a_shift + d_shift).unsqueeze(1)
+            if self.use_action_film:
+                a_scale, a_shift = self.action_film[i](action_4dof)
+                scale1 = (a_scale + d_scale).unsqueeze(1)
+                shift1 = (a_shift + d_shift).unsqueeze(1)
+            else:
+                # action-free ablation: dt-FiLM only (action_film params unused, no grad)
+                scale1 = d_scale.unsqueeze(1)
+                shift1 = d_shift.unsqueeze(1)
             scale2 = scale1
             shift2 = shift1
 

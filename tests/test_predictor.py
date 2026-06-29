@@ -90,6 +90,32 @@ class TestLatentPredictor:
             out2 = model(history, z_t, action2, dt)
         assert not torch.allclose(out1, out2, atol=1e-6)
 
+    def test_no_action_film_ignores_action(self) -> None:
+        """use_action_film=False: action is ignored even with non-zero action_film weights."""
+        model = LatentPredictor(dim=EMBED_DIM, depth=2, heads=12, use_action_film=False)
+        for film in model.action_film:
+            film.net[-1].weight.data.normal_(std=0.5)
+            film.net[-1].bias.data.normal_(std=0.5)
+        model.eval()
+        history, z_t, _, dt = _make_inputs(B=1)
+        with torch.no_grad():
+            out1 = model(history, z_t, torch.zeros(1, DOF), dt)
+            out2 = model(history, z_t, torch.ones(1, DOF) * 5.0, dt)
+        assert torch.allclose(out1, out2, atol=1e-6)
+
+    def test_no_action_film_still_uses_dt(self) -> None:
+        """dt-FiLM stays active in the action-free ablation."""
+        model = LatentPredictor(dim=EMBED_DIM, depth=2, heads=12, use_action_film=False)
+        for film in model.dt_film:
+            film.net[-1].weight.data.normal_(std=0.5)
+            film.net[-1].bias.data.normal_(std=0.5)
+        model.eval()
+        history, z_t, action, _ = _make_inputs(B=1)
+        with torch.no_grad():
+            out1 = model(history, z_t, action, torch.full((1, HORIZON), 0.2))
+            out2 = model(history, z_t, action, torch.full((1, HORIZON), 2.0))
+        assert not torch.allclose(out1, out2, atol=1e-6)
+
     def test_dt_film_changes_output(self) -> None:
         model = LatentPredictor(dim=EMBED_DIM, depth=2, heads=12)
         for film in model.dt_film:

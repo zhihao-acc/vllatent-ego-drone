@@ -35,7 +35,9 @@ class ModelOutput:
 class SportsFollowingModel(nn.Module):
     """Predictor + waypoint head, config-driven."""
 
-    def __init__(self, cfg: PredictorConfig, dim: int = EMBED_DIM) -> None:
+    def __init__(
+        self, cfg: PredictorConfig, dim: int = EMBED_DIM, use_action_film: bool = True
+    ) -> None:
         super().__init__()
         self.predictor = LatentPredictor(
             dim=dim,
@@ -45,6 +47,7 @@ class SportsFollowingModel(nn.Module):
             dropout=cfg.dropout,
             history=cfg.history,
             horizon=cfg.horizon,
+            use_action_film=use_action_film,
         )
         self.waypoint_head = WaypointHead(dim=dim)
 
@@ -66,5 +69,7 @@ class SportsFollowingModel(nn.Module):
         )
 
     @classmethod
-    def from_config(cls, cfg: PredictorConfig, dim: int = EMBED_DIM) -> SportsFollowingModel:
-        return cls(cfg=cfg, dim=dim)
+    def from_config(
+        cls, cfg: PredictorConfig, dim: int = EMBED_DIM, use_action_film: bool = True
+    ) -> SportsFollowingModel:
+        return cls(cfg=cfg, dim=dim, use_action_film=use_action_film)

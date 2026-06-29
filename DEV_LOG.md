@@ -67,7 +67,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.21 — Pre-train sanity check + viz | done | 2026-06-26 | run_sanity_check (7 pure tests) + TrainingLogger JSONL (6 torch tests) green |
 | B1.22 — Full training run | superseded | 2026-06-29 | **REPLANNED → B1.21b + B1.22a–e (B-1 = latent only)**; head → B-2a; see plan Group 8 |
 | B1.21b — Trust cleanup + remove verify/ | done | 2026-06-29 | dangling trust refs removed from schemas.py docstrings + CLAUDE.md L44 + plan scope rows; empty `vllatent/verify/` (only `__pycache__`) removed; docs-only, 465 pure green |
-| B1.22a — train_sports.py upgrade (val/scene-split/warmup/bf16/--latent-only) | pending | — | Group 8 (replan): AUTO |
+| B1.22a — train_sports.py upgrade (val/scene-split/warmup/bf16/--latent-only) | done | 2026-06-29 | --latent-only + evaluate()+persistence + split_clips_by_source + train-only NormStats→val + SequentialLR warmup→cosine + ckpt_best/early-stop + bf16(no-scaler) + AdamW param-groups + --no-action-film + --domain-weight(WeightedRandomSampler) + per-worker RNG + frozen TrainConfig(PURE); 478 pure / 64 torch / lint / mypy green; CPU latent-only smoke learns |
 | B1.22b — Full pilot DINOv3 encode (173 .npz) | pending | — | Group 8 (replan): USER-GATED (H20); only ski03 cached today |
 | B1.22c — Curate + ingest more REAL YouTube FPV | pending | — | Group 8 (replan): USER-GATED; ~5h/~90K frames target [parallel] |
 | B1.22d — Game footage (Steep) → domain=game latent-pretrain slice | pending | — | Group 8 (replan): USER-GATED [parallel] |
@@ -78,6 +78,42 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-29 — B1.22a: train_sports.py upgrade for the B-1 latent-only run
+
+**Status:** B1.22a pending → **done** (AUTO, TORCH). The single-loop B1.20 script gained
+everything the real B-1 run needs; the staged HEAD plumbing (`--stage 2/3`, freeze,
+`--init-predictor`, `--head-input`) is intentionally **NOT** here (Phase B-2).
+
+**What shipped.**
+- **`--latent-only`** — optimizes `model.predictor` params ONLY (verified: head excluded), calls
+  `model.predictor` directly, loss = `L_latent` only (fp32-cast outputs).
+- **`vllatent/train/evaluate.py`** — `evaluate()` + `per_horizon_cosine()`: per-horizon val cosine,
+  **persistence baseline** `cos(z_t, z_{t+k})`, and margin (the B-1 DoD metric); sample-weighted,
+  fp32, no_grad, restores train mode, empty-loader guard.
+- **`split_clips_by_source()`** (`sports_loader.py`, PURE) — scene-split holding out WHOLE source
+  videos (`stem.split('_')[0]`); no sub-clip leak; guarantees ≥1 train source.
+- **train-only `NormStats`** injected into val (no leakage); **`SequentialLR`** linear-warmup→cosine;
+  **`ckpt_best.pt`** + early-stop on `val_cos`/`val_margin`; **bf16** default (no GradScaler; fp16
+  keeps it); **`build_param_groups`** (`train/optim.py`, AdamW decay/no-decay wd 0.05, embeds/norms/
+  biases excluded); **`--no-action-film`** (predictor `use_action_film` flag — dt-FiLM only);
+  **`--domain-weight`** down-weights `domain=game` via `WeightedRandomSampler` over the loader's new
+  `sample_domains` (default `real`; B1.22d writes `domain=game` into the .npz); per-worker RNG reseed;
+  frozen **`TrainConfig`** (PURE, validated) snapshotted to `train_config.json`; `checkpoint.py`
+  records `val_metrics`. Writes `val_metrics.jsonl` per eval.
+- `--resume` preserved (model/opt/scheduler/step/epoch) for both modes.
+
+**Tested.** 478 pure (split + domain plumbing) + 64 torch (evaluate, optim, action-film ablation,
+all affected) green; ruff + mypy(pure) clean. Real-data CPU `--latent-only` smoke (ski03, depth=2,
+20 steps): L_latent 0.42→0.20, cosine −0.00→0.36, warmup→cosine LR, ckpt saved.
+
+**Adversarial review** (10-agent workflow): 5 findings → 2 confirmed, 3 dismissed. The "CRITICAL
+`GradScaler('cuda')` crash" was an **empirically-disproved false positive** (`torch.amp.GradScaler`'s
+first positional IS `device`; verified no crash, env torch 2.12). Applied the one real (defensive)
+fix: explicit `.float()` on the latent-only quality weight. **USER-verifiable (B1.22e/dev box):**
+the GPU `--overfit-tiny` smoke beating the zeros baseline within 200 steps.
 
 ---
 

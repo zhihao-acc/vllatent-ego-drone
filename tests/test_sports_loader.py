@@ -27,6 +27,7 @@ def _make_clip_npz(
     fps: float = 5.0,
     constant_delta: bool = False,
     spike_frame: int | None = None,
+    domain: str | None = None,
 ) -> None:
     """Write a synthetic sports .npz clip."""
     rng = np.random.default_rng(0)
@@ -40,6 +41,7 @@ def _make_clip_npz(
     frame_quality = np.clip(rng.random(n_frames).astype(np.float32), 0.2, 1.0)
     timestamps = np.arange(n_frames, dtype=np.float64) / fps
     path.parent.mkdir(parents=True, exist_ok=True)
+    extra = {"domain": np.array(domain)} if domain is not None else {}
     np.savez(
         str(path),
         latents=latents,
@@ -47,6 +49,7 @@ def _make_clip_npz(
         vo_confidence=vo_confidence,
         frame_quality=frame_quality,
         timestamps=timestamps,
+        **extra,
     )
 
 
@@ -305,6 +308,29 @@ class TestSportsTrainingDataset:
         assert sample.target_deltas.shape == (HORIZON, DOF)
         raw_delta = np.array([0.1, 0.05, -0.02, 1.0], dtype=np.float32)
         assert not np.allclose(sample.target_deltas[0], raw_delta, atol=0.01)
+
+
+class TestDomainPlumbing:
+    """B1.22a: per-clip domain tag flows to sample_domains (default 'real')."""
+
+    def test_default_domain_is_real(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "clip01.npz", n_frames=20)
+        ds = SportsTrainingDataset(tmp_path)
+        assert set(ds.sample_domains) == {"real"}
+        assert len(ds.sample_domains) == len(ds)
+
+    def test_game_domain_read_from_npz(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "game01.npz", n_frames=20, domain="game")
+        ds = SportsTrainingDataset(tmp_path)
+        assert set(ds.sample_domains) == {"game"}
+
+    def test_mixed_domains_parallel_to_samples(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "real01.npz", n_frames=15)
+        _make_clip_npz(tmp_path / "game01.npz", n_frames=20, domain="game")
+        ds = SportsTrainingDataset(tmp_path, clip_ids=["real01", "game01"])
+        assert len(ds.sample_domains) == len(ds)
+        assert ds.sample_domains.count("game") == 20 - HORIZON
+        assert ds.sample_domains.count("real") == 15 - HORIZON
 
 
 class TestImportPurity:

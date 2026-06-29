@@ -31,6 +31,8 @@ _ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.*?))?\}")
 
 # Allowed enum values (validated at the boundary).
 ENCODER_DTYPES = ("float16", "float32")
+AMP_DTYPES = ("bf16", "fp16", "fp32")
+EARLY_STOP_METRICS = ("val_cos", "val_margin")
 
 
 def _expand_env(value: Any) -> Any:
@@ -113,6 +115,61 @@ class DistillConfig:
                 raise ValueError(f"distill.{name} must be >= 0, got {getattr(self, name)}")
         if self.temperature <= 0:
             raise ValueError(f"distill.temperature must be > 0, got {self.temperature}")
+
+
+@dataclass(frozen=True)
+class TrainConfig:
+    """SWEPT training-run knobs for the B-1 latent run (PURE tier — validated, no torch).
+
+    The single source of truth for the training hyper-parameters the B-1 run sweeps:
+    optimizer, schedule, AMP precision, scene-split, eval/early-stop, and the game-domain
+    down-weight. ``train_sports.py`` builds this from CLI args (fail-fast on a bad knob) and
+    snapshots it next to the run. The model *structure* lives in ``PredictorConfig``; this is
+    the run recipe. **No Stage-2/3 / head / freeze knobs — that is Phase B-2.**
+    """
+
+    latent_only: bool = False         # B-1: train the predictor only on L_latent (skip head/L_wp)
+    lr: float = 2e-4
+    weight_decay: float = 0.05        # decoupled AdamW WD (decay group only)
+    warmup_frac: float = 0.05         # fraction of total steps for linear LR warmup → cosine
+    batch_size: int = 64
+    epochs: int = 100                 # upper bound; early-stop usually triggers first
+    amp_dtype: str = "bf16"           # one of AMP_DTYPES; bf16 ⇒ no GradScaler
+    val_frac: float = 0.2             # fraction of SOURCES (not windows) held out for val
+    eval_every_epochs: int = 1
+    early_stop_patience: int = 8      # evals without val improvement before stopping
+    early_stop_metric: str = "val_cos"  # one of EARLY_STOP_METRICS
+    domain_weight: float = 1.0        # sampling weight for domain=game clips (1.0 = no game mix)
+    use_action_film: bool = True      # False ⇒ action-free predictor ablation (dt-FiLM only)
+    grad_clip: float = 1.0            # 0 disables clipping
+    seed: int = 42
+    num_workers: int = 4
+
+    def __post_init__(self) -> None:
+        if self.lr <= 0:
+            raise ValueError(f"train.lr must be > 0, got {self.lr}")
+        if self.weight_decay < 0:
+            raise ValueError(f"train.weight_decay must be >= 0, got {self.weight_decay}")
+        if not (0.0 <= self.warmup_frac < 1.0):
+            raise ValueError(f"train.warmup_frac must be in [0, 1), got {self.warmup_frac}")
+        if not (0.0 <= self.val_frac < 1.0):
+            raise ValueError(f"train.val_frac must be in [0, 1), got {self.val_frac}")
+        if self.domain_weight < 0:
+            raise ValueError(f"train.domain_weight must be >= 0, got {self.domain_weight}")
+        if self.grad_clip < 0:
+            raise ValueError(f"train.grad_clip must be >= 0, got {self.grad_clip}")
+        for name in ("batch_size", "epochs", "eval_every_epochs", "early_stop_patience"):
+            v = getattr(self, name)
+            if not isinstance(v, int) or v < 1:
+                raise ValueError(f"train.{name} must be a positive int, got {v!r}")
+        if self.num_workers < 0:
+            raise ValueError(f"train.num_workers must be >= 0, got {self.num_workers}")
+        if self.amp_dtype not in AMP_DTYPES:
+            raise ValueError(f"train.amp_dtype must be one of {AMP_DTYPES}, got {self.amp_dtype!r}")
+        if self.early_stop_metric not in EARLY_STOP_METRICS:
+            raise ValueError(
+                f"train.early_stop_metric must be one of {EARLY_STOP_METRICS}, got {self.early_stop_metric!r}"
+            )
 
 
 @dataclass(frozen=True)
@@ -246,8 +303,11 @@ __all__ = [
     "EncoderConfig",
     "PredictorConfig",
     "DistillConfig",
+    "TrainConfig",
     "DataConfig",
     "CacheConfig",
     "IngestConfig",
     "ENCODER_DTYPES",
+    "AMP_DTYPES",
+    "EARLY_STOP_METRICS",
 ]
