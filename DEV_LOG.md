@@ -68,9 +68,9 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.22 — Full training run | superseded | 2026-06-29 | **REPLANNED → B1.21b + B1.22a–e (B-1 = latent only)**; head → B-2a; see plan Group 8 |
 | B1.21b — Trust cleanup + remove verify/ | done | 2026-06-29 | dangling trust refs removed from schemas.py docstrings + CLAUDE.md L44 + plan scope rows; empty `vllatent/verify/` (only `__pycache__`) removed; docs-only, 465 pure green |
 | B1.22a — train_sports.py upgrade (val/scene-split/warmup/bf16/--latent-only) | done | 2026-06-29 | --latent-only + evaluate()+persistence + split_clips_by_source + train-only NormStats→val + SequentialLR warmup→cosine + ckpt_best/early-stop + bf16(no-scaler) + AdamW param-groups + --no-action-film + --domain-weight(WeightedRandomSampler) + per-worker RNG + frozen TrainConfig(PURE); 478 pure / 64 torch / lint / mypy green; CPU latent-only smoke learns |
-| B1.22b — Full pilot DINOv3 encode (173 .npz) | pending | — | Group 8 (replan): USER-GATED (H20); only ski03 cached today |
-| B1.22c — Curate + ingest more REAL YouTube FPV | pending | — | Group 8 (replan): USER-GATED; ~5h/~90K frames target [parallel] |
-| B1.22d — Game footage (Steep) → domain=game latent-pretrain slice | pending | — | Group 8 (replan): USER-GATED [parallel] |
+| B1.22c — Curate + ingest more REAL YouTube FPV (FRONT-LOADED) | pending | — | Group 8: USER-GATED; do FIRST; ~90K frames; res/fps/aspect gates; on dev box |
+| B1.22b — Generate full dataset ON DEV BOX → rsync .npz to H20 | pending | — | Group 8 (revised 2026-06-29): USER-GATED (5060 Ti, NOT H20); only ski03 cached (stale, stretch-encoded) |
+| B1.22d — [CONDITIONAL] Game footage → domain=game pretrain slice | pending | — | Group 8: DEFERRED 2026-06-29; build ONLY if real-only B1.22e misses persistence; --domain-weight plumbing already shipped |
 | B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | pending | — | Group 8 (replan): USER-GATED (H20) |
 | B1.22f — Stage 2: waypoint head on frozen predictor | superseded | 2026-06-29 | **→ Phase B-2a** (deferred: MegaSaM scale + prober undecided) |
 | B1.22g — Stage 3: conditional joint fine-tune | superseded | 2026-06-29 | **→ Phase B-2a** |
@@ -78,6 +78,29 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-29 — Data-generation strategy + undistorted preprocessing (user decisions)
+
+**Status:** strategy decided (user); one code change (center-square-crop) shipped; plan revised.
+**Why.** Move the slow+cheap half (data gen) off the rented H20 onto the free dev box; rent the
+H20 only for the fast+expensive half (training). The full chain (filter → MegaSaM → DINOv3 →
+`.npz`) **already ran on the 5060 Ti in B1.10c**, so this is proven, not speculative.
+
+**Decisions.**
+- **Generate the full B-1 dataset on the DEV BOX**, then `rsync` only the `.npz` (~2 GB) to the H20;
+  H20 = training only. B1.22b retitled accordingly; runbook §E step 3 flipped to dev-box encode.
+- **Front-load curation (B1.22c) before generation** → one local pass for the whole dataset.
+- **Resolution stays 720p** (`scale=1280:720`); download caps at ≤720p. (1080p deferred — DINOv3
+  squashes to 224² anyway.)
+- **Aspect = center-square-crop** (NOT stretch): committed in `vllatent/encode/dinov3.py`
+  `_center_square_crop` — undistorted 16:9→1:1; no-op for square input. **DEPLOY FOOT-GUN:** the
+  on-drone (Jetson/RealSense) preprocessing MUST apply the same crop (Phase D). Invalidates the
+  stretch-encoded ski03 cache (regenerated in the local pass). 4 crop tests; 13 encode torch green.
+- **Game footage (B1.22d) DEFERRED to a conditional fallback** — build only if real-only B1.22e
+  fails to beat persistence with margin; `--domain-weight` plumbing already shipped in B1.22a so it
+  needs zero code changes if revived. The predictor is domain-blind ⇒ prefer real-only.
 
 ---
 

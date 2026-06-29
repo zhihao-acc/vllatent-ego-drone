@@ -837,35 +837,53 @@ predictor and trains the head on top (design in the B-2 section below).
   unit tests for split + evaluate + param-groups; `make test-torch` + lint + typecheck green.
 - **Deps:** Blocked-by: B1.18, B1.19, B1.21 (done). Blocks: B1.22e.
 
-**B1.22b — Full DINOv3 encode of the 11 accepted pilot clips on H20.**
-- Tier TORCH+ORCH / **USER-GATED** (H20)
-- Run the full ingest/encode (content filter → FPV extract → quality gate → MegaSaM VO →
-  DINOv3 encode) of all 11 accepted clips → **173 `.npz`** with provenance manifests. Today
-  only `ski03_fpv00_c000.npz` exists. BLOCKING prerequisite for any real training run. Latents
-  off git; rsync only.
-- **DoD:** 173 `.npz` in `ingest_data/latent_cache` with valid manifests; `pilot_summary`
-  reconciles; user pastes encode summary (frames, GPU, dtype fp16, BGR→RGB flag). Stays
-  `in_progress` until user verifies.
-- **Deps:** Blocked-by: B1.7 (filter done), B1.10c (E2E encode verified). Blocks: B1.22e.
+**B1.22b — Generate the full B-1 dataset ON THE DEV BOX, then rsync `.npz` to H20.**
+- Tier TORCH+ORCH / **USER-GATED** (dev box 5060 Ti — **NOT** H20)
+- **Strategy (decided 2026-06-29):** data generation is the slow+cheap half; training is the
+  fast+expensive half. The full chain (content filter → FPV extract → quality gate → MegaSaM VO →
+  DINOv3 encode) **already ran on the 5060 Ti in B1.10c**, so generate the *entire* B-1 dataset
+  locally (overnight, free) and **rsync only the `.npz` (~2 GB for 173 clips) to the H20** — rent
+  the H20 purely for the B1.22e training run. Front-load **all** curation (B1.22c) first so this is
+  ONE local generation pass. Resolution **720p** (`scale=1280:720`); aspect = **center-square-crop**
+  to 224² (committed in DINOv3 preprocessing — undistorted, must be matched on-drone in Phase D).
+- Run: `python scripts/ingest_youtube_pilot.py --device cuda` (full; no `--filter-only`/`--skip-megasam`)
+  → `ingest_data/latent_cache/*.npz`. Today only `ski03` is cached (and it's stretch-encoded → stale;
+  regenerated here under the new crop). BLOCKING prerequisite for B1.22e.
+- **DoD:** all accepted clips → `.npz` with valid manifests in `ingest_data/latent_cache`;
+  `pilot_summary` reconciles; user pastes encode summary (frame count, fp16 dtype, BGR→RGB flag,
+  per-clip OK/error). MegaSaM is the time bottleneck — watch `pilot_summary` for per-clip failures
+  (first full multi-clip run; only ski03 was validated in B1.10c). Stays `in_progress` until verified.
+  Then `rsync -avP ingest_data/latent_cache/*.npz <H20>:.../ingest_data/latent_cache/` (never git).
+- **Deps:** Blocked-by: B1.7 (filter done), B1.10c (E2E encode verified on dev), B1.22c (curation).
+  Blocks: B1.22e.
 
-**B1.22c — Curate + promote more REAL YouTube FPV.**
+**B1.22c — Curate + promote more REAL YouTube FPV (FRONT-LOADED, before B1.22b generation).**
 - Tier RESEARCH+DATA / **USER-GATED** (download/ingest)
-- §C.2 — candidates yaml + 3-level dedup + SponsorBlock + resolution/fps gates + slow-mo
-  exclusion + sport/camera quotas + typed metadata fields; promote accepted clips into
-  `configs/sports_clips.yaml`, ingest+encode on H20. Curation tooling AUTO; download/ingest/encode
-  USER-GATED. Target ~5h / ~90K frames near-term. Real-only val maintained.
+- §C.2 — candidates yaml + 3-level dedup + SponsorBlock + **resolution/fps/aspect gates** (≥720p
+  source; reject vertical/4:3 oddballs so the pre-crop frames are uniform) + slow-mo exclusion +
+  sport/camera quotas + typed metadata fields; promote accepted clips into `configs/sports_clips.yaml`.
+  **Do this FIRST** so the whole B-1 dataset is curated before the single local generation pass
+  (B1.22b). Curation tooling AUTO; download/ingest USER-GATED (on the dev box, same as B1.22b).
+  Target ~5h / ~90K frames near-term. Real-only val maintained. **If this yields enough clean real
+  data to beat persistence in B1.22e, the game slice (B1.22d) is dropped.**
 - **DoD:** `sports_clips_candidates.yaml` populated; dedup script green; N additional clips
   promoted + encoded; user verifies the additional encode.
 - **Deps:** Blocked-by: B1.7. Recommended-before final B1.24 (not blocking the pilot run B1.22e).
 
-**B1.22d — Curate + ingest game footage (Steep / Riders Republic) as a `domain=game`
+**B1.22d — [CONDITIONAL FALLBACK] Game footage (Steep / Riders Republic) as a `domain=game`
 latent-pretraining slice.**
-- Tier RESEARCH+DATA / **USER-GATED** (capture/ingest)
-- §C.3 — no-commentary longplays, HUD OFF, ≥1080p; `domain=game` metadata; ingest through the
-  same pipeline (MegaSaM VO + DINOv3 encode) → `.npz` with `domain=game` provenance. Extend
-  `manifest.py` validator with a typed game-video distinction (do NOT free-text). Used only as
-  the `L_latent` pretraining slice (B1.22e game-pretraining variant), down-weighted, never the
-  validation target.
+- Tier RESEARCH+DATA / **USER-GATED** (capture/ingest) — **DEFERRED 2026-06-29; build ONLY if
+  real-only B1.22e fails to beat persistence with margin.**
+- Rationale for deferral: the predictor is domain-blind (action+dt FiLM only), so game data
+  pollutes the shared weights; game was added purely as a *volume* hedge. If B1.22c scales real
+  YouTube enough that B1.22e beats persistence on real held-out val, **drop this step**. The
+  `--domain-weight` plumbing (WeightedRandomSampler over `loader.sample_domains`, default `real`)
+  shipped in B1.22a, so this can be added later with **zero code changes** beyond ingest.
+- §C.3 (if built) — no-commentary longplays, HUD OFF, ≥1080p source; `domain=game` metadata
+  written into the `.npz`; ingest through the same pipeline (MegaSaM VO + DINOv3 encode + the same
+  center-square-crop) → `.npz` with `domain=game` provenance. Extend `manifest.py` validator with a
+  typed game-video distinction (do NOT free-text). Used only as the `L_latent` pretraining slice
+  (B1.22e game-pretraining variant), down-weighted, never the validation target.
 - **DoD:** game clips ingested + encoded with `domain=game` tag; manifest validates the new
   provenance; user verifies the encode.
 - **Deps:** Blocked-by: B1.22a (domain plumbing). Feeds B1.22e game-pretraining variant.
@@ -920,9 +938,12 @@ latent-pretraining slice.**
    `python -c "import torch;print(torch.cuda.get_device_name(0), torch.cuda.is_bf16_supported())"`
    (expect H20 / True).
 2. **Code sync:** `git pull` (mirror) for the B1.22a upgrades. Never commit/rsync `.npz`/`runs/`/weights.
-3. **Encode (B1.22b)** ON the H20 (frames/VO/DINOv3 all need GPU): run the ingest/encode of the
-   11 accepted clips → `ingest_data/latent_cache/*.npz` (173 files). Paste back the encode summary.
-   If frames already live on dev: `rsync -avP -e 'ssh -p <PORT>' ingest_data/frames/ root@<H20>:/root/vllatent-ego-drone/ingest_data/frames/` (frames only, not latents).
+3. **Generate the dataset (B1.22b) ON THE DEV BOX** (5060 Ti — proven in B1.10c; saves H20 $$):
+   `python scripts/ingest_youtube_pilot.py --device cuda` (full chain) → `ingest_data/latent_cache/*.npz`.
+   MegaSaM is the bottleneck → run overnight. Then push **only the latents** to the H20:
+   `rsync -avP -e 'ssh -p <PORT>' ingest_data/latent_cache/*.npz root@<H20>:/root/vllatent-ego-drone/ingest_data/latent_cache/`
+   (never the videos/frames; never git). Paste the encode summary (count, fp16, BGR→RGB, per-clip OK).
+   The H20 is rented from step 4 onward (training only), not for encode.
 4. **B-1 latent run (B1.22e):** `$PY scripts/train_sports.py --cache-dir ingest_data/latent_cache --run-dir runs/b1_latent --latent-only --amp-dtype bf16 --depth 6 --batch-size 64 --lr 2e-4 --warmup-frac 0.05 --weight-decay 0.05 --val-frac 0.2 --eval-every-epochs 1 --early-stop-patience 8 --early-stop-metric val_cos --device cuda` → paste tail of `runs/b1_latent/val_metrics.jsonl` (per-horizon cosine **+ persistence margin**), steps/sec, GPU mem; confirm `ckpt_best.pt` + `norm_stats.npz`.
    - **Game-pretraining variant (optional, after B1.22d):** train on the combined real+game cache with `--domain-weight 0.4`, then fine-tune real-only from that checkpoint; keep the predictor only if real-val cosine beats the real-only run.
 5. **Pull artifacts (off git):** `rsync -avP -e 'ssh -p <PORT>' root@<H20>:/root/vllatent-ego-drone/runs/ ./runs/` (`ckpt_best.pt`, `norm_stats.npz`, `*_metrics.jsonl`). Never `git add` these.
