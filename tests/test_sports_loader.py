@@ -173,6 +173,8 @@ class TestSportsTrainingDataset:
         assert sample.target_latents.dtype == LATENT_DTYPE
         assert sample.target_deltas.shape == (HORIZON, DOF)
         assert sample.target_deltas.dtype == np.float32
+        assert sample.last_action.shape == (DOF,)
+        assert sample.last_action.dtype == np.float32
         assert sample.vo_confidence.shape == (HORIZON,)
         assert sample.dt_seconds.shape == (HORIZON,)
         assert isinstance(sample.frame_quality, float)
@@ -186,6 +188,18 @@ class TestSportsTrainingDataset:
         assert s1.history_mask.tolist() == [False, True, True]
         s2 = ds[2]
         assert s2.history_mask.tolist() == [True, True, True]
+
+    def test_last_action_zero_at_clip_start(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "clip01.npz", n_frames=20)
+        ds = SportsTrainingDataset(tmp_path)
+        s0 = ds[0]
+        np.testing.assert_array_equal(s0.last_action, np.zeros(DOF, dtype=np.float32))
+
+    def test_last_action_nonzero_after_start(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "clip01.npz", n_frames=20, constant_delta=True)
+        ds = SportsTrainingDataset(tmp_path)
+        s5 = ds[5]
+        assert not np.allclose(s5.last_action, np.zeros(DOF))
 
     def test_gt_history_not_predicted(self, tmp_path: Path) -> None:
         """History latents must be the actual cached latents, not zeros/predicted."""

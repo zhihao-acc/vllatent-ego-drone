@@ -170,6 +170,7 @@ class LatentPredictor(nn.Module):
         z_t: torch.Tensor,
         action_4dof: torch.Tensor,
         dt_seconds: torch.Tensor,
+        history_mask: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """
         Parameters
@@ -178,6 +179,7 @@ class LatentPredictor(nn.Module):
         z_t : (B, P, D)
         action_4dof : (B, 4) f32
         dt_seconds : (B, T) f32
+        history_mask : (B, H) bool, optional — True=real, False=padding
 
         Returns
         -------
@@ -198,7 +200,15 @@ class LatentPredictor(nn.Module):
         ], dim=1)
 
         n_frames = all_frames.shape[1]
-        all_frames = all_frames + self.temporal_embed[:, :n_frames]
+        te = self.temporal_embed[:, :n_frames]
+
+        if history_mask is not None:
+            mask_4d = history_mask[:, :, None, None].to(dtype=te.dtype, device=device)
+            te_hist = te[:, :self.history] * mask_4d
+            te_rest = te[:, self.history:].expand(B, -1, -1, -1)
+            te = torch.cat([te_hist, te_rest], dim=1)
+
+        all_frames = all_frames + te
 
         x = all_frames.reshape(B, n_frames * self.n_patches, self.dim)
 

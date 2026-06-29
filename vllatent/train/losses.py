@@ -8,10 +8,10 @@ combined_loss: L_total = w_quality * L_latent + lambda_wp * w_vo * L_wp.
 """
 from __future__ import annotations
 
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
-import torch
-import torch.nn.functional as F
+if TYPE_CHECKING:
+    import torch
 
 
 class LossOutput(NamedTuple):
@@ -29,15 +29,9 @@ def latent_loss(
     quality_weight: torch.Tensor,
     beta: float = 0.1,
 ) -> torch.Tensor:
-    """Quality-weighted smooth L1 on latent predictions.
+    """Quality-weighted smooth L1 on latent predictions."""
+    import torch.nn.functional as F
 
-    Parameters
-    ----------
-    predicted : (B, T, P, D)
-    target : (B, T, P, D)
-    quality_weight : (B,) — frame_quality.clamp(min=0.1)
-    beta : smooth L1 beta (DINO-world precedent: 0.1, NOT default 1.0)
-    """
     per_sample = F.smooth_l1_loss(
         predicted, target, beta=beta, reduction="none"
     ).mean(dim=(1, 2, 3))
@@ -50,14 +44,9 @@ def waypoint_loss(
     target: torch.Tensor,
     confidence_weight: torch.Tensor,
 ) -> torch.Tensor:
-    """Confidence-weighted smooth L1 on waypoint deltas.
+    """Confidence-weighted smooth L1 on waypoint deltas."""
+    import torch.nn.functional as F
 
-    Parameters
-    ----------
-    predicted : (B, T, 4)
-    target : (B, T, 4)
-    confidence_weight : (B,) — vo_confidence.mean(1).clamp(min=0.05)
-    """
     per_sample = F.smooth_l1_loss(
         predicted, target, reduction="none"
     ).mean(dim=(1, 2))
@@ -69,6 +58,8 @@ def cosine_similarity_diagnostic(
     predicted: torch.Tensor, target: torch.Tensor
 ) -> torch.Tensor:
     """Mean cosine similarity across batch (diagnostic, not gradient source)."""
+    import torch.nn.functional as F
+
     pred_flat = predicted.reshape(predicted.shape[0], -1)
     tgt_flat = target.reshape(target.shape[0], -1)
     return F.cosine_similarity(pred_flat, tgt_flat, dim=1).mean()
@@ -85,20 +76,9 @@ def combined_loss(
     lambda_waypoint: float = 1.0,
     beta: float = 0.1,
 ) -> LossOutput:
-    """Combined training loss with per-sample weighting.
+    """Combined training loss with per-sample weighting."""
+    import torch
 
-    Parameters
-    ----------
-    predicted_latents : (B, T, P, D)
-    target_latents : (B, T, P, D)
-    predicted_deltas : (B, T, 4)
-    target_deltas : (B, T, 4)
-    frame_quality : (B,)
-    vo_confidence : (B, T)
-    lambda_latent : weight for L_latent
-    lambda_waypoint : weight for L_wp
-    beta : smooth L1 beta for L_latent
-    """
     w_quality = frame_quality.clamp(min=0.1)
     w_vo = vo_confidence.mean(dim=1).clamp(min=0.05)
 

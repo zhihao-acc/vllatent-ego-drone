@@ -19,6 +19,8 @@ class TrainingLogger:
     """Append-only JSON-lines logger for training metrics."""
 
     def __init__(self, log_dir: Path, log_every: int = 50) -> None:
+        if log_every < 1:
+            raise ValueError(f"log_every must be >= 1, got {log_every}")
         self.log_dir = log_dir
         self.log_every = log_every
         self.log_dir.mkdir(parents=True, exist_ok=True)

@@ -1,4 +1,4 @@
-"""Pre-train sanity checks (TORCH tier) — B1.21.
+"""Pre-train sanity checks (PURE tier) — B1.21.
 
 Runs at training start: reads N random samples, verifies shapes/dtypes/masks.
 Raises on any inconsistency so bad data never enters a training run silently.
@@ -65,8 +65,28 @@ def _check_sample(sample: object, idx: int) -> None:
     if not np.all(np.isfinite(deltas)):
         raise ValueError(f"{prefix}.target_deltas contains non-finite values")
 
+    last_act = getattr(sample, "last_action", None)
+    if last_act is None or last_act.shape != (DOF,):
+        raise ValueError(f"{prefix}.last_action shape {getattr(last_act, 'shape', None)}, expected ({DOF},)")
+    if not np.all(np.isfinite(last_act)):
+        raise ValueError(f"{prefix}.last_action contains non-finite values")
+
     dt = getattr(sample, "dt_seconds", None)
     if dt is None or dt.shape != (HORIZON,):
         raise ValueError(f"{prefix}.dt_seconds shape {getattr(dt, 'shape', None)}")
-    if np.any(dt <= 0):
-        raise ValueError(f"{prefix}.dt_seconds contains non-positive values")
+    if not np.all(np.isfinite(dt)) or np.any(dt <= 0):
+        raise ValueError(f"{prefix}.dt_seconds contains non-finite or non-positive values")
+
+    vo = getattr(sample, "vo_confidence", None)
+    if vo is not None:
+        if not np.all(np.isfinite(vo)):
+            raise ValueError(f"{prefix}.vo_confidence contains non-finite values")
+        if np.any(vo < 0):
+            raise ValueError(f"{prefix}.vo_confidence contains negative values")
+
+    fq = getattr(sample, "frame_quality", None)
+    if fq is not None:
+        if not np.isfinite(fq):
+            raise ValueError(f"{prefix}.frame_quality is non-finite: {fq}")
+        if fq < 0 or fq > 1:
+            raise ValueError(f"{prefix}.frame_quality out of [0,1]: {fq}")

@@ -52,8 +52,9 @@ class SportsFollowingModel(nn.Module):
         predicted_latents = self.predictor(
             history_latents=batch.history_latents,
             z_t=batch.z_t,
-            action_4dof=batch.target_deltas[:, 0],
+            action_4dof=batch.last_action,
             dt_seconds=batch.dt_seconds,
+            history_mask=batch.history_mask,
         )
 
         pooled = predicted_latents.mean(dim=2)

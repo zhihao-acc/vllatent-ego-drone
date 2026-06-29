@@ -72,6 +72,11 @@ class TestTrainingLogger:
         lines = logger.log_path.read_text().strip().split("\n")
         assert len(lines) == 3
 
+    def test_log_every_zero_raises(self) -> None:
+        import pathlib
+        with pytest.raises(ValueError, match="log_every"):
+            TrainingLogger(log_dir=pathlib.Path("/tmp/test_viz"), log_every=0)
+
     def test_cosine_per_horizon_range(self, tmp_path: object) -> None:
         logger = TrainingLogger(log_dir=tmp_path)  # type: ignore[arg-type]
         B, T, P, D = 2, HORIZON, PATCH_TOKENS, EMBED_DIM

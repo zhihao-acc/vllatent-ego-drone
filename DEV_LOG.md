@@ -73,6 +73,38 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 ---
 
+## 2026-06-28 — Code review fix: 15 findings (3C/4H/5M/3L)
+
+**Status:** B1.20 still **in_progress** (fixes applied, run still USER-GATED).
+**What:** 10-agent code review on B1.17–B1.20 surfaced 15 findings. All fixed in one commit.
+
+**CRITICAL (3) — fixed:**
+- #1: `loss_out` UnboundLocalError on resume when loop never executes. Init to `None`, guard final save.
+- #2: LR scheduler restarts from peak on resume. Now saves/restores `scheduler_state_dict`.
+- #3: Config snapshot recorded defaults, not actual CLI args. `Config(predictor=pred_cfg)` embeds real hyperparams.
+
+**HIGH (4) — fixed:**
+- #4: **GT future delta leak.** `batch.target_deltas[:,0]` fed as FiLM action — IS the prediction target. Added `last_action` field (`velocities[t-1]`, zeros at clip start) to `SportsSample`/`TrainingBatch`; model uses `batch.last_action`.
+- #5: `history_mask` never forwarded to predictor. Now zeros out temporal embeddings for padded history slots.
+- #6: `NormStats` never persisted. Now calls `dataset.save_norm_stats()` after construction.
+- #7: Infinite loop when `len(dataset) < batch_size`. Guard raises `ValueError`.
+
+**MEDIUM (5) — fixed:**
+- #8: NaN `dt_seconds` passed positivity check (IEEE 754). Added `np.isfinite` guard.
+- #9: `vo_confidence`/`frame_quality` never validated. Added finite + range checks.
+- #10: `sample_weight` field kept (collate computes it, still valid for future use). No semantic change.
+- #11: Epoch counter off-by-one on early break. Break moved before `epoch += 1`.
+- #12: `TrainingLogger` ZeroDivisionError on `log_every=0`. Added `>= 1` validation.
+
+**LOW (3) — fixed:**
+- #13: `compute_baseline_loss` now uses `latent_loss`/`waypoint_loss` (same weighting as training).
+- #14: `sanity.py` docstring corrected from "TORCH tier" to "PURE tier".
+- #15: `losses.py` top-level `import torch` moved inside functions (lazy import, CI-safe).
+
+**Tests:** 465 pure + 106 torch = 571 all green.
+
+---
+
 ## 2026-06-26 — B1.20: Training script (AUTO half — script written)
 
 **Status:** B1.20 pending → **in_progress** (script AUTONOMOUS; run USER-GATED).

@@ -70,6 +70,7 @@ class SportsSample:
     history_mask: np.ndarray     # (H,) bool — True=real, False=padding
     target_latents: np.ndarray   # (T, P, D) fp16 — GT future latents (L_latent targets)
     target_deltas: np.ndarray    # (T, 4) f32 — preprocessed future deltas (L_wp targets)
+    last_action: np.ndarray      # (4,) f32 — most recent known action (delta t-1→t), zeros at clip start
     vo_confidence: np.ndarray    # (T,) f32 — per-step VO confidence
     frame_quality: float         # composite quality of z_t frame
     dt_seconds: np.ndarray       # (T,) f32 — inter-frame time deltas
@@ -263,6 +264,11 @@ class SportsTrainingDataset:
             ).astype(np.float32)
             target_v = target_v + noise
 
+        if t > 0 and t - 1 < velocities.shape[0]:
+            last_act = self._norm_stats.normalize(velocities[t - 1])
+        else:
+            last_act = np.zeros(DOF, dtype=np.float32)
+
         fq = float(clip["frame_quality"][t])
 
         return SportsSample(
@@ -271,6 +277,7 @@ class SportsTrainingDataset:
             history_mask=mask,
             target_latents=target_lat,
             target_deltas=target_v,
+            last_action=last_act,
             vo_confidence=vo_conf,
             frame_quality=fq,
             dt_seconds=dt_sec,

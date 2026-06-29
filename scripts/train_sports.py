@@ -18,7 +18,6 @@ import time
 from pathlib import Path
 
 import torch
-import torch.nn.functional as F
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
@@ -33,7 +32,7 @@ from vllatent.train.checkpoint import (
     seed_everything,
     snapshot_config,
 )
-from vllatent.train.losses import combined_loss
+from vllatent.train.losses import combined_loss, latent_loss, waypoint_loss
 from vllatent.train.sanity import run_sanity_check
 from vllatent.train.viz import TrainingLogger
 
@@ -53,11 +52,15 @@ def compute_baseline_loss(
 
     z = torch.zeros_like(batch.target_latents).to(device)
     tgt_lat = batch.target_latents.to(device)
-    l_lat = F.smooth_l1_loss(z, tgt_lat, beta=0.1).item()
+    fq = batch.frame_quality.to(device)
+    w_quality = fq.clamp(min=0.1)
+    l_lat = latent_loss(z, tgt_lat, w_quality, beta=0.1).item()
 
     z_wp = torch.zeros_like(batch.target_deltas).to(device)
     tgt_wp = batch.target_deltas.to(device)
-    l_wp = F.smooth_l1_loss(z_wp, tgt_wp).item()
+    vo = batch.vo_confidence.to(device)
+    w_vo = vo.mean(dim=1).clamp(min=0.05)
+    l_wp = waypoint_loss(z_wp, tgt_wp, w_vo).item()
 
     return l_lat, l_wp
 
@@ -66,12 +69,12 @@ def train(args: argparse.Namespace) -> None:
     device = args.device
     seed_everything(args.seed)
 
-    config = Config()
     pred_cfg = PredictorConfig(
         depth=args.depth,
         heads=args.heads,
         dropout=args.dropout,
     )
+    config = Config(predictor=pred_cfg)
 
     run_dir = Path(args.run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -88,12 +91,19 @@ def train(args: argparse.Namespace) -> None:
     run_sanity_check(dataset, n_samples=min(5, len(dataset)))
     print("[train] Sanity check PASSED")
 
+    dataset.save_norm_stats(run_dir / "norm_stats.npz")
+    print(f"[train] Saved norm_stats to {run_dir / 'norm_stats.npz'}")
+
     model = SportsFollowingModel(pred_cfg, dim=EMBED_DIM).to(device)
     n_params = sum(p.numel() for p in model.parameters())
     print(f"[train] Model: {n_params:,} parameters")
 
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=args.lr, weight_decay=args.weight_decay
+    )
+
+    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
+        optimizer, T_max=args.max_steps, eta_min=args.lr * 0.01
     )
 
     start_step = 0
@@ -103,6 +113,10 @@ def train(args: argparse.Namespace) -> None:
         ckpt = load_checkpoint(args.resume, model, optimizer, map_location=device)
         start_step = ckpt["global_step"] + 1
         start_epoch = ckpt["epoch"]
+        if "scheduler_state_dict" in ckpt:
+            scheduler.load_state_dict(ckpt["scheduler_state_dict"])
+        else:
+            scheduler.last_epoch = start_step
         print(f"[train] Resumed at step {start_step}, epoch {start_epoch}")
 
     if args.overfit_tiny:
@@ -118,6 +132,11 @@ def train(args: argparse.Namespace) -> None:
         )
         print(f"[train] Overfit-tiny mode: {n_samples} samples, {args.max_steps} steps")
     else:
+        if len(dataset) < args.batch_size:
+            raise ValueError(
+                f"Dataset ({len(dataset)} samples) smaller than batch_size ({args.batch_size}). "
+                f"Use --overfit-tiny or reduce --batch-size."
+            )
         loader = torch.utils.data.DataLoader(
             dataset,
             batch_size=args.batch_size,
@@ -129,15 +148,12 @@ def train(args: argparse.Namespace) -> None:
     baseline_lat, baseline_wp = compute_baseline_loss(dataset, device=device)
     print(f"[train] Baseline (zeros): L_latent={baseline_lat:.4f}, L_wp={baseline_wp:.4f}")
 
-    scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-        optimizer, T_max=args.max_steps, eta_min=args.lr * 0.01
-    )
-
     logger = TrainingLogger(log_dir=run_dir, log_every=args.log_every)
 
     model.train()
     step = start_step
     epoch = start_epoch
+    loss_out = None
     t0 = time.time()
 
     while step < args.max_steps:
@@ -151,6 +167,7 @@ def train(args: argparse.Namespace) -> None:
                 history_mask=batch.history_mask.to(device),
                 target_latents=batch.target_latents.to(device),
                 target_deltas=batch.target_deltas.to(device),
+                last_action=batch.last_action.to(device),
                 vo_confidence=batch.vo_confidence.to(device),
                 frame_quality=batch.frame_quality.to(device),
                 dt_seconds=batch.dt_seconds.to(device),
@@ -202,19 +219,24 @@ def train(args: argparse.Namespace) -> None:
                 save_checkpoint(
                     model, optimizer, epoch, step, config,
                     {"loss": loss_out.total.item()}, ckpt_path,
+                    scheduler=scheduler,
                 )
                 print(f"[train] Saved checkpoint: {ckpt_path}")
 
             step += 1
 
+        if step >= args.max_steps:
+            break
         epoch += 1
 
-    final_path = run_dir / "ckpt_final.pt"
-    save_checkpoint(
-        model, optimizer, epoch, step - 1, config,
-        {"loss": loss_out.total.item()}, final_path,
-    )
-    print(f"[train] Final checkpoint: {final_path}")
+    if loss_out is not None:
+        final_path = run_dir / "ckpt_final.pt"
+        save_checkpoint(
+            model, optimizer, epoch, step - 1, config,
+            {"loss": loss_out.total.item()}, final_path,
+            scheduler=scheduler,
+        )
+        print(f"[train] Final checkpoint: {final_path}")
     print(f"[train] Done. {step} steps in {time.time() - t0:.1f}s")
 
 

@@ -75,27 +75,29 @@ def save_checkpoint(
     config: Config,
     metrics: dict[str, float],
     path: str | Path,
+    scheduler: Any | None = None,
 ) -> Path:
     """Save a training checkpoint.
 
     The checkpoint dict contains: ``model_state_dict``, ``optimizer_state_dict``,
-    ``epoch``, ``global_step``, ``config`` (plain dict), ``metrics``.
+    ``epoch``, ``global_step``, ``config`` (plain dict), ``metrics``,
+    and optionally ``scheduler_state_dict``.
     """
     import torch as _torch
 
     out = Path(path)
     out.parent.mkdir(parents=True, exist_ok=True)
-    _torch.save(
-        {
-            "model_state_dict": model.state_dict(),
-            "optimizer_state_dict": optimizer.state_dict(),
-            "epoch": epoch,
-            "global_step": global_step,
-            "config": _config_to_dict(config),
-            "metrics": dict(metrics),
-        },
-        out,
-    )
+    ckpt_dict: dict[str, Any] = {
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": optimizer.state_dict(),
+        "epoch": epoch,
+        "global_step": global_step,
+        "config": _config_to_dict(config),
+        "metrics": dict(metrics),
+    }
+    if scheduler is not None:
+        ckpt_dict["scheduler_state_dict"] = scheduler.state_dict()
+    _torch.save(ckpt_dict, out)
     return out
 
 

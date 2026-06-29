@@ -18,6 +18,7 @@ def _make_batch(B: int = 2, dim: int = EMBED_DIM) -> TrainingBatch:
         history_mask=torch.ones(B, HISTORY, dtype=torch.bool),
         target_latents=torch.randn(B, HORIZON, PATCH_TOKENS, dim),
         target_deltas=torch.randn(B, HORIZON, DOF),
+        last_action=torch.randn(B, DOF),
         vo_confidence=torch.ones(B, HORIZON),
         frame_quality=torch.ones(B),
         dt_seconds=torch.full((B, HORIZON), 0.2),

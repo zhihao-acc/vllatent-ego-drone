@@ -42,6 +42,7 @@ class TestCollate:
         assert batch.history_mask.shape == (B, HISTORY)
         assert batch.target_latents.shape == (B, HORIZON, PATCH_TOKENS, EMBED_DIM)
         assert batch.target_deltas.shape == (B, HORIZON, DOF)
+        assert batch.last_action.shape == (B, DOF)
         assert batch.vo_confidence.shape == (B, HORIZON)
         assert batch.frame_quality.shape == (B,)
         assert batch.dt_seconds.shape == (B, HORIZON)
@@ -56,6 +57,7 @@ class TestCollate:
         assert batch.history_latents.dtype == torch.float16
         assert batch.history_mask.dtype == torch.bool
         assert batch.target_deltas.dtype == torch.float32
+        assert batch.last_action.dtype == torch.float32
         assert batch.vo_confidence.dtype == torch.float32
         assert batch.frame_quality.dtype == torch.float32
         assert batch.dt_seconds.dtype == torch.float32
