@@ -66,6 +66,9 @@ secrets/
 # === Wild-video ingestion pipeline raw/intermediate data ===
 /ingest_data/
 
+# === E2E test-run report artifacts (frames/plots/caches; keep only .md reports) ===
+/reports/e2e_test/
+
 # === codegraph project-scoped index (DB lives here; never commit) ===
 .codegraph/
 

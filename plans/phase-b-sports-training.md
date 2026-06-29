@@ -651,42 +651,348 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 
 ---
 
-### Group 8 — Full Training + Verification
+### Group 8 — Latent World-Model Training + Verification (B-1)
 
-**B1.22 — Full training run: YouTube pilot (+ CosFly if revisited).**
-- Tier TORCH / USER-GATED (H20)
-- Train on all available data (YouTube pilot clips; CosFly deferred). Scene-split sacred
-  val: hold out 2-3 complete clips. AdamW, cosine LR, batch size fit to GPU. Log train/val
-  loss, per-step cosine sim, waypoint L1 error, speed (steps/sec). Run on AutoDL H20.
-  Training playbook: "scene-split sacred val", "boring HP", "track speed."
-- **DoD:** Trained checkpoint. Val loss plateaus. Latent cosine sim > 0.7 on val. Waypoint L1
-  within 2x of training-set L1 on val.
-- **Test:** User monitors H20. Reviews val metrics.
-- **Deps:** blocks B1.23. Blocked-by: B1.20. (B1.8 no longer blocking — CosFly deferred.)
+> **REPLANNED 2026-06-28 · scope-cut 2026-06-29.** Supersedes the single-step B1.22.
+> **B-1 now trains the latent predictor ONLY — the waypoint head is DEFERRED to B-2** (user
+> 2026-06-29). Rationale: the head's `L_wp` target is the **MegaSaM delta**, whose monocular-VO
+> **scale is inconsistent/unresolved across clips**, and the head architecture (MLP vs
+> PI-Prober vs attentive-pool) is **undecided** — both are open problems. The predictor, by
+> contrast, trains on **clean GT DINOv3 latents** with no scale ambiguity, so it is the
+> well-posed half. **B-1 DoD = a good latent world model.** Staged training stays the umbrella
+> recipe (predictor first in B-1; head second in B-2). Plus a **revised training policy** (the
+> current `train_sports.py` has no val loop / scene-split / warmup / early-stop / best-ckpt and
+> uses fp16+GradScaler — all fixed here) and an **expanded data plan** (full pilot encode, more
+> real YouTube, game footage as a **latent-pretraining** source). The rejected
+> `reports/training-policy-research-2026-06-25.md` (AdaLN / visual bottleneck / SkyJEPA / GRPO)
+> stays **REFERENCE ONLY**; its **PI-Prober** is reopened as a live **B-2 head-architecture
+> candidate** (the "should we adopt the prober?" question). Backed by a 9-agent
+> research+adversarial workflow (2026-06-28).
 
-**B1.23 — Jetson inference speed check.**
-- Tier RESEARCH / USER-GATED (Orin NX access)
-- Export trained model to TorchScript/ONNX, run on Orin NX. Measure encoder (frozen) +
-  predictor + waypoint head end-to-end. Target: < 50ms (20 Hz).
-  Training playbook: "track speed (Jetson)."
-- **DoD:** Written benchmark. GO / CONDITIONAL-GO for deployment speed.
-- **Test:** User runs on Orin NX.
-- **Deps:** blocks B1.24. Blocked-by: B1.22.
+#### Framing — what B-1 Group 8 is (and is not)
 
-**B1.24 — Phase B-1 DoD verification.**
-- Tier DOC / USER-GATED
-- Verify: (1) pipeline bugs fixed, (2) schemas revised, (3) encoder decision locked,
-  (4) data acquired + quality validated, (5) cache pipeline green, (6) predictor trains
-  (overfit passes, full train converges), (7) val metrics acceptable, (8) Jetson speed OK.
-- **DoD:** Written Phase B-1 completion note. All tests green.
+**B-1 deliverable = a good latent world model** — an action+dt-conditioned DINOv3-latent
+predictor that anticipates future latents better than a persistence baseline, verified on real
+held-out skiing FPV. **NOT** a deployable waypoint policy. The run is **overfitting-dominated**
+on the pilot (~8.6K frames / 11 source videos → ~7.5K sliding windows; an epoch on H20 is
+seconds), so B-1 is an **architecture-validation + data-scale** effort: prove the predictor
+learns, then grow the data.
+
+**Deferred to B-2 (unresolved — user decision 2026-06-29):**
+- **Waypoint head training** (`L_wp`) — the entire Stage-2/Stage-3 head pipeline.
+- **MegaSaM scale inconsistency** — monocular VO recovers translation only up to an unknown,
+  per-clip, drifting scale. Current `normalize_scale("median_speed")` + per-dataset velocity
+  z-score make the *distribution* comparable but do NOT fix cross-clip metric scale, so absolute
+  `L_wp` targets are unreliable. Candidate B-2 fixes (to research): metric-depth anchoring from
+  MegaSaM's UniDepth stage; scale-free waypoint parameterization (unit-direction + log-speed);
+  per-clip scale alignment; GPS/IMU anchoring on custom data. **B-1 sidesteps this** — the
+  predictor's action-FiLM uses the (normalized) delta only as a *soft conditioning hint*, never
+  as a regression target, so scale error there is tolerable, not load-bearing.
+- **Prober decision** — MLP vs SkyJEPA-style PI-Prober vs attentive-pool head; a B-2
+  head-architecture question now that the head is designed in B-2.
+
+**Data reality (corrected 2026-06-28).** Real follow-cam FPV is genuinely scarce, and the
+plan's assumed B-3 volume saviour **Ego-Exo4D does not fit** (cooking/music/dance/basketball/
+soccer/bouldering — real texture but **no skiing and no sustained high-speed ego-translation
+following a subject**; wrong dynamics for our task — see Open Decision #9). **Game footage
+(极限国度 / Ubisoft Steep, Riders Republic) has the opposite trade-off — synthetic texture but
+exactly the right structure (follow-cam, downhill, alpine, fast translation).** Because the
+predictor is **domain-blind** (only action-FiLM + dt-FiLM; no "real vs game" input), game
+frames train the *same shared weights* as real — so game data is used as a **measured
+latent-pretraining source** (B-1's own `L_latent` objective): pretrain on real+game, then
+**fine-tune the predictor on real-only**, and **keep the game contribution only if it improves
+cosine on a real held-out val** (safety net against domain pollution). This turns "is there
+enough data?" into a measured experiment.
+
+#### A. Revised training policy (replaces "AdamW + cosine, batch-to-GPU")
+
+- **Keep the LOCKED stack** — frozen+cached DINOv3 ViT-B/16 D=768; predictor depth=6 /
+  heads=12 / mlp_ratio=4 / dropout=0.1 (~57M params). The `WaypointHead` exists in the
+  assembled model but is **UNTRAINED in B-1** (B-2). **No new modules** (no PI-Prober / AdaLN /
+  visual bottleneck / readout token / SkyJEPA / GRPO — all REFERENCE-ONLY).
+- **Precision:** default `--amp-dtype bf16` on H20 (Hopper sm_90) — **drop GradScaler**; cast
+  predictor outputs to **fp32 before** `smooth_l1` / `mean` / `cosine` (latents are fp16 on
+  disk; the ~602K-element reductions and the cosine diagnostic must be exact). Keep `fp16`
+  (with GradScaler, checkpoint `scaler.state_dict()`) and `fp32` as fallback flags.
+- **Overfitting is the primary lever** (small data): keep dropout 0.1 + existing temporal-
+  jitter ±1 + Gaussian delta-noise; switch AdamW to **two param groups** — `weight_decay=0.05`
+  on weight matrices (`ndim>=2`), `0.0` on biases / LayerNorm / `temporal_embed` / FiLM
+  zero-init (replaces the flat `wd=0.01`); grad-clip 1.0.
+- **LR + warmup:** add **linear warmup** (~5% of steps) → `CosineAnnealingLR` (`eta_min=1e-6`)
+  via `SequentialLR` (current script has NO warmup). AdamW betas (0.9, 0.95). Batch 64 default
+  (96 GB fits more, but 64 generalizes better on ~7.5K windows); `grad_accum=1`. DataLoader
+  `num_workers 4-8`, `pin_memory`, `drop_last` (train), per-worker/per-epoch RNG reseed.
+- **Validation (load-bearing — these decide validity):**
+  - **Scene-split by SOURCE video, not sub-clip.** Many sub-clips share a source (e.g. all
+    `ski03_*`); splitting by sub-clip leaks. Group by `stem.split('_')[0]`; hold out **2–3
+    whole source videos** spanning the sport mix.
+  - **NormStats from TRAIN clips only,** injected into val (`SportsTrainingDataset(...,
+    norm_stats=train_ds.norm_stats)`) — fixes the current per-dataset leak (`train_sports.py:94`
+    computes stats over the whole dataset). NormStats only affect the action-FiLM input in B-1
+    (no `L_wp` target). Save the **train** stats as the inference stats.
+  - **Best-ckpt + early-stop:** evaluate every epoch / `--eval-every`; keep `ckpt_best.pt`
+    (this is what ships to B1.23, **not** `ckpt_final.pt`); patience ~5–10 evals (the 57M
+    predictor memorizes fast here).
+  - **Latent metrics** (the B-1 DoD signal): per-horizon (t=1..4) **val latent cosine** AND the
+    margin over a **persistence baseline** (`cos(z_t, z_{t+k})` — "next frame ≈ current frame";
+    a latent predictor that can't beat persistence has learned nothing). At N=11 sources, treat
+    `val cosine > 0.7` as a DIRECTIONAL high-variance signal (rotate 2–3 folds); the
+    **persistence margin** is the more robust pass signal. Optional richer diagnostics:
+    per-patch cosine, nearest-neighbour frame retrieval from the predicted latent.
+- **Loss unchanged** (LOCKED): `L_latent` = smooth-L1 β=0.1, frame_quality-weighted, **sole**
+  loss in B-1 (no pixel decoder — DINO-WM ablation shows reconstruction *hurts*; `L_wp` is B-2).
+  FiLM stays locked (AdaLN parked as a B-2 experiment knob).
+
+#### B. The B-1 training run — latent world model (predictor only)
+
+Staged training, Stage 1 only. The `WaypointHead` is strictly **downstream** of the predictor,
+so deferring it to B-2 is a clean cut: B-1 trains the predictor in isolation; B-2 freezes this
+predictor and trains the head on top (design in the B-2 section below).
+
+- **TRAIN the predictor only** (`blocks`, `action_film`, `dt_film`, `temporal_embed`,
+  `output_norm`). The head is not optimized and `L_wp` is not computed (`--latent-only`).
+- **LOSS:** `L_latent` only (smooth-L1 β=0.1, frame_quality-weighted). **TARGET:** GT future
+  DINOv3 latents from the cache — clean, no scale ambiguity (the whole reason B-1 is the
+  well-posed half). LR 2e-4 (→1.5e-4 if overfitting), warmup→cosine, WD 0.05 param groups, bf16,
+  dropout 0.1, batch 64. Early-stop on **val latent cosine vs persistence margin**.
+- **Action conditioning (kept).** action-FiLM is fed the normalized `last_action` (previous
+  observed delta) and dt-FiLM the `dt_seconds` — this is what makes it a *world-action* model,
+  not just a video model. The MegaSaM scale problem is **non-load-bearing here** (soft
+  conditioning hint, not a target). *Sub-decision (Open G):* run **action-conditioned** (default)
+  or pure **action-free** (`--no-action-film`, fully MegaSaM-independent) — default keeps it.
+- **HANDOFF:** save `ckpt_best.pt` (predictor) + `norm_stats.npz` (train-only) + config snapshot.
+  This is the shipped B-1 artifact and the B-2 Stage-2 starting point.
+- **Game-pretraining variant (the data-scale experiment):** first pretrain on **real+game**
+  (`domain=game` slice, down-weighted via `frame_quality`), then **fine-tune the predictor on
+  real-only**; **keep the game contribution only if real-val cosine improves** over real-only
+  training. Measured, not assumed (§Framing).
+- **Invariants:** NormStats computed **once** on train clips, reused verbatim (and at inference);
+  latents are **not** normalized (raw fp16). `--resume` restores optimizer/scheduler within the
+  run. **No EMA / no VICReg / no anti-collapse** (frozen cached target cannot collapse — repo
+  invariant).
+
+> **Deferred to B-2 (head training):** freeze this predictor (`requires_grad_(False)` +
+> `eval()` + `no_grad`) and train the head on its PREDICTED (not GT) mean-pooled latents; the
+> mean-pool-washes-out-heading risk, the `mean_minus_zt` / attentive-pool escalation, the
+> MLP-vs-PI-Prober decision, the MegaSaM-scale fix, and an optional joint fine-tune all live in
+> B-2. See the Phase B-2 section.
+
+#### C. Data plan
+
+1. **(BLOCKING) Full pilot encode** — today only `ski03_fpv00_c000.npz` is cached; B1.7 ran
+   `--filter-only`. Encode all **11 accepted clips** (38 FPV ranges, **173 sub-clips** @10s/5fps,
+   ~8.6K frames) on the H20 → 173 `.npz` + manifests. Highest-value B-1 action; hard prerequisite.
+2. **Expanded real YouTube** (parallel) — harvest named follow-cam/FPV channels (**Dutch Drone
+   Gods**, **Johnny FPV**, **Gab707 / Gabriel Kocher** ski-FPV, **GoPro** Awards/follow-cam,
+   **Red Bull / RedBullBike / RedBullSnow**, **TRYP FPV**, **Richard Permin/Fastwood**, wingsuit
+   **Soul Flyers / TEEM**) + **AirVuz** curated collections via `yt-dlp --flat-playlist` + title
+   regex `(?i)(fpv|follow|chase|one[ -]?take|no cuts|pov)` into a NEW
+   `configs/sports_clips_candidates.yaml`. 3-level dedup (`video_id` → frame pHash → sub-clip
+   pHash after SBD). SponsorBlock pre-pass. Gates: ≥1080p, native ≥24fps, exclude artificial
+   slow-mo (corrupts MegaSaM deltas). Sport + camera-behavior quotas. Realistic target **~5h ≈
+   ~90K frames** (~600–700 accepted 10s sub-clips) from ~8–13h curated source (~62% yield).
+3. **Game footage as Stage-1 pretraining** (parallel) — Steep / Riders Republic no-commentary
+   longplays, **HUD/overlay OFF** (YOLO-World rejects overlays), ≥1080p. `domain=game` tag.
+   **No clean-GT-trajectory advantage** (no telemetry/camera-path export in either game → deltas
+   carry the same MegaSaM noise as YouTube), so used for **L_latent appearance/dynamics
+   diversity** in Stage-1 pretraining, down-weighted via `frame_quality` and gated on real-val
+   improvement (Stage 1 scale variant, §B). Never the B-1 architecture-validation training target.
+4. **AirSim — DEFER to B-3+.** The A5.13 render harness yields clean GT 6-DoF deltas, but its
+   UE4 urban/suburban scenes are domain-wrong and have no moving athlete to follow. Becomes the
+   right controllable source only after a snowy scene + animated athlete + scripted follow
+   trajectory are authored (substantial build).
+5. **Metadata fields** (new, typed) in the clip yaml: `domain {real,game}`, `camera`, `subject`,
+   `creator`, `license`, `source_resolution`, `source_fps`, `slowmo`, `time_ranges`, `env`,
+   `accept_status`.
+6. **Storage/ops:** 196×768 fp16 ≈ 0.29 MB/frame → ~25 GB per 90K frames. Latents/`runs/`/videos
+   stay **off git** (no-blobs); rsync only; provenance manifest per clip is the cache key.
+
+#### D. Steps
+
+**B1.21b — Cleanup stale trust references + remove empty `verify/`.**
+- Tier PURE+DOC / AUTO
+- Remove leftover `trust` references from the trust-mechanism removal (commit `125576f`):
+  `schemas.py` docstring, `CLAUDE.md` OPEN-list line ~44, plan references; delete empty
+  `vllatent/verify/` (only `__pycache__`). No behaviour change. `PredictorOutput` shape unchanged.
+- **DoD:** No `trust` refs remain in those spots; `vllatent/verify/` gone; `make test` + lint +
+  typecheck green.
+- **Deps:** none (parallel cleanup).
+
+**B1.22a — Upgrade `train_sports.py` for the B-1 latent-only run.**
+- Tier TORCH / AUTO
+- Add what the single-loop script lacks: **`--latent-only`** predictor-training mode (optimize
+  `model.predictor.parameters()`, compute `L_latent` only, skip head/`L_wp`); `@torch.no_grad
+  evaluate()` → per-horizon val latent cosine + **persistence-baseline margin** (`cos(z_t,
+  z_{t+k})`); `split_clips_by_source()` (group by `stem.split('_')[0]`, hold out whole sources);
+  train-only NormStats injected into val; `SequentialLR` warmup→cosine; `ckpt_best.pt` +
+  early-stop; `--amp-dtype` default bf16 (drop scaler, cast outputs fp32); AdamW decay/no-decay
+  param groups (wd 0.05); `--no-action-film` toggle; `--domain-weight` for the game slice;
+  per-worker RNG reseed. Add a frozen **`TrainConfig`** (PURE tier) for the swept knobs;
+  `checkpoint.py` records `val_metrics`. **The staged HEAD plumbing (`--stage 2/3`, predictor
+  freeze, `--init-predictor`, `--head-input`, joint control) is B-2, NOT built here.**
+- **DoD:** new flags parse + run; `evaluate()` returns per-horizon cosine + persistence margin
+  on a synthetic 2-source fixture; scene-split holds out whole sources (no window leak); val
+  uses train NormStats; bf16 path has no scaler; `--latent-only` optimizes only the predictor;
+  existing `--overfit-tiny` smoke still beats the persistence/zeros baseline within 200 steps;
+  unit tests for split + evaluate + param-groups; `make test-torch` + lint + typecheck green.
+- **Deps:** Blocked-by: B1.18, B1.19, B1.21 (done). Blocks: B1.22e.
+
+**B1.22b — Full DINOv3 encode of the 11 accepted pilot clips on H20.**
+- Tier TORCH+ORCH / **USER-GATED** (H20)
+- Run the full ingest/encode (content filter → FPV extract → quality gate → MegaSaM VO →
+  DINOv3 encode) of all 11 accepted clips → **173 `.npz`** with provenance manifests. Today
+  only `ski03_fpv00_c000.npz` exists. BLOCKING prerequisite for any real training run. Latents
+  off git; rsync only.
+- **DoD:** 173 `.npz` in `ingest_data/latent_cache` with valid manifests; `pilot_summary`
+  reconciles; user pastes encode summary (frames, GPU, dtype fp16, BGR→RGB flag). Stays
+  `in_progress` until user verifies.
+- **Deps:** Blocked-by: B1.7 (filter done), B1.10c (E2E encode verified). Blocks: B1.22e.
+
+**B1.22c — Curate + promote more REAL YouTube FPV.**
+- Tier RESEARCH+DATA / **USER-GATED** (download/ingest)
+- §C.2 — candidates yaml + 3-level dedup + SponsorBlock + resolution/fps gates + slow-mo
+  exclusion + sport/camera quotas + typed metadata fields; promote accepted clips into
+  `configs/sports_clips.yaml`, ingest+encode on H20. Curation tooling AUTO; download/ingest/encode
+  USER-GATED. Target ~5h / ~90K frames near-term. Real-only val maintained.
+- **DoD:** `sports_clips_candidates.yaml` populated; dedup script green; N additional clips
+  promoted + encoded; user verifies the additional encode.
+- **Deps:** Blocked-by: B1.7. Recommended-before final B1.24 (not blocking the pilot run B1.22e).
+
+**B1.22d — Curate + ingest game footage (Steep / Riders Republic) as a `domain=game`
+latent-pretraining slice.**
+- Tier RESEARCH+DATA / **USER-GATED** (capture/ingest)
+- §C.3 — no-commentary longplays, HUD OFF, ≥1080p; `domain=game` metadata; ingest through the
+  same pipeline (MegaSaM VO + DINOv3 encode) → `.npz` with `domain=game` provenance. Extend
+  `manifest.py` validator with a typed game-video distinction (do NOT free-text). Used only as
+  the `L_latent` pretraining slice (B1.22e game-pretraining variant), down-weighted, never the
+  validation target.
+- **DoD:** game clips ingested + encoded with `domain=game` tag; manifest validates the new
+  provenance; user verifies the encode.
+- **Deps:** Blocked-by: B1.22a (domain plumbing). Feeds B1.22e game-pretraining variant.
+
+**B1.22e — B-1 training run: latent world model on H20 (predictor only, `L_latent`).**
+- Tier TORCH / **USER-GATED** (H20)
+- §B. Dev-box (5060 Ti, fp32) tiny smoke first (confirm `L_latent` decreases + per-horizon
+  cosine rises **above persistence**), then H20: `--latent-only`, bf16, LR 2e-4 warmup→cosine,
+  WD 0.05 param groups, batch 64, scene-split sacred val, early-stop on val
+  cosine-vs-persistence (patience ~8). Save `ckpt_best.pt` (predictor) + train-only
+  `norm_stats.npz`. **Game-pretraining variant:** pretrain on real+game → fine-tune predictor on
+  real-only; keep game only if real-val cosine improves. Optional depth-2–4 overfitting sweep.
+- **DoD (good latent world model):** per-horizon val latent cosine **beats the persistence
+  baseline** by a clear margin and `t=1` cosine is high (directional ≥0.7 at N=11 sources,
+  rotate 2–3 folds); cosine degrades gracefully over the horizon; `ckpt_best` + `norm_stats`
+  saved; user pastes `val_metrics.jsonl` tail (cosine + persistence margin per horizon) +
+  steps/sec + GPU mem.
+- **Deps:** Blocked-by: B1.22a, B1.22b. Blocks: B1.23. (B1.22c/B1.22d feed the data-scale variant.)
+
+> **B1.22f / B1.22g (waypoint head Stage 2 + Stage 3) → MOVED to Phase B-2** (deferred
+> 2026-06-29: unresolved MegaSaM scale + undecided head architecture). See the Phase B-2 section.
+
+**B1.23 — Jetson Orin NX inference speed check (<50 ms / 20 Hz).**
+- Tier RESEARCH / **USER-GATED** (Orin NX)
+- Export the shipped `ckpt_best` (predictor) to TorchScript/ONNX; on Orin NX measure frozen
+  DINOv3 encoder + predictor (depth=6, or the swept depth) end-to-end. The waypoint head (tiny
+  MLP, added in B-2) has negligible cost — note it, don't block on it. Folds in the deferred
+  B1.11 Orin benchmark — if the predictor TRT FP16 budget is blown, the depth-2–4 sweep
+  checkpoint is the fallback.
+- **DoD:** written benchmark; encoder+predictor <50 ms = GO, else CONDITIONAL-GO with the
+  smaller-depth checkpoint; user pastes latency.
+- **Deps:** Blocked-by: B1.22e. Blocks: B1.24.
+
+**B1.24 — Phase B-1 DoD verification (good latent world model).**
+- Tier DOC / **USER-GATED**
+- Verify: (1) pipeline bugs fixed, (2) schemas revised + trust cleanup, (3) encoder locked
+  (D=768 depth=6), (4) pilot encoded + (recommended) real data expanded + quality validated,
+  (5) cache pipeline green, (6) **latent predictor trains — overfit passes; the H20 run beats
+  persistence on real held-out val; per-horizon cosine acceptable as a directional signal**,
+  (7) encoder+predictor Jetson speed OK. Waypoint head, `L_wp`, prober choice, and MegaSaM-scale
+  are explicitly **out of B-1 scope** (B-2).
+- **DoD:** written Phase B-1 completion note; `make test && make test-torch && make lint &&
+  make typecheck` all green; `ckpt_best` lineage + val metrics recorded.
 - **Test:** `make test && make test-torch && make lint && make typecheck`
-- **Deps:** blocked-by all B1.x.
+- **Deps:** blocked-by B1.22a–e, B1.23.
+
+#### E. End-to-end USER-GATED runbook (H20 — SSH hands-off; agent pastes, user runs)
+
+1. **H20 setup** (paste-run on the rented box): activate conda `vllatent-ego-drone` (Py3.10 /
+   torch 2.8 / cu12x / transformers≥4.56 / timm≥1.0.20); `export HF_ENDPOINT=https://hf-mirror.com`;
+   set the GitHub mirror chain; `pip install -e '.[torch]'`. Verify bf16:
+   `python -c "import torch;print(torch.cuda.get_device_name(0), torch.cuda.is_bf16_supported())"`
+   (expect H20 / True).
+2. **Code sync:** `git pull` (mirror) for the B1.22a upgrades. Never commit/rsync `.npz`/`runs/`/weights.
+3. **Encode (B1.22b)** ON the H20 (frames/VO/DINOv3 all need GPU): run the ingest/encode of the
+   11 accepted clips → `ingest_data/latent_cache/*.npz` (173 files). Paste back the encode summary.
+   If frames already live on dev: `rsync -avP -e 'ssh -p <PORT>' ingest_data/frames/ root@<H20>:/root/vllatent-ego-drone/ingest_data/frames/` (frames only, not latents).
+4. **B-1 latent run (B1.22e):** `$PY scripts/train_sports.py --cache-dir ingest_data/latent_cache --run-dir runs/b1_latent --latent-only --amp-dtype bf16 --depth 6 --batch-size 64 --lr 2e-4 --warmup-frac 0.05 --weight-decay 0.05 --val-frac 0.2 --eval-every-epochs 1 --early-stop-patience 8 --early-stop-metric val_cos --device cuda` → paste tail of `runs/b1_latent/val_metrics.jsonl` (per-horizon cosine **+ persistence margin**), steps/sec, GPU mem; confirm `ckpt_best.pt` + `norm_stats.npz`.
+   - **Game-pretraining variant (optional, after B1.22d):** train on the combined real+game cache with `--domain-weight 0.4`, then fine-tune real-only from that checkpoint; keep the predictor only if real-val cosine beats the real-only run.
+5. **Pull artifacts (off git):** `rsync -avP -e 'ssh -p <PORT>' root@<H20>:/root/vllatent-ego-drone/runs/ ./runs/` (`ckpt_best.pt`, `norm_stats.npz`, `*_metrics.jsonl`). Never `git add` these.
+6. **Jetson (B1.23):** on Orin NX, export `ckpt_best` (encoder+predictor) to TorchScript/ONNX and bench end-to-end; paste latency (<50 ms = GO).
+7. **Paste-back at every gate:** `val_metrics.jsonl` tail (per-horizon cosine + persistence margin), `ckpt_best` path, steps/sec, GPU mem. USER-GATED steps stay `in_progress` until pasted.
+
+> Waypoint-head training commands (Stage 2/3, joint control) are **B-2** — added when the head
+> pipeline and MegaSaM-scale fix land.
+
+#### F. Verification ladder
+
+1. **Overfit-tiny** (re-run B1.20 on a REAL encoded clip; dev box; `--latent-only`; fp32):
+   `L_latent` beats the persistence/zeros baseline within 200 steps; resume@200 → identical
+   step-201 gradients. Plumbing smoke.
+2. **Dev smoke** (5060 Ti, tiny, fp32): predictor-only `L_latent` strictly decreases + per-horizon
+   cosine rises **above persistence**; confirms the `--latent-only` path before spending H20 time.
+3. **H20 latent run:** scene-split val cosine **beats persistence** per-horizon (t=1..4) + 2–3
+   folds; `t=1` cosine high (directional ≥0.7); best by val cosine-vs-persistence.
+4. **Game-pretraining variant (if run):** real-val cosine with game-pretrain > real-only — else
+   discard the game contribution (measured, not assumed).
+5. **B-1 DoD:** `make test && make test-torch && make lint && make typecheck` green; val metrics
+   reviewed as directional; `ckpt_best` (predictor, not `ckpt_final`) ships.
+6. **Jetson:** exported encoder+predictor end-to-end <50 ms = GO; else CONDITIONAL-GO with
+   depth-2–4 ckpt.
+
+#### G. Open decisions surfaced to user (defaults in effect unless changed)
+
+- **Data timing** — DEFAULT: run the pilot latent-validation (B1.22e) as soon as the encode
+  finishes; curate expanded real (B1.22c) + game (B1.22d) in parallel. (Alt: expand first.)
+- **Action conditioning** — DEFAULT: action-conditioned predictor (normalized `last_action`
+  FiLM). (Alt: `--no-action-film` pure video model, fully MegaSaM-independent.)
+- **Depth** — DEFAULT: depth=6. Optional depth-2–4 overfitting-mitigation sweep alongside (depth
+  is an OPEN Phase-B knob).
+- **Game footage** — RESOLVED (user 2026-06-28): latent-pretraining source, fine-tune on
+  real-only, keep only if real-val improves. **Ego-Exo4D demoted** (wrong motion/domain).
+- **Waypoint head → B-2** (user 2026-06-29). The head-input (mean vs `mean_minus_zt` vs attentive
+  pool), the **prober decision** (MLP vs PI-Prober), the **MegaSaM-scale fix**, and the optional
+  joint fine-tune are all B-2 open problems — see the Phase B-2 section.
 
 ---
 
 ## Phase B-2 & B-3 (high-level)
 
-### B-2: Language Cross-Attention
+### B-2: Waypoint Head + Language Cross-Attention
+
+**B-2a — Waypoint head training (MOVED FROM B-1, 2026-06-29).** B-1 ships a frozen latent
+predictor; B-2 trains the action decoder on top. Resolve two open problems FIRST:
+- **MegaSaM scale inconsistency (BLOCKING).** `L_wp` regresses MegaSaM deltas whose monocular
+  scale is per-clip ambiguous + drifting. Candidates to evaluate: (a) **metric-depth anchoring**
+  from MegaSaM's UniDepth stage (absolute per-clip scale); (b) **scale-free parameterization** —
+  predict unit-direction + log-speed (or normalized magnitude) so the head is invariant to
+  per-clip scale; (c) per-clip Sim(3)/scale alignment to a common reference; (d) GPS/IMU anchoring
+  on custom GoPro data (B-3). Pick after a scale-drift audit on the pilot VO (reuse
+  `vo_validation.scale_drift`).
+- **Prober decision (head architecture).** MLP (lean default, `D→256→128→4` over pooled latents)
+  vs SkyJEPA-style **PI-Prober** (residual on a kinematic prior — bounded drift, MPPI-composable;
+  REFERENCE `training-policy-research-2026-06-25.md` §3.3 notes it ≈ a reparameterized MLP under
+  GT-`v_prev` supervision, so its real payoff is Phase-D MPPI/SO(3)) vs a tiny **attentive pool**
+  head (1 query over 196 tokens) fixing the mean-pool-washes-out-heading risk. Decide via a small
+  bake-off once scale is fixed.
+- **Staged head training (design parked from B-1):** load the B-1 `ckpt_best` predictor, **freeze
+  it** (`requires_grad_(False)` + `eval()` + `no_grad`), train the head only on `L_wp` reading the
+  predictor's **PREDICTED** mean-pooled latents (never GT — matches inference). LR 1e-3 probe, WD
+  0, same train NormStats. Optional **Stage 3** joint low-LR fine-tune (predictor LR 2e-5–5e-5;
+  hard-abort if val latent cosine regresses >0.02). Optional **joint-training control**.
+  Head-input escalation if it underfits: `mean` → `mean_minus_zt` (latent-delta) → attentive pool.
+- **DoD:** denormalized waypoint val-L1 within ~2× a clean train L1 on real held-out, on a
+  **scale-consistent** target. Ships the full predictor+head model toward Phase-D closed-loop.
+
+**B-2b — Language Cross-Attention.**
 - RefCOCOg warm-start: download RefCOCOg (~237K expressions), train Flamingo-style zero-init
   gated cross-attention (every other predictor block) on grounding task.
 - Auto-captioning pipeline: SAM-2 + VLM on sports clips -> verified (frame, expression, mask)
@@ -739,16 +1045,25 @@ REMAINING — CRITICAL PATH (blocked on B1.11 encoder gate):
     B1.20 (overfit-tiny) <-- B1.14,B1.17,B1.18,B1.19✓,data✓
     B1.21 (sanity+viz) <-- B1.13,B1.18         |
                                                 |
-  GROUP 8 (full training + verify):            |
-    B1.22 (full train) <-- B1.20               |
-    B1.23 (Jetson speed) <-- B1.22             |
-    B1.24 (B-1 DoD) <-- ALL                   |
+  GROUP 8 (B-1 LATENT WORLD MODEL — REPLANNED 2026-06-28, scope-cut 2026-06-29):
+    B1.21b (trust cleanup, AUTO) ......... none
+    B1.22a (latent train-script upgrade, AUTO)  B1.18,B1.19,B1.21✓
+    B1.22b (pilot encode, H20) ........... B1.7✓,B1.10c✓        ──┐
+    B1.22c (expand real YouTube) ......... B1.7✓   [parallel]     │
+    B1.22d (game footage latent-pretrain). B1.22a [parallel]      │
+    B1.22e (B-1 run: predictor, L_latent)  B1.22a,B1.22b <────────┘
+    B1.23  (Jetson: encoder+predictor) ... B1.22e
+    B1.24  (B-1 DoD: good latent model) .. ALL
+    ── waypoint head (Stage 2/3) → Phase B-2a (deferred 2026-06-29) ──
 ```
 
-**Critical path:** B1.11 → B1.12 → B1.15 → B1.17 → B1.18 → B1.20 → B1.22 → B1.24
+**Critical path (B-1):** B1.20✓(fixes landed) → **B1.22a → B1.22b → B1.22e (latent run) →
+B1.23 → B1.24**. B1.22c/B1.22d (data scale-up) run in parallel. Waypoint head training (former
+B1.22f/g) is **Phase B-2a** — blocked on the MegaSaM-scale fix + prober decision.
 
-**All data-track and pipeline prerequisites are satisfied.** The only remaining gate before
-the model+training track can proceed is B1.11 (Orin NX encoder benchmark, USER-GATED).
+**All data-track and pipeline prerequisites are satisfied; B1.11/B1.12 accepted the D=768
+default (DEV_LOG 2026-06-26).** The gating prerequisite for the first real run is **B1.22b
+(full pilot encode on H20)** — today only one clip is cached.
 
 ---
 
@@ -809,12 +1124,23 @@ the model+training track can proceed is B1.11 (Orin NX encoder benchmark, USER-G
    L_wp is undertrained on YouTube-only data. See CosFly Suitability Assessment.
 
 9. **Data sufficiency for YouTube-only B-1.** Per vault research §1.3, V-JEPA 2-AC trained a
-   300M predictor on 62 hrs (~890K frames, 3 samples/param). Our 22M model needs far less.
-   YouTube pilot (173 sub-clips) is small (~8.6K frames) but sufficient for overfit-tiny-batch
-   and initial convergence. Full YouTube curation (30-80 hrs, 3.2-8.6M frames) in B-3 brings
-   us to 0.15-0.39 samples/param — below the 0.5 minimum viable. **Ego-Exo4D (B-3, ~26M
-   frames) is required to reach the comfortable zone.** B-1 validates the architecture; B-3
-   scales the data. CosFly adds ~210K frames of L_wp-only signal — helpful but not load-bearing.
+   300M predictor on 62 hrs (~890K frames, 3 samples/param). Our ~57M predictor needs less but
+   still wants ~10-20M frames to converge. YouTube pilot (173 sub-clips, ~8.6K frames) is
+   ~1000× short of that — sufficient only for overfit-tiny-batch and **architecture validation**,
+   not a deployable model. B-1 validates the architecture; the volume fight is the scale-up.
+   - **CORRECTION (2026-06-28): Ego-Exo4D does NOT fit and is DEMOTED** from the "required for
+     the comfortable zone" role. Ego-Exo4D is skilled-human-activity video (cooking, music,
+     dance, basketball, soccer, bouldering, bike repair) — real texture but **no skiing and no
+     sustained high-speed ego-translation following a subject downhill**. Its motion/scene
+     structure is wrong for our follow-cam latent-dynamics task. Right texture, wrong dynamics.
+   - **Revised volume path:** (a) expanded REAL YouTube follow-cam/FPV (~5h ≈ ~90K frames
+     near-term — the best domain match but genuinely supply-limited); (b) **game footage
+     (Steep / Riders Republic) as a Stage-1 latent-PRETRAINING source** — synthetic texture but
+     the *right* structure (follow-cam, downhill, alpine, fast translation); pretrain on
+     real+game → fine-tune predictor on real-only → keep the game contribution only if it
+     improves real held-out val cosine (safety net against domain pollution from the
+     domain-blind shared predictor). CosFly (~210K, L_wp-only) and AirSim (clean GT but needs a
+     bespoke snowy + animated-athlete + scripted-follow build) remain B-3+ supplements.
 
 5. **Scheduled sampling (B-2).** B-1 uses GT history. Deployment needs auto-regressive.
    B-2 introduces curriculum mixing GT and predicted history.

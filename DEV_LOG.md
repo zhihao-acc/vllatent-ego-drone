@@ -65,11 +65,76 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.19 — Checkpoint save/load + config snapshot | done | 2026-06-19 | `vllatent/train/checkpoint.py` — save/load + config snapshot + seed_everything; 10 torch tests green; lazy torch import (AST-verified) |
 | B1.20 — Training script: overfit-tiny-batch | in_progress | 2026-06-26 | Script written (AUTO); USER-GATED: run on dev box, verify loss < baseline in 200 steps |
 | B1.21 — Pre-train sanity check + viz | done | 2026-06-26 | run_sanity_check (7 pure tests) + TrainingLogger JSONL (6 torch tests) green |
-| B1.22 — Full training run | pending | — | Phase B-1 Group 8: USER-GATED (H20) |
-| B1.23 — Jetson inference speed check | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
-| B1.24 — Phase B-1 DoD verification | pending | — | Phase B-1 Group 8: USER-GATED |
+| B1.22 — Full training run | superseded | 2026-06-29 | **REPLANNED → B1.21b + B1.22a–e (B-1 = latent only)**; head → B-2a; see plan Group 8 |
+| B1.21b — Trust cleanup + remove verify/ | pending | — | Group 8 (replan): AUTO |
+| B1.22a — train_sports.py upgrade (val/scene-split/warmup/bf16/--latent-only) | pending | — | Group 8 (replan): AUTO |
+| B1.22b — Full pilot DINOv3 encode (173 .npz) | pending | — | Group 8 (replan): USER-GATED (H20); only ski03 cached today |
+| B1.22c — Curate + ingest more REAL YouTube FPV | pending | — | Group 8 (replan): USER-GATED; ~5h/~90K frames target [parallel] |
+| B1.22d — Game footage (Steep) → domain=game latent-pretrain slice | pending | — | Group 8 (replan): USER-GATED [parallel] |
+| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | pending | — | Group 8 (replan): USER-GATED (H20) |
+| B1.22f — Stage 2: waypoint head on frozen predictor | superseded | 2026-06-29 | **→ Phase B-2a** (deferred: MegaSaM scale + prober undecided) |
+| B1.22g — Stage 3: conditional joint fine-tune | superseded | 2026-06-29 | **→ Phase B-2a** |
+| B1.23 — Jetson inference speed check (encoder+predictor) | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
+| B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-29 — Group 8 SCOPE CUT: B-1 = latent world model only; waypoint head → B-2
+
+**Status:** B-1 Group 8 narrowed (user decision). The waypoint head (former B1.22f/g, `L_wp`,
+Stage 2/3, joint control) is **deferred to Phase B-2a**. **B-1 DoD = a good latent prediction
+model** (predictor beats a persistence baseline on real held-out val; per-horizon cosine).
+
+**Why.** Two head-side issues are unresolved: (1) **MegaSaM scale inconsistency** — `L_wp`'s
+target is the monocular VO delta, whose scale is per-clip ambiguous/drifting (median-speed +
+z-score fix the distribution, not cross-clip metric scale); (2) **prober decision** undecided
+(MLP vs SkyJEPA PI-Prober vs attentive-pool head). The predictor trains on clean GT DINOv3
+latents (no scale ambiguity) → it's the well-posed half. Deferring the head de-risks B-1.
+
+**Plan edits.** Group 8 retitled "Latent World-Model Training (B-1)"; B1.22a rescoped to
+`--latent-only` (no `--stage 2/3`/head plumbing); B1.22e is the single B-1 run (predictor on
+`L_latent`, game-pretrain variant kept); B1.23 = encoder+predictor latency; B1.24 = latent DoD;
+B1.22f/g → new **B-2a** block (waypoint head training + MegaSaM-scale-fix candidates + prober
+bake-off). Dependency graph + Open-Decision G updated; action-conditioned-vs-action-free is the
+new B-1 sub-decision (default: keep action-FiLM — scale error is tolerable as conditioning).
+
+---
+
+## 2026-06-28 — Group 8 REPLAN: staged training + revised policy + expanded data
+
+**Status:** B1.22 (single-step) **superseded** → **B1.21b + B1.22a–g** (staged). Plan-only
+session (no code changed); `plans/phase-b-sports-training.md` Group 8 fully rewritten.
+
+**Why.** User mandate: (1) **staged training** — train the latent predictor and the waypoint
+head **separately** (head is downstream of predictor → clean decouple); (2) **check/revise the
+training policy**; (3) **more data** incl. game footage (极限国度/Steep) because real YouTube is
+too small. Backed by a 9-agent research + adversarial-verify workflow.
+
+**Key outcomes.**
+- **Staged design:** Stage 1 predictor-only on `L_latent` → Stage 2 **frozen+eval** predictor,
+  head-only on `L_wp` (reads PREDICTED not GT latents) → Stage 3 conditional joint fine-tune
+  (cosine-regression abort). Optional single-stage **joint control** for comparison.
+- **Policy revision (B1.22a):** current `train_sports.py` has **no val loop / scene-split /
+  warmup / early-stop / best-ckpt** and uses fp16+GradScaler. Fixes: bf16 (drop scaler, cast
+  loss inputs fp32), linear-warmup→cosine, **scene-split by SOURCE video** (sub-clips of one
+  source leak), **train-only NormStats** injected to val, best-ckpt + early-stop, AdamW
+  decay/no-decay param groups (wd 0.05), `--stage {1,2,3,joint}`.
+- **Data:** full pilot encode is **still pending** (only `ski03_fpv00_c000.npz` cached — B1.7
+  ran `--filter-only`); expand real YouTube (~90K frames); **game footage = measured Stage-1
+  pretraining source** (pretrain real+game → fine-tune predictor real-only → keep only if real
+  val cosine improves; predictor is domain-blind so unguarded game data pollutes it).
+- **Ego-Exo4D DEMOTED** (Open Decision #9): wrong motion/domain (no skiing, no high-speed
+  ego-translation) — not the volume saviour the plan assumed.
+- **Rejected report stays REFERENCE-ONLY:** `training-policy-research-2026-06-25.md`
+  (PI-Prober/AdaLN/visual-bottleneck/SkyJEPA/GRPO) — only its staged *schedule* is adopted, with
+  the LEAN architecture kept (MLP head, FiLM, no anti-collapse).
+
+**Open (defaults in effect):** data-timing = pilot-now + expand-parallel; joint control = run it;
+head-input = locked `mean` + cheap escalation; depth=6 (+ optional 2–4 sweep).
+**Loose end:** working tree has **uncommitted** `predictor.py` (SDPA flash-attn) + `train_sports.py`
+(bf16/AMP) changes from the B1.20 run — commit before B1.22a builds on them.
 
 ---
 
