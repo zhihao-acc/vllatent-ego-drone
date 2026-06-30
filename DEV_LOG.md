@@ -68,16 +68,51 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.22 — Full training run | superseded | 2026-06-29 | **REPLANNED → B1.21b + B1.22a–e (B-1 = latent only)**; head → B-2a; see plan Group 8 |
 | B1.21b — Trust cleanup + remove verify/ | done | 2026-06-29 | dangling trust refs removed from schemas.py docstrings + CLAUDE.md L44 + plan scope rows; empty `vllatent/verify/` (only `__pycache__`) removed; docs-only, 465 pure green |
 | B1.22a — train_sports.py upgrade (val/scene-split/warmup/bf16/--latent-only) | done | 2026-06-29 | --latent-only + evaluate()+persistence + split_clips_by_source + train-only NormStats→val + SequentialLR warmup→cosine + ckpt_best/early-stop + bf16(no-scaler) + AdamW param-groups + --no-action-film + --domain-weight(WeightedRandomSampler) + per-worker RNG + frozen TrainConfig(PURE); 478 pure / 64 torch / lint / mypy green; CPU latent-only smoke learns |
-| B1.22c — Curate + ingest more REAL YouTube FPV (FRONT-LOADED) | pending | — | Group 8: USER-GATED; do FIRST; ~90K frames; res/fps/aspect gates; on dev box |
-| B1.22b — Generate full dataset ON DEV BOX → rsync .npz to H20 | pending | — | Group 8 (revised 2026-06-29): USER-GATED (5060 Ti, NOT H20); only ski03 cached (stale, stretch-encoded) |
+| B1.22c — Curate + ingest more REAL YouTube FPV (FRONT-LOADED) | done | 2026-06-29 | USER signaled local 45-candidate data generation/QC passed; source-level QC HTML generated for 44 clips (`cand01`–`cand13`, `cand15`–`cand45`; no `cand14` frames) |
+| B1.22b — Generate full dataset ON DEV BOX → rsync .npz to H20 | in_progress | 2026-06-29 | Local dev-box cache exists (919 `.npz`, 918 `cand*`); H20 rsync confirmation still pending, never git-add latents |
 | B1.22d — [CONDITIONAL] Game footage → domain=game pretrain slice | pending | — | Group 8: DEFERRED 2026-06-29; build ONLY if real-only B1.22e misses persistence; --domain-weight plumbing already shipped |
-| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | pending | — | Group 8 (replan): USER-GATED (H20) |
+| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | in_progress | 2026-06-29 | Local CUDA preflight smoke passed (details below); H20 run USER-GATED, stays in_progress until pasted val metrics |
 | B1.22f — Stage 2: waypoint head on frozen predictor | superseded | 2026-06-29 | **→ Phase B-2a** (deferred: MegaSaM scale + prober undecided) |
 | B1.22g — Stage 3: conditional joint fine-tune | superseded | 2026-06-29 | **→ Phase B-2a** |
 | B1.23 — Jetson inference speed check (encoder+predictor) | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
 | B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-29 — B1.22c/B1.22e: QC committed + local CUDA preflight before H20
+
+**Status:** B1.22c local data/QC accepted by user → **done**; B1.22b/B1.22e → **in_progress**
+(H20 rsync + training paste-back still user-gated). Commit `68d162b` added Codex-local `AGENTS.md`
+and `.codex/ralph-rules.md`, persisted content-filter decisions for QC, added
+`scripts/qc_report.py`/`qc_lib.py`, made MegaSaM output paths robust, and kept generated
+`reports/qc/` ignored.
+
+**QC output.** `python scripts/qc_report.py --clip cand01 ... cand45 --device cuda` generated
+44 source-level HTML reports plus `reports/qc/index.html`. `cand14` was skipped because no
+`ingest_data/frames/cand14` directory exists. Top-level index reported 44 clips; generated HTML
+is ignored and not committed.
+
+**CUDA note.** Sandboxed Codex commands hide `/dev/nvidia*`, so `torch.cuda.is_available()` is
+false there. Unsandboxed check is healthy: RTX 5060 Ti visible, torch `2.12.0+cu130`, CUDA 13.0,
+bf16 supported. Do not interpret sandbox CUDA=false as an env failure.
+
+**Local B1.22e smoke (unsandboxed CUDA, RTX 5060 Ti).**
+- Overfit-tiny, real cache, full depth=6, 56.7M optimized predictor params, fp32, batch 4,
+  8 samples: `L_latent` 0.4181 → 0.1038; zeros baseline 0.1215; first beats baseline at step
+  120 (`L_latent=0.1203`); `loss_waypoint=0.0` confirmed latent-only. Run dir:
+  `runs/b1_22e_smoke_cuda_overfit/` (ignored).
+- Tiny scene-split/eval smoke, 12 symlinked clips from two sources (`cand01`/`cand02`), full
+  depth=6, fp32, batch 4: split 6 train / 6 val by source, val 249 windows, wrote
+  `ckpt_best.pt`, `norm_stats.npz`, `val_metrics.jsonl`; one-epoch functional metric
+  `val_cos=0.3013`, persistence `0.8726`, margin `-0.5713` (expected for a one-epoch tiny
+  smoke; H20 run owns DoD).
+
+**Next.** User runs H20 paste block: rsync local `.npz` cache to H20, then run
+`scripts/train_sports.py --latent-only` with bf16/batch64/depth6 and paste `val_metrics.jsonl`
+tail, steps/sec, GPU memory, `ckpt_best.pt`, and `norm_stats.npz` confirmation. Do not mark
+B1.22b/B1.22e done until that paste-back lands.
 
 ---
 
