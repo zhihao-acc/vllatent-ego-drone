@@ -130,6 +130,8 @@ class TrainConfig:
 
     latent_only: bool = False         # B-1: train the predictor only on L_latent (skip head/L_wp)
     lr: float = 2e-4
+    adam_beta1: float = 0.9
+    adam_beta2: float = 0.95
     weight_decay: float = 0.05        # decoupled AdamW WD (decay group only)
     warmup_frac: float = 0.05         # fraction of total steps for linear LR warmup → cosine
     batch_size: int = 64
@@ -138,7 +140,7 @@ class TrainConfig:
     val_frac: float = 0.2             # fraction of SOURCES (not windows) held out for val
     eval_every_epochs: int = 1
     early_stop_patience: int = 8      # evals without val improvement before stopping
-    early_stop_metric: str = "val_cos"  # one of EARLY_STOP_METRICS
+    early_stop_metric: str = "val_margin"  # one of EARLY_STOP_METRICS
     domain_weight: float = 1.0        # sampling weight for domain=game clips (1.0 = no game mix)
     use_action_film: bool = True      # False ⇒ action-free predictor ablation (dt-FiLM only)
     grad_clip: float = 1.0            # 0 disables clipping
@@ -148,6 +150,14 @@ class TrainConfig:
     def __post_init__(self) -> None:
         if self.lr <= 0:
             raise ValueError(f"train.lr must be > 0, got {self.lr}")
+        if not (0.0 <= self.adam_beta1 < 1.0):
+            raise ValueError(f"train.adam_beta1 must be in [0, 1), got {self.adam_beta1}")
+        if not (0.0 <= self.adam_beta2 < 1.0):
+            raise ValueError(f"train.adam_beta2 must be in [0, 1), got {self.adam_beta2}")
+        if self.adam_beta1 >= self.adam_beta2:
+            raise ValueError(
+                f"train.adam_beta1 must be < train.adam_beta2, got {self.adam_beta1} >= {self.adam_beta2}"
+            )
         if self.weight_decay < 0:
             raise ValueError(f"train.weight_decay must be >= 0, got {self.weight_decay}")
         if not (0.0 <= self.warmup_frac < 1.0):

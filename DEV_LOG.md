@@ -71,13 +71,64 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.22c — Curate + ingest more REAL YouTube FPV (FRONT-LOADED) | done | 2026-06-29 | USER signaled local 45-candidate data generation/QC passed; source-level QC HTML generated for 44 clips (`cand01`–`cand13`, `cand15`–`cand45`; no `cand14` frames) |
 | B1.22b — Generate full dataset ON DEV BOX → rsync .npz to H20 | done | 2026-06-30 | Local 919 `.npz` cache was rsynced/used for H20 B1.22e run; never git-add latents |
 | B1.22d — [CONDITIONAL] Game footage → domain=game pretrain slice | pending | — | Real-only B1.22e missed persistence; do NOT activate game blindly — first diagnose/replan B1.22e, then decide |
-| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | in_progress | 2026-06-30 | H20 run completed but missed DoD: best e16 `val_cos=0.7318`, persistence `0.8094`, margin `-0.0777`; late NaN at e24; next = diagnose/research/replan before rerun |
+| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | in_progress | 2026-06-30 | H20 run completed but missed DoD; recovery replan + AUTO guards/diagnostics done; next = user-gated H20 depth-4/lower-LR diagnostic, stop if train margin stays negative |
 | B1.22f — Stage 2: waypoint head on frozen predictor | superseded | 2026-06-29 | **→ Phase B-2a** (deferred: MegaSaM scale + prober undecided) |
 | B1.22g — Stage 3: conditional joint fine-tune | superseded | 2026-06-29 | **→ Phase B-2a** |
 | B1.23 — Jetson inference speed check (encoder+predictor) | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
 | B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-30 — B1.22e recovery replan + AUTO diagnostics
+
+**Status:** B1.22e remains **in_progress**. Do not proceed to B1.23/B1.24. AUTO recovery work is
+done; the next step is USER-GATED H20 training with the new diagnostic flags.
+
+**Diagnosis locked into the plan.** The first H20 run failed primarily because the absolute
+future-latent objective had to beat a very strong 5 Hz persistence baseline. The metric itself is
+apples-to-apples, and `ski03` is not the aggregate root cause (35/1425 val windows). Train-batch
+cosine reached only ~0.81 while cache-only train persistence is ~0.87, so the next run must report
+full train margin before we spend more time on capacity/data hypotheses. The late collapse/NaN is a
+separate stability defect, beginning around step 7510 and first logged as NaN at step 7840.
+
+**Plan revised first.** `plans/phase-b-sports-training.md` now treats the original
+depth-6/action-FiLM/LR2e-4 command as a failed baseline, keeps the DoD unchanged, and defines the
+recovery decision rule: if train margin stays negative, stop and replan a persistence-residual
+predictor (`z_hat = z_t + delta_hat`) before another full run; if train margin is positive but val
+margin is negative, focus on split/data scale/generalization.
+
+**AUTO code changes.**
+- `TrainConfig` now records AdamW betas, defaults to `(0.9, 0.95)`, and defaults checkpoint
+  selection to `early_stop_metric="val_margin"`.
+- `train_sports.py` exposes `--adam-beta1/--adam-beta2`, `--exclude-source`, `--eval-train`, and
+  `--eval-by-source`.
+- Full runs can now exclude orphan/provenance-gap sources such as `ski03` without moving cache
+  files; train-eval writes `train_eval_metrics.jsonl`; val source attribution writes
+  `source_metrics.jsonl`.
+- Optimizer steps now fail fast on non-finite loss or non-finite gradient norm before
+  `optimizer.step()`, and `grad_norm` is logged in `train_metrics.jsonl`.
+- `SportsTrainingDataset.sample_sources` tracks source id per sample for diagnostics.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_config.py tests/test_train_split.py tests/test_sports_loader.py tests/test_train_viz.py tests/test_evaluate.py`
+  → 91 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile scripts/train_sports.py vllatent/config.py vllatent/data/sports_loader.py vllatent/train/viz.py`
+  → pass.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check scripts/train_sports.py vllatent/config.py vllatent/data/sports_loader.py vllatent/train/viz.py tests/test_config.py tests/test_sports_loader.py tests/test_train_viz.py`
+  → all checks passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m mypy vllatent/schemas.py vllatent/actions.py vllatent/frames.py vllatent/config.py vllatent/manifest.py vllatent/audit.py vllatent/ingest/quality.py vllatent/ingest/ego_motion.py`
+  → success, 8 files.
+- CLI parse check confirms `--adam-beta*`, `--exclude-source`, `--eval-train`, `--eval-by-source`,
+  and `--early-stop-metric {val_cos,val_margin}` are present.
+- Direct `_step_optimizer` smoke over a tiny `torch.nn.Linear` returned a finite grad norm for a
+  finite loss and raised `FloatingPointError` for a NaN loss before backward/step.
+
+**Next USER gate.** Run the recovery command on H20 and paste: tail of
+`val_metrics.jsonl`, tail of `train_eval_metrics.jsonl`, `source_metrics.jsonl`, steps/sec, GPU mem,
+and confirmation that `ckpt_best.pt` + `norm_stats.npz` exist. If train margin is still negative,
+do not continue with more absolute-prediction sweeps; replan residual prediction first.
 
 ---
 

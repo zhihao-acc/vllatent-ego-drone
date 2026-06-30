@@ -47,6 +47,18 @@ class TestTrainingLogger:
         assert entry["cosine_sim"] == pytest.approx(0.7)
         assert entry["lr"] == pytest.approx(1e-4)
 
+    def test_log_extra_metrics(self, tmp_path: object) -> None:
+        logger = TrainingLogger(log_dir=tmp_path)  # type: ignore[arg-type]
+        logger.log_step(
+            step=0,
+            epoch=0,
+            loss_output=_fake_loss_output(),
+            lr=1e-4,
+            extra_metrics={"grad_norm": 1.25},
+        )
+        entry = json.loads(logger.log_path.read_text().strip())
+        assert entry["grad_norm"] == pytest.approx(1.25)
+
     def test_log_with_per_horizon(self, tmp_path: object) -> None:
         logger = TrainingLogger(log_dir=tmp_path)  # type: ignore[arg-type]
         B, T, P, D = 2, HORIZON, PATCH_TOKENS, EMBED_DIM

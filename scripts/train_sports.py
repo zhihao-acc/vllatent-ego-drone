@@ -8,7 +8,7 @@ Two modes:
         --run-dir runs/b1_latent --latent-only --amp-dtype bf16 --depth 6 \
         --batch-size 64 --lr 2e-4 --warmup-frac 0.05 --weight-decay 0.05 \
         --val-frac 0.2 --eval-every-epochs 1 --early-stop-patience 8 \
-        --early-stop-metric val_cos --device cuda
+        --early-stop-metric val_margin --eval-train --eval-by-source --device cuda
 
     # Overfit-tiny smoke (first-ever training test — must beat zeros baseline <200 steps)
     python scripts/train_sports.py --overfit-tiny --cache-dir ingest_data/latent_cache \
@@ -32,7 +32,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from vllatent.config import Config, PredictorConfig, TrainConfig
 from vllatent.data.collate import collate_sports_batch
-from vllatent.data.sports_loader import SportsTrainingDataset, split_clips_by_source
+from vllatent.data.sports_loader import SportsTrainingDataset, clip_source, split_clips_by_source
 from vllatent.model.sports_model import SportsFollowingModel
 from vllatent.schemas import EMBED_DIM
 from vllatent.train.checkpoint import (
@@ -181,11 +181,59 @@ def _make_train_loader(dataset: SportsTrainingDataset, tcfg: TrainConfig):  # no
     return DataLoader(dataset, shuffle=True, **common)
 
 
+def _make_eval_loader(dataset: SportsTrainingDataset, tcfg: TrainConfig):  # noqa: ANN201
+    """DataLoader for deterministic eval over train/val diagnostic datasets."""
+    from torch.utils.data import DataLoader
+
+    return DataLoader(
+        dataset,
+        batch_size=tcfg.batch_size,
+        shuffle=False,
+        collate_fn=collate_sports_batch,
+        drop_last=False,
+        num_workers=tcfg.num_workers,
+    )
+
+
+def _source_groups(stems: list[str]) -> dict[str, list[str]]:
+    groups: dict[str, list[str]] = {}
+    for stem in stems:
+        groups.setdefault(clip_source(stem), []).append(stem)
+    return {src: sorted(ids) for src, ids in sorted(groups.items())}
+
+
+def _write_jsonl(path: Path, entry: dict) -> None:
+    with open(path, "a") as f:
+        f.write(json.dumps(entry) + "\n")
+
+
+def _evaluate_sources(model, cache_dir, stems, norm_stats, tcfg, device):  # noqa: ANN001, ANN201
+    """Evaluate each held-out source separately for margin attribution."""
+    entries = []
+    for src, src_stems in _source_groups(stems).items():
+        src_ds = SportsTrainingDataset(
+            cache_dir=cache_dir,
+            clip_ids=src_stems,
+            augment=False,
+            norm_stats=norm_stats,
+        )
+        src_loader = _make_eval_loader(src_ds, tcfg)
+        metrics = evaluate(model, src_loader, device, amp_dtype=tcfg.amp_dtype)
+        entries.append({
+            "source": src,
+            "n_clips": len(src_stems),
+            **metrics,
+        })
+    return entries
+
+
 def train(args: argparse.Namespace) -> None:
     device = args.device
     tcfg = TrainConfig(
         latent_only=args.latent_only,
         lr=args.lr,
+        adam_beta1=args.adam_beta1,
+        adam_beta2=args.adam_beta2,
         weight_decay=args.weight_decay,
         warmup_frac=args.warmup_frac,
         batch_size=args.batch_size,
@@ -219,7 +267,11 @@ def train(args: argparse.Namespace) -> None:
     n_params = sum(p.numel() for p in opt_target.parameters() if p.requires_grad)
     print(f"[train] Model: {n_params:,} optimized params (latent_only={tcfg.latent_only}, "
           f"action_film={tcfg.use_action_film}, amp={tcfg.amp_dtype})")
-    optimizer = torch.optim.AdamW(build_param_groups(opt_target, tcfg.weight_decay), lr=tcfg.lr)
+    optimizer = torch.optim.AdamW(
+        build_param_groups(opt_target, tcfg.weight_decay),
+        lr=tcfg.lr,
+        betas=(tcfg.adam_beta1, tcfg.adam_beta2),
+    )
 
     if args.overfit_tiny:
         _train_overfit(args, tcfg, model, optimizer, opt_target, config, run_dir,
@@ -263,17 +315,20 @@ def _train_overfit(args, tcfg, model, optimizer, opt_target, config, run_dir,  #
             with autocast:
                 loss_out, pred_lat, pred_delta = _forward_loss(
                     model, batch, tcfg, device, args.lambda_latent, args.lambda_waypoint)
-            _step_optimizer(loss_out.total, optimizer, opt_target, scaler, use_scaler, tcfg.grad_clip)
+            grad_norm = _step_optimizer(
+                loss_out.total, optimizer, opt_target, scaler, use_scaler, tcfg.grad_clip
+            )
             scheduler.step()
             if logger.should_log(step):
                 lr = scheduler.get_last_lr()[0]
                 logger.log_step(step=step, epoch=0, loss_output=loss_out, lr=lr,
                                 predicted_latents=pred_lat.detach(), target_latents=batch.target_latents,
                                 predicted_deltas=None if pred_delta is None else pred_delta.detach(),
-                                target_deltas=None if pred_delta is None else batch.target_deltas)
+                                target_deltas=None if pred_delta is None else batch.target_deltas,
+                                extra_metrics={"grad_norm": grad_norm})
                 beat = "YES" if loss_out.latent.item() < baseline_lat else "no"
                 print(f"  step {step:4d} | L_lat={loss_out.latent.item():.4f} ({beat}) "
-                      f"cos={loss_out.cosine_sim.item():.3f} lr={lr:.2e}")
+                      f"cos={loss_out.cosine_sim.item():.3f} grad={grad_norm:.2f} lr={lr:.2e}")
             step += 1
     if loss_out is not None:
         save_checkpoint(model, optimizer, 0, step - 1, config,
@@ -287,6 +342,13 @@ def _train_full(args, tcfg, model, optimizer, opt_target, config, run_dir,  # no
     stems = sorted(p.stem for p in Path(args.cache_dir).glob("*.npz"))
     if not stems:
         raise ValueError(f"No .npz clips in {args.cache_dir}")
+    if args.exclude_source:
+        excluded = set(args.exclude_source)
+        before = len(stems)
+        stems = [s for s in stems if clip_source(s) not in excluded]
+        print(f"[train] Excluded sources {sorted(excluded)}: {before - len(stems)} clips removed")
+        if not stems:
+            raise ValueError("No .npz clips remain after --exclude-source filtering")
     train_stems, val_stems = split_clips_by_source(stems, tcfg.val_frac, seed=tcfg.seed)
     print(f"[train] Scene split: {len(train_stems)} train / {len(val_stems)} val clips "
           f"(by source video, val_frac={tcfg.val_frac})")
@@ -296,18 +358,21 @@ def _train_full(args, tcfg, model, optimizer, opt_target, config, run_dir,  # no
     train_ds.save_norm_stats(run_dir / "norm_stats.npz")  # TRAIN-only stats
 
     val_loader = None
+    train_eval_loader = None
     if val_stems:
         # val uses TRAIN norm-stats (no leakage) and no augmentation
         val_ds = SportsTrainingDataset(cache_dir=args.cache_dir, clip_ids=val_stems,
                                        augment=False, norm_stats=train_ds.norm_stats)
-        from torch.utils.data import DataLoader
-        val_loader = DataLoader(val_ds, batch_size=tcfg.batch_size, shuffle=False,
-                                collate_fn=collate_sports_batch, drop_last=False,
-                                num_workers=tcfg.num_workers)
+        val_loader = _make_eval_loader(val_ds, tcfg)
         print(f"[train] Val: {len(val_ds)} windows")
     else:
         print("[train] WARNING: no val sources (need >= 2 source videos for scene-split) — "
               "training without held-out val / early-stop")
+    if args.eval_train:
+        train_eval_ds = SportsTrainingDataset(cache_dir=args.cache_dir, clip_ids=train_stems,
+                                              augment=False, norm_stats=train_ds.norm_stats)
+        train_eval_loader = _make_eval_loader(train_eval_ds, tcfg)
+        print(f"[train] Train-eval: {len(train_eval_ds)} windows")
 
     if len(train_ds) < tcfg.batch_size:
         raise ValueError(f"Train set ({len(train_ds)}) < batch_size ({tcfg.batch_size}). "
@@ -320,6 +385,8 @@ def _train_full(args, tcfg, model, optimizer, opt_target, config, run_dir,  # no
     scaler = torch.amp.GradScaler("cuda", enabled=use_scaler)
     logger = TrainingLogger(log_dir=run_dir, log_every=args.log_every)
     val_log = run_dir / "val_metrics.jsonl"
+    train_eval_log = run_dir / "train_eval_metrics.jsonl"
+    source_log = run_dir / "source_metrics.jsonl"
     start_step, start_epoch = _maybe_resume(args, model, optimizer, scheduler, device)
 
     best_metric, patience_left, t0 = float("-inf"), tcfg.early_stop_patience, time.time()
@@ -331,23 +398,36 @@ def _train_full(args, tcfg, model, optimizer, opt_target, config, run_dir,  # no
             with autocast:
                 loss_out, pred_lat, pred_delta = _forward_loss(
                     model, batch, tcfg, device, args.lambda_latent, args.lambda_waypoint)
-            _step_optimizer(loss_out.total, optimizer, opt_target, scaler, use_scaler, tcfg.grad_clip)
+            grad_norm = _step_optimizer(
+                loss_out.total, optimizer, opt_target, scaler, use_scaler, tcfg.grad_clip
+            )
             scheduler.step()
             if logger.should_log(global_step):
                 lr = scheduler.get_last_lr()[0]
                 logger.log_step(step=global_step, epoch=epoch, loss_output=loss_out, lr=lr,
                                 predicted_latents=pred_lat.detach(), target_latents=batch.target_latents,
                                 predicted_deltas=None if pred_delta is None else pred_delta.detach(),
-                                target_deltas=None if pred_delta is None else batch.target_deltas)
+                                target_deltas=None if pred_delta is None else batch.target_deltas,
+                                extra_metrics={"grad_norm": grad_norm})
                 print(f"  e{epoch} s{global_step} | L_lat={loss_out.latent.item():.4f} "
-                      f"cos={loss_out.cosine_sim.item():.3f} lr={lr:.2e} "
+                      f"cos={loss_out.cosine_sim.item():.3f} grad={grad_norm:.2f} lr={lr:.2e} "
                       f"{(global_step + 1) / max(time.time() - t0, 1e-6):.1f} it/s")
             global_step += 1
 
         if val_loader is not None and (epoch + 1) % tcfg.eval_every_epochs == 0:
             val = evaluate(model, val_loader, device, amp_dtype=tcfg.amp_dtype)
-            with open(val_log, "a") as f:
-                f.write(json.dumps({"epoch": epoch, "step": global_step, **val}) + "\n")
+            _write_jsonl(val_log, {"epoch": epoch, "step": global_step, **val})
+            if train_eval_loader is not None:
+                train_eval = evaluate(model, train_eval_loader, device, amp_dtype=tcfg.amp_dtype)
+                _write_jsonl(train_eval_log, {"epoch": epoch, "step": global_step, **train_eval})
+                print(f"[eval-train] e{epoch} train_cos={train_eval['val_cos']:.4f} "
+                      f"persistence={train_eval['val_persistence']:.4f} "
+                      f"margin={train_eval['val_margin']:+.4f}")
+            if args.eval_by_source:
+                for source_entry in _evaluate_sources(
+                    model, args.cache_dir, val_stems, train_ds.norm_stats, tcfg, device
+                ):
+                    _write_jsonl(source_log, {"epoch": epoch, "step": global_step, **source_entry})
             metric = val["val_cos"] if tcfg.early_stop_metric == "val_cos" else val["val_margin"]
             print(f"[eval] e{epoch} val_cos={val['val_cos']:.4f} "
                   f"persistence={val['val_persistence']:.4f} margin={val['val_margin']:+.4f}")
@@ -380,21 +460,35 @@ def _maybe_resume(args, model, optimizer, scheduler, device) -> tuple[int, int]:
     return start_step, start_epoch
 
 
-def _step_optimizer(loss, optimizer, opt_target, scaler, use_scaler, grad_clip):  # noqa: ANN001
-    """One optimizer step with optional fp16 GradScaler + grad clipping."""
+def _step_optimizer(loss, optimizer, opt_target, scaler, use_scaler, grad_clip) -> float:  # noqa: ANN001
+    """One optimizer step with optional fp16 GradScaler + finite grad checking."""
+    if not torch.isfinite(loss.detach()).all():
+        raise FloatingPointError(f"non-finite loss before backward: {loss.detach().item()}")
+
     optimizer.zero_grad()
     if use_scaler:
         scaler.scale(loss).backward()
-        if grad_clip > 0:
-            scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(opt_target.parameters(), grad_clip)
+        scaler.unscale_(optimizer)
+        grad_norm = _clip_or_check_grad_norm(opt_target, grad_clip)
         scaler.step(optimizer)
         scaler.update()
     else:
         loss.backward()
-        if grad_clip > 0:
-            torch.nn.utils.clip_grad_norm_(opt_target.parameters(), grad_clip)
+        grad_norm = _clip_or_check_grad_norm(opt_target, grad_clip)
         optimizer.step()
+    return grad_norm
+
+
+def _clip_or_check_grad_norm(opt_target, grad_clip: float) -> float:  # noqa: ANN001
+    """Return total grad norm; raise before optimizer.step on non-finite gradients."""
+    params = [p for p in opt_target.parameters() if p.grad is not None]
+    if not params:
+        return 0.0
+    max_norm = grad_clip if grad_clip > 0 else float("inf")
+    norm = torch.nn.utils.clip_grad_norm_(params, max_norm, error_if_nonfinite=True)
+    if not torch.isfinite(norm.detach()).all():
+        raise FloatingPointError(f"non-finite gradient norm before optimizer step: {norm}")
+    return float(norm.detach().cpu())
 
 
 def _nullcontext():  # noqa: ANN202
@@ -418,16 +512,24 @@ def main() -> None:
     parser.add_argument("--epochs", type=int, default=100)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--lr", type=float, default=2e-4)
+    parser.add_argument("--adam-beta1", type=float, default=0.9)
+    parser.add_argument("--adam-beta2", type=float, default=0.95)
     parser.add_argument("--weight-decay", type=float, default=0.05)
     parser.add_argument("--warmup-frac", type=float, default=0.05)
     parser.add_argument("--grad-clip", type=float, default=1.0)
     parser.add_argument("--num-workers", type=int, default=4)
+    parser.add_argument("--exclude-source", action="append", default=[],
+                        help="Exclude a whole source id before scene split; repeatable")
+    parser.add_argument("--eval-train", action="store_true",
+                        help="Evaluate train split without augmentation and log train_eval_metrics.jsonl")
+    parser.add_argument("--eval-by-source", action="store_true",
+                        help="Evaluate each val source separately and log source_metrics.jsonl")
 
     # scene-split val + eval / early-stop
     parser.add_argument("--val-frac", type=float, default=0.2)
     parser.add_argument("--eval-every-epochs", type=int, default=1)
     parser.add_argument("--early-stop-patience", type=int, default=8)
-    parser.add_argument("--early-stop-metric", default="val_cos", choices=("val_cos", "val_margin"))
+    parser.add_argument("--early-stop-metric", default="val_margin", choices=("val_cos", "val_margin"))
 
     # game-domain mix (B1.22d)
     parser.add_argument("--domain-weight", type=float, default=1.0,

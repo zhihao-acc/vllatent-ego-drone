@@ -332,6 +332,14 @@ class TestDomainPlumbing:
         assert ds.sample_domains.count("game") == 20 - HORIZON
         assert ds.sample_domains.count("real") == 15 - HORIZON
 
+    def test_sample_sources_parallel_to_samples(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "ski03_fpv00_c000.npz", n_frames=15)
+        _make_clip_npz(tmp_path / "cand05_fpv00_c000.npz", n_frames=20)
+        ds = SportsTrainingDataset(tmp_path, clip_ids=["ski03_fpv00_c000", "cand05_fpv00_c000"])
+        assert len(ds.sample_sources) == len(ds)
+        assert ds.sample_sources.count("ski03") == 15 - HORIZON
+        assert ds.sample_sources.count("cand05") == 20 - HORIZON
+
 
 class TestImportPurity:
     def test_no_torch_at_module_level(self) -> None:

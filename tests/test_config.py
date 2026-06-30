@@ -16,6 +16,7 @@ from vllatent.config import (
     EncoderConfig,
     IngestConfig,
     PredictorConfig,
+    TrainConfig,
 )
 from vllatent.schemas import HISTORY, HORIZON
 
@@ -124,6 +125,13 @@ def test_ingest_config_absent_by_default() -> None:
     assert cfg.ingest is None
 
 
+def test_train_config_recovery_defaults() -> None:
+    c = TrainConfig()
+    assert c.early_stop_metric == "val_margin"
+    assert c.adam_beta1 == 0.9
+    assert c.adam_beta2 == 0.95
+
+
 @pytest.mark.parametrize("factory", [
     lambda: IngestConfig(target_fps=0.0),
     lambda: IngestConfig(min_clip_seconds=-1.0),
@@ -131,6 +139,9 @@ def test_ingest_config_absent_by_default() -> None:
     lambda: IngestConfig(resolution_h=0),
     lambda: IngestConfig(quality_threshold=1.5),
     lambda: IngestConfig(name=""),
+    lambda: TrainConfig(adam_beta1=-0.1),
+    lambda: TrainConfig(adam_beta2=1.0),
+    lambda: TrainConfig(adam_beta1=0.99, adam_beta2=0.95),
 ])
 def test_ingest_config_rejects_bad(factory) -> None:
     with pytest.raises(ValueError):

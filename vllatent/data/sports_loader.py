@@ -222,6 +222,7 @@ class SportsTrainingDataset:
             raise ValueError(f"No .npz clips found in {cache_dir}")
 
         self._clips: list[dict[str, np.ndarray]] = []
+        self._clip_ids: list[str] = []
         self._clip_velocities: list[np.ndarray] = []
         self._clip_dt: list[np.ndarray] = []
         self._clip_domains: list[str] = []
@@ -237,6 +238,7 @@ class SportsTrainingDataset:
             velocities = _preprocess_deltas(clip["deltas"], dt)
 
             self._clips.append(clip)
+            self._clip_ids.append(p.stem)
             self._clip_velocities.append(velocities)
             self._clip_dt.append(dt)
             self._clip_domains.append(_clip_domain(clip))
@@ -251,11 +253,14 @@ class SportsTrainingDataset:
 
         self._samples: list[tuple[int, int]] = []
         self.sample_domains: list[str] = []   # domain per sample index (parallel to _samples)
+        self.sample_sources: list[str] = []   # source id per sample index (parallel to _samples)
         for clip_idx, clip in enumerate(self._clips):
             n = clip["latents"].shape[0]
+            src = clip_source(self._clip_ids[clip_idx])
             for t in range(n - HORIZON):
                 self._samples.append((clip_idx, t))
                 self.sample_domains.append(self._clip_domains[clip_idx])
+                self.sample_sources.append(src)
 
     def _discover_clips(self, clip_ids: list[str] | None) -> list[Path]:
         if clip_ids is not None:

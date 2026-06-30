@@ -39,6 +39,7 @@ class TrainingLogger:
         target_latents: torch.Tensor | None = None,
         predicted_deltas: torch.Tensor | None = None,
         target_deltas: torch.Tensor | None = None,
+        extra_metrics: dict[str, float] | None = None,
     ) -> None:
         """Log one training step's metrics to JSONL."""
         import torch
@@ -52,6 +53,8 @@ class TrainingLogger:
             "cosine_sim": loss_output.cosine_sim.item(),
             "lr": lr,
         }
+        if extra_metrics is not None:
+            entry.update(extra_metrics)
 
         if predicted_latents is not None and target_latents is not None:
             with torch.no_grad():
