@@ -69,15 +69,54 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.21b — Trust cleanup + remove verify/ | done | 2026-06-29 | dangling trust refs removed from schemas.py docstrings + CLAUDE.md L44 + plan scope rows; empty `vllatent/verify/` (only `__pycache__`) removed; docs-only, 465 pure green |
 | B1.22a — train_sports.py upgrade (val/scene-split/warmup/bf16/--latent-only) | done | 2026-06-29 | --latent-only + evaluate()+persistence + split_clips_by_source + train-only NormStats→val + SequentialLR warmup→cosine + ckpt_best/early-stop + bf16(no-scaler) + AdamW param-groups + --no-action-film + --domain-weight(WeightedRandomSampler) + per-worker RNG + frozen TrainConfig(PURE); 478 pure / 64 torch / lint / mypy green; CPU latent-only smoke learns |
 | B1.22c — Curate + ingest more REAL YouTube FPV (FRONT-LOADED) | done | 2026-06-29 | USER signaled local 45-candidate data generation/QC passed; source-level QC HTML generated for 44 clips (`cand01`–`cand13`, `cand15`–`cand45`; no `cand14` frames) |
-| B1.22b — Generate full dataset ON DEV BOX → rsync .npz to H20 | in_progress | 2026-06-29 | Local dev-box cache exists (919 `.npz`, 918 `cand*`); H20 rsync confirmation still pending, never git-add latents |
-| B1.22d — [CONDITIONAL] Game footage → domain=game pretrain slice | pending | — | Group 8: DEFERRED 2026-06-29; build ONLY if real-only B1.22e misses persistence; --domain-weight plumbing already shipped |
-| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | in_progress | 2026-06-29 | Local CUDA preflight smoke passed (details below); H20 run USER-GATED, stays in_progress until pasted val metrics |
+| B1.22b — Generate full dataset ON DEV BOX → rsync .npz to H20 | done | 2026-06-30 | Local 919 `.npz` cache was rsynced/used for H20 B1.22e run; never git-add latents |
+| B1.22d — [CONDITIONAL] Game footage → domain=game pretrain slice | pending | — | Real-only B1.22e missed persistence; do NOT activate game blindly — first diagnose/replan B1.22e, then decide |
+| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | in_progress | 2026-06-30 | H20 run completed but missed DoD: best e16 `val_cos=0.7318`, persistence `0.8094`, margin `-0.0777`; late NaN at e24; next = diagnose/research/replan before rerun |
 | B1.22f — Stage 2: waypoint head on frozen predictor | superseded | 2026-06-29 | **→ Phase B-2a** (deferred: MegaSaM scale + prober undecided) |
 | B1.22g — Stage 3: conditional joint fine-tune | superseded | 2026-06-29 | **→ Phase B-2a** |
 | B1.23 — Jetson inference speed check (encoder+predictor) | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
 | B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-06-30 — B1.22e: H20 latent run completed, DoD NOT met
+
+**Status:** B1.22b effectively **done** (H20 training consumed the 919-file local latent cache);
+B1.22e remains **in_progress**. Do not mark B1.22e done or proceed to B1.23/B1.24.
+
+**Artifacts.** Returned H20 run is local under
+`runs/h20_b1_latent_lr2e-4_nan_20260630/` and remains ignored/off-git. It contains
+`ckpt_best.pt` (651M), `norm_stats.npz`, `val_metrics.jsonl`, `train.log`, and config/log files.
+
+**Run config.** `--latent-only`, depth=6, action-FiLM enabled, bf16, LR `2e-4`, WD `0.05`,
+warmup `0.05`, batch 64, val-frac `0.2`, seed 42, early-stop metric `val_cos`, patience 8.
+Train log reports 56,741,376 optimized params, split `834 train / 85 val clips`, and
+`1425` val windows.
+
+**Best finite val metric (epoch 16 / step 5457).**
+- `val_cos=0.7317715287208557`
+- `val_persistence=0.8094441294670105`
+- `val_margin=-0.07767263054847717`
+- per-horizon cos `[0.742104709148407, 0.7347822785377502, 0.7280759215354919, 0.7221232056617737]`
+- per-horizon persistence `[0.8690751194953918, 0.819399356842041, 0.7866102457046509, 0.7626919150352478]`
+- per-horizon margin `[-0.12697041034698486, -0.08461707830429077, -0.058534324169158936, -0.04056870937347412]`
+
+**Interpretation.** Directional cosine passed the old high-variance `t=1 > 0.7` sanity threshold,
+but the predictor did **not** beat persistence at any horizon, so B-1 DoD failed. The negative
+margin is least bad at horizon 4, suggesting the persistence baseline is especially strong at
+short horizons.
+
+**Stability issue.** Epoch 23 collapsed to `val_cos=0.2157602012`; epoch 24 became `NaN`.
+`train.log` shows `L_lat=nan` starting around epoch 24 / step 7840. `ckpt_best` predates the NaN,
+but the numerics still need investigation before another paid H20 run.
+
+**Next-session instruction.** `plans/handoff-2026-06-24-b1.10c-onwards.md` was rewritten as the
+current handoff. The next session should first inspect data/split, metric/baseline, model size,
+action-FiLM, and numerics; research/ponder the failure mode; discuss with the user; then revise
+`plans/phase-b-sports-training.md` before executing any model/training changes. Do not blindly
+rerun the same B1.22e command.
 
 ---
 
