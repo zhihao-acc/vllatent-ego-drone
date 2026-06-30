@@ -103,6 +103,10 @@ class FilterResult:
     shot_boundaries: list[int]
     shots: list[ShotInfo]
     per_frame_scores: np.ndarray
+    # Diagnostic per-frame signals (the "why" behind each reject) — optional so
+    # older constructions stay valid; populated by the filter_video* functions.
+    motion_scores: np.ndarray | None = None
+    rejected_objects: np.ndarray | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +529,8 @@ def filter_video_from_paths(
         shot_boundaries=boundaries,
         shots=classification.shots,
         per_frame_scores=scores,
+        motion_scores=motion_scores,
+        rejected_objects=rejected_objects,
     )
 
 
@@ -565,7 +571,53 @@ def filter_video(
         shot_boundaries=boundaries,
         shots=classification.shots,
         per_frame_scores=scores,
+        motion_scores=motion_scores,
+        rejected_objects=rejected_objects,
     )
+
+
+# ---------------------------------------------------------------------------
+# Provenance persistence (QC) — write the per-frame decisions to disk so the
+# QC report reads the EXACT verdict the run made, with no YOLO re-run.
+# ---------------------------------------------------------------------------
+
+
+def save_filter_result(frames_dir, result: FilterResult):
+    """Persist a FilterResult as ``<frames_dir>/_filter.json`` (pure JSON)."""
+    import json
+    from pathlib import Path
+
+    ms = result.motion_scores
+    ro = result.rejected_objects
+    payload = {
+        "verdict": result.verdict.value,
+        "n_frames": int(result.n_frames),
+        "n_fpv_frames": int(result.n_fpv_frames),
+        "motion_threshold": float(_MOTION_THRESHOLD),
+        "fpv_mask": [int(x) for x in np.asarray(result.fpv_mask).tolist()],
+        "shot_boundaries": [int(x) for x in result.shot_boundaries],
+        "shots": [
+            {"start": int(s.start), "end": int(s.end),
+             "is_fpv": bool(s.is_fpv), "mean_score": float(s.mean_score)}
+            for s in result.shots
+        ],
+        "motion_scores": [round(float(x), 3) for x in np.asarray(ms).tolist()] if ms is not None else None,
+        "rejected_objects": [int(x) for x in np.asarray(ro).tolist()] if ro is not None else None,
+    }
+    out = Path(frames_dir) / "_filter.json"
+    out.write_text(json.dumps(payload))
+    return out
+
+
+def load_filter_result(frames_dir) -> dict | None:
+    """Load ``<frames_dir>/_filter.json`` if present, else None."""
+    import json
+    from pathlib import Path
+
+    p = Path(frames_dir) / "_filter.json"
+    if not p.exists():
+        return None
+    return json.loads(p.read_text())
 
 
 __all__ = [
@@ -574,6 +626,8 @@ __all__ = [
     "ShotInfo",
     "ShotClassification",
     "FilterResult",
+    "save_filter_result",
+    "load_filter_result",
     "compute_motion_scores",
     "detect_shot_boundaries",
     "detect_shot_boundaries_from_paths",

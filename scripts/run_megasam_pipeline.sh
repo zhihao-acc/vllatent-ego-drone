@@ -52,6 +52,10 @@ fi
 
 FRAMES_DIR="$(realpath "$FRAMES_DIR")"
 MEGASAM_DIR="$(realpath "$MEGASAM_DIR")"
+# Resolve OUT_DIR to absolute BEFORE the `cd "$MEGASAM_DIR"` below — otherwise the
+# relative mkdir/cp at the end land the output INSIDE the MegaSaM repo instead of
+# ours, and parse_megasam_output (which uses the caller-relative path) finds nothing.
+OUT_DIR="$(realpath -m "$OUT_DIR")"
 
 echo "[megasam] =============================="
 echo "[megasam] Pipeline: ${CLIP_ID}"

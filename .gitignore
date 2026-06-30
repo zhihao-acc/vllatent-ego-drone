@@ -69,6 +69,10 @@ secrets/
 # === E2E test-run report artifacts (frames/plots/caches; keep only .md reports) ===
 /reports/e2e_test/
 
+# === QC report artifacts (embedded thumbnails/plots; regenerable, never commit) ===
+/reports/qc/
+/reports/qc_smoke/
+
 # === codegraph project-scoped index (DB lives here; never commit) ===
 .codegraph/
 

@@ -216,14 +216,24 @@ def process_clip(
     # --- Stage 1: Download ---
     if skip_download:
         skipped.append("download")
-        candidates = list(raw_dir.glob(f"{clip_id}.*"))
-        if not candidates:
+        # The video is only needed to extract frames (Stage 2). When the
+        # orchestrator has already cut a sub-clip's frames into frames_dir
+        # (no per-sub-clip video exists on disk), we proceed from those frames.
+        video_exts = {".mp4", ".mkv", ".webm", ".avi", ".mov"}
+        candidates = [
+            p for p in raw_dir.glob(f"{clip_id}.*") if p.suffix.lower() in video_exts
+        ]
+        video_path = candidates[0] if candidates else None
+        frames_present = frames_dir.exists() and bool(list(frames_dir.glob("*.jpg")))
+        if video_path is None and not frames_present:
             return [ClipPipelineResult(
                 clip_id=clip_id, n_frames=0, n_accepted=0,
                 latent_path="", stages_skipped=skipped,
-                errors=[f"No video found for {clip_id} in {raw_dir}"],
+                errors=[
+                    f"No video in {raw_dir} nor pre-extracted frames in "
+                    f"{frames_dir} for {clip_id}"
+                ],
             )]
-        video_path = candidates[0]
     else:
         _log(f"downloading {clip_id}")
         raw_dir.mkdir(parents=True, exist_ok=True)

@@ -24,6 +24,10 @@ from pathlib import Path
 
 import numpy as np
 
+_ROOT = str(Path(__file__).resolve().parent.parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 
 def _log(msg: str) -> None:
     print(f"[vo-validate] {msg}", file=sys.stderr)
@@ -53,6 +57,7 @@ def _parse_and_validate(megasam_dir: Path, fps: float, clip_id: str) -> dict:
         "deltas": deltas,
         "deltas_norm": deltas_norm,
         "structural_errors": structural_errors,
+        "fps": fps,
     }
 
 
@@ -100,100 +105,26 @@ def _print_report(report, clip_id: str) -> None:
 
 
 def _generate_html(data: dict, out_path: Path) -> None:
-    """Generate interactive Plotly HTML report."""
-    import plotly.graph_objects as go
-    from plotly.subplots import make_subplots
+    """Generate interactive Plotly HTML report (figure built in qc_lib)."""
+    import sys as _sys
+
+    _here = str(Path(__file__).resolve().parent)
+    if _here not in _sys.path:
+        _sys.path.insert(0, _here)
+    import qc_lib
 
     report = data["report"]
-    poses = data["poses"]
-    confidences = data["confidences"]
-    deltas = data["deltas"]
-    clip_id = report.clip_id
-    fps = 5.0
-
-    positions = poses[:, :3, 3]
-    n = len(positions)
-
-    speeds = np.linalg.norm(np.diff(positions, axis=0), axis=1) * fps
-    yaw_rates = np.abs(deltas[:, 3]) * fps if len(deltas) > 0 else np.array([])
-
-    fig = make_subplots(
-        rows=3, cols=2,
-        specs=[
-            [{"type": "scene", "colspan": 2}, None],
-            [{"type": "xy"}, {"type": "xy"}],
-            [{"type": "xy"}, {"type": "xy"}],
-        ],
-        subplot_titles=[
-            "3D Trajectory",
-            "Speed Profile (m/s)", "Yaw Rate (°/s)",
-            "VO Confidence", "Acceleration Magnitude",
-        ],
-        vertical_spacing=0.08,
+    fig = qc_lib.build_vo_figure(
+        poses=data["poses"],
+        confidences=data["confidences"],
+        deltas=data["deltas"],
+        decision=report.verdict.decision,
+        clip_id=report.clip_id,
+        fps=float(data.get("fps", 5.0)),
+        max_speed_ms=MAX_SKIING_SPEED_MS,
+        max_yaw_rate_deg_s=MAX_YAW_RATE_DEG_S,
+        low_confidence=LOW_CONFIDENCE_THRESHOLD,
     )
-
-    # 3D trajectory colored by speed
-    speed_colors = np.zeros(n)
-    speed_colors[1:] = speeds
-    fig.add_trace(go.Scatter3d(
-        x=positions[:, 0], y=positions[:, 1], z=positions[:, 2],
-        mode="lines+markers",
-        marker=dict(size=2, color=speed_colors, colorscale="RdYlGn_r",
-                    colorbar=dict(title="Speed (m/s)", x=1.02)),
-        line=dict(width=2, color="gray"),
-        name="Trajectory",
-    ), row=1, col=1)
-
-    frames = np.arange(len(speeds))
-
-    # Speed profile
-    fig.add_trace(go.Scatter(
-        x=frames, y=speeds, mode="lines", name="Speed",
-        line=dict(color="steelblue"),
-    ), row=2, col=1)
-    fig.add_hline(y=MAX_SKIING_SPEED_MS, line_dash="dash", line_color="red",
-                  annotation_text=f"Max {MAX_SKIING_SPEED_MS} m/s",
-                  row=2, col=1)
-
-    # Yaw rate
-    if len(yaw_rates) > 0:
-        fig.add_trace(go.Scatter(
-            x=np.arange(len(yaw_rates)), y=yaw_rates, mode="lines",
-            name="Yaw Rate", line=dict(color="orange"),
-        ), row=2, col=2)
-        fig.add_hline(y=MAX_YAW_RATE_DEG_S, line_dash="dash", line_color="red",
-                      annotation_text=f"Max {MAX_YAW_RATE_DEG_S}°/s",
-                      row=2, col=2)
-
-    # Confidence
-    fig.add_trace(go.Scatter(
-        x=np.arange(len(confidences)), y=confidences, mode="lines",
-        name="Confidence", line=dict(color="green"),
-    ), row=3, col=1)
-    fig.add_hline(y=LOW_CONFIDENCE_THRESHOLD, line_dash="dash", line_color="red",
-                  annotation_text="Low threshold", row=3, col=1)
-
-    # Acceleration magnitude
-    if n > 2:
-        velocity = np.diff(positions, axis=0) * fps
-        acceleration = np.diff(velocity, axis=0) * fps
-        accel_mag = np.linalg.norm(acceleration, axis=1)
-        fig.add_trace(go.Scatter(
-            x=np.arange(len(accel_mag)), y=accel_mag, mode="lines",
-            name="Accel Mag", line=dict(color="purple"),
-        ), row=3, col=2)
-
-    v = report.verdict
-    verdict_color = {"GO": "green", "CONDITIONAL-GO": "orange", "NO-GO": "red"}[v.decision]
-    title = (f"MegaSaM VO Validation — {clip_id} — "
-             f"<span style='color:{verdict_color}'>{v.decision}</span>")
-
-    fig.update_layout(
-        title=title,
-        height=900,
-        showlegend=False,
-    )
-
     out_path.parent.mkdir(parents=True, exist_ok=True)
     fig.write_html(str(out_path), include_plotlyjs="cdn")
     _log(f"HTML report: {out_path}")

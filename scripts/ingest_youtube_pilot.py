@@ -22,6 +22,10 @@ from pathlib import Path
 
 import yaml
 
+_ROOT = str(Path(__file__).resolve().parent.parent)
+if _ROOT not in sys.path:
+    sys.path.insert(0, _ROOT)
+
 
 def _log(msg: str) -> None:
     print(f"[youtube-pilot] {msg}", file=sys.stderr)
@@ -134,9 +138,17 @@ def main(argv: list[str] | None = None) -> int:
 
         _log("  running content filter (every frame)...")
         try:
-            from vllatent.ingest.content_filter import VideoVerdict, extract_fpv_ranges, filter_video_from_paths
+            from vllatent.ingest.content_filter import (
+                VideoVerdict,
+                extract_fpv_ranges,
+                filter_video_from_paths,
+                save_filter_result,
+            )
 
             filter_result = filter_video_from_paths(frame_paths, device=args.device)
+
+            # Persist per-frame decisions for QC (read by scripts/qc_report.py).
+            save_filter_result(clip_frames_dir, filter_result)
 
             fpv_count = sum(1 for s in filter_result.shots if s.is_fpv)
             _log(f"  verdict: {filter_result.verdict.value}, FPV shots: {fpv_count}/{len(filter_result.shots)}")
