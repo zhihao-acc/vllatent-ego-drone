@@ -85,7 +85,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.6 — B2a diagnosis + B1-arch replan | done | 2026-07-05 | Direct-policy B2a is diagnostic only; next target is corrected scale-free supervision plus stronger B1/WAM checkpoint |
 | B2.7 — Repair supervision/loss contract | done | 2026-07-05 | Speed-ratio targets are clipped/masked, diagnostics added, loss path term now uses normalized path geometry; local cache has 0 unmasked speed outliers |
 | B2.8 — Past-only action/camera-history conditioning | done | 2026-07-05 | Added causal action-history/path tensors through loader/collate/trainer and optional direct-policy conditioning; future-delta leakage test covers history inputs |
-| B2.9 — Re-run repaired direct-policy diagnostic | pending | — | Validate corrected signal locally; direct policy remains baseline/probe, not final H20 artifact |
+| B2.9 — Re-run repaired direct-policy diagnostic | blocked | 2026-07-05 | Repaired direct policy improved source-balanced margin to +8.95% but missed +10% gate; only 5/10 sources improved, so B2.10 is not auto-authorized |
 | B2.10 — Control-relevant B1/WAM architecture | pending | — | Latent/world predictor + action head; accepted by action-margin improvement, not raw DINO cosine |
 | B2.11 — Local B1-arch training-policy verification | pending | — | Must beat inertia and repaired direct-policy baseline locally before H20 |
 | B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
@@ -93,6 +93,39 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.9 repaired direct-policy diagnostic
+
+**Status:** B2.9 is blocked at the local source-balanced gate. Do not proceed to B2.10/WAM
+implementation without an explicit decision to accept this near-miss or run another local
+diagnostic.
+
+**Tiny overfit passed.** With repaired supervision/loss and past-history conditioning, the tiny
+overfit reached model score `1.0968` vs best baseline `repeat_last=1.2958`, margin `+0.1990`
+(`+15.36%`) over 16 samples. Speed-valid target steps were `56/64`.
+
+**Source-balanced smoke improved but missed the gate.** On the same local source-balanced recipe
+used for B2.7/B2.8 (`--max-clips-per-source 4`, 10 held-out sources), the best epoch reached:
+model score `1.0119`, best baseline `repeat_last=1.1113`, margin `+0.0995` (`+8.95%`), with
+`2800/2948` speed-valid target steps. The B2.9 pass line is `+10%`, so this is a near miss, not a
+pass.
+
+**Per-source diagnosis.** At the best epoch, only `5/10` held-out sources improved. Worst sources:
+`cand06 -6.60%`, `cand36 -1.83%`, `ski03 -0.74%`, `cand31 -0.70%`, `cand38 -0.19%`. Best sources:
+`cand35 +17.99%`, `cand05 +16.36%`, `cand42 +10.52%`, `cand29 +8.33%`, `cand08 +0.15%`.
+
+**Interpretation.** B2.7/B2.8 fixed the worst label/loss pathology and materially improved the
+direct diagnostic (`+1.99%` -> `+8.95%`), but the direct signal still falls just short of the local
+gate and does not improve on a majority of sources. Per the replan, B2.10 should wait for either a
+user-approved near-miss acceptance or another local diagnostic/fix.
+
+**Verified.**
+- Repaired tiny overfit: `scripts/train_sports_b2.py --overfit-tiny ... --max-steps 50`
+  -> margin `+15.36%`.
+- Repaired source-balanced smoke: `scripts/train_sports_b2.py ... --max-clips-per-source 4`
+  -> best margin `+8.95%`, 5/10 sources improved, gate failed.
 
 ---
 
