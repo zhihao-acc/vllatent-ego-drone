@@ -77,7 +77,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.23 — Jetson inference speed check (encoder+predictor) | superseded | 2026-07-05 | No accepted B1 predictor checkpoint; B2 will benchmark encoder+action policy after B2b |
 | B1.24 — Phase B-1 DoD verification (good latent model) | superseded | 2026-07-05 | Original B1 model DoD failed; B1 closed by decision and B2 activated |
 | B2.0 — Close B1 and activate B2 Ralph loop | done | 2026-07-05 | Plan/rules/log/AGENTS updated; next active implementation step is B2.1 |
-| B2.1 — Pure scale-free action target contract | pending | — | Define scale-free future-action target; prove scale invariance and no torch import |
+| B2.1 — Pure scale-free action target contract | done | 2026-07-05 | `vllatent/scale_free_targets.py`: locked `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]` target, pure numpy, scale-invariant, finite/masked degenerates, target-only API |
 | B2.2 — Loader emits B2 action targets additively | pending | — | Keep B1 target_deltas path; add scale-free target/action fields and B2 collate |
 | B2.3 — Direct scale-free action policy | pending | — | Frozen DINO history/current latents + previous observed motion → future action sequence |
 | B2.4 — Action losses, metrics, baselines | pending | — | Direction/yaw/speed/path-shape metrics and baseline margins |
@@ -88,6 +88,37 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.9 — Jetson action-policy speed check | pending | — | USER-GATED after useful B2 checkpoint exists |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.1 pure scale-free action target contract
+
+**Status:** B2.1 is done. Next AUTO step is B2.2 loader/collate additive B2 action fields.
+
+**Contract locked.** Added `vllatent/scale_free_targets.py` as a PURE numpy module. The B2.1
+per-horizon target vector is exactly
+`[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]`; yaw-rate is not part of this target
+contract. `ScaleFreeActionTargets` returns only `actions` and `moving_mask`, so future action labels
+are target-only and do not package model inputs.
+
+**Scale handling.** `reference_speed_from_deltas()` computes arbitrary-scale speed references for
+observed motion. `future_deltas_to_scale_free_targets()` can use an observed reference or an internal
+label-only reference, and does not return that reference. Uniform positive rescaling of translation
+deltas preserves `unit_dir_xyz` and `log_speed_ratio`. Zero/near-zero motion is finite and masked,
+using a stable forward fallback direction.
+
+**Metric speed remains outside Youtube labels.** `metric_speed_command_from_log_ratio()` is an
+inference/controller helper only: it uses onboard odom reference speed and clamps commands to
+`7.5 m/s - 1e-3`, strictly below the cap. The target-generation signature has no odom speed or speed
+cap parameter.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_scale_free_targets.py`
+  -> 18 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile vllatent/scale_free_targets.py tests/test_scale_free_targets.py`
+  -> pass.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check vllatent/scale_free_targets.py tests/test_scale_free_targets.py`
+  -> all checks passed.
 
 ---
 

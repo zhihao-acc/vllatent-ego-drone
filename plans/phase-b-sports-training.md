@@ -1000,8 +1000,8 @@ scale-free motion intent from video and leave metric conversion to the controlle
 
 **B2 locked defaults.**
 - **Target representation:** per-horizon scale-free action vector:
-  `unit_xyz` (3D body-frame direction), `log_speed_ratio` (relative speed profile), and
-  `yaw_rate_norm` (bounded yaw-rate command). Raw MegaSaM metric magnitude is diagnostics only.
+  `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]`. Raw MegaSaM metric magnitude is
+  diagnostics only; yaw-rate targets stay out of the locked B2.1 direct-policy contract.
 - **Inference conversion:** `speed_cmd = min(odom_reference_speed * exp(log_speed_ratio), 7.5 m/s)`.
   The controller must clamp strictly below `7.5 m/s`; B2 never learns an absolute Youtube speed.
 - **Architecture:** direct action head first. Inputs are frozen DINO history/current latents,
@@ -1037,12 +1037,12 @@ Each B2 step follows the same loop:
 - Tier PURE / AUTO
 - Add a pure numpy target module for scale-free future actions. It must expose the locked action
   dimension and transformation utilities from raw/preprocessed velocity-like deltas:
-  `unit_xyz`, `log_speed_ratio`, `yaw_rate_norm`, plus inverse/control helper docs showing odom
-  scale and the `7.5 m/s` cap live outside Youtube training.
+  `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]`, plus inverse/control helper docs showing
+  odom scale and the `7.5 m/s` cap live outside Youtube training.
 - Required invariants:
-  - multiplying all translational deltas by any positive scalar leaves `unit_xyz` and
+  - multiplying all translational deltas by any positive scalar leaves `unit_dir_xyz` and
     `log_speed_ratio` unchanged;
-  - yaw target is unaffected by translation scaling;
+  - yaw is not part of the B2.1 target vector;
   - zero/near-zero speed is finite and explicitly masked or mapped to a stable fallback;
   - future actions are never returned as model inputs.
 - **DoD:** pure tests prove scale invariance, finite zero-speed behavior, shape/dtype, and no torch import.
