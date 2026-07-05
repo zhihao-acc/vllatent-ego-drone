@@ -68,6 +68,16 @@ class ScaleFreeActionPolicy(nn.Module):
             nn.GELU(),
             nn.Linear(hidden_dim, hidden_dim),
         )
+        self.history_action_proj = nn.Sequential(
+            nn.Linear(action_dim, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
+        self.history_path_proj = nn.Sequential(
+            nn.Linear(3, hidden_dim),
+            nn.GELU(),
+            nn.Linear(hidden_dim, hidden_dim),
+        )
         self.dt_proj = nn.Sequential(
             nn.Linear(1, hidden_dim),
             nn.GELU(),
@@ -96,6 +106,9 @@ class ScaleFreeActionPolicy(nn.Module):
         history_mask: torch.Tensor,
         last_action_scale_free: torch.Tensor,
         dt_seconds: torch.Tensor,
+        action_history_scale_free: torch.Tensor | None = None,
+        action_history_mask: torch.Tensor | None = None,
+        camera_history_path_scale_free: torch.Tensor | None = None,
     ) -> torch.Tensor:
         """Predict future scale-free actions.
 
@@ -106,6 +119,9 @@ class ScaleFreeActionPolicy(nn.Module):
         history_mask : (B, H) bool, True=real history frame
         last_action_scale_free : (B, 4)
         dt_seconds : (B, T)
+        action_history_scale_free : optional (B, H, 4)
+        action_history_mask : optional (B, H) bool
+        camera_history_path_scale_free : optional (B, H, 3)
 
         Returns
         -------
@@ -124,6 +140,28 @@ class ScaleFreeActionPolicy(nn.Module):
             )
         if dt_seconds.shape != (z_t.shape[0], self.horizon):
             raise ValueError(f"dt_seconds: expected {(z_t.shape[0], self.horizon)}, got {dt_seconds.shape}")
+        if action_history_scale_free is not None and action_history_scale_free.shape != (
+            z_t.shape[0],
+            self.history,
+            self.action_dim,
+        ):
+            raise ValueError(
+                f"action_history_scale_free: expected {(z_t.shape[0], self.history, self.action_dim)}, "
+                f"got {action_history_scale_free.shape}"
+            )
+        if action_history_mask is not None and action_history_mask.shape != (z_t.shape[0], self.history):
+            raise ValueError(
+                f"action_history_mask: expected {(z_t.shape[0], self.history)}, got {action_history_mask.shape}"
+            )
+        if camera_history_path_scale_free is not None and camera_history_path_scale_free.shape != (
+            z_t.shape[0],
+            self.history,
+            3,
+        ):
+            raise ValueError(
+                f"camera_history_path_scale_free: expected {(z_t.shape[0], self.history, 3)}, "
+                f"got {camera_history_path_scale_free.shape}"
+            )
 
         batch_size = z_t.shape[0]
         device = z_t.device
@@ -138,6 +176,21 @@ class ScaleFreeActionPolicy(nn.Module):
         current_valid = torch.ones(batch_size, 1, device=device, dtype=torch.bool)
         valid_frames = torch.cat([mask, current_valid], dim=1)
         frames = frames * valid_frames.unsqueeze(-1).to(dtype=frames.dtype)
+
+        if action_history_scale_free is not None:
+            action_hist = action_history_scale_free.to(device=device, dtype=dtype)
+            history_valid = (
+                mask
+                if action_history_mask is None
+                else action_history_mask.to(device=device, dtype=torch.bool)
+            )
+            if camera_history_path_scale_free is None:
+                camera_path = torch.zeros(batch_size, self.history, 3, device=device, dtype=dtype)
+            else:
+                camera_path = camera_history_path_scale_free.to(device=device, dtype=dtype)
+            history_context = self.history_action_proj(action_hist) + self.history_path_proj(camera_path)
+            history_context = history_context * history_valid.unsqueeze(-1).to(dtype=history_context.dtype)
+            frames[:, : self.history] = frames[:, : self.history] + history_context
 
         tokens = frames + self.temporal_embed[:, : self.history + 1]
         encoded = self.context_encoder(tokens, src_key_padding_mask=~valid_frames)

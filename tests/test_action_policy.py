@@ -28,6 +28,13 @@ def _enable_residual_output(model: ScaleFreeActionPolicy) -> None:
     torch.nn.init.normal_(model.head[-1].bias, std=0.02)
 
 
+def _make_history_inputs(batch_size: int = 2):
+    action_history = torch.randn(batch_size, HISTORY, SCALE_FREE_ACTION_DIM)
+    action_history_mask = torch.ones(batch_size, HISTORY, dtype=torch.bool)
+    camera_history_path = torch.randn(batch_size, HISTORY, 3)
+    return action_history, action_history_mask, camera_history_path
+
+
 @pytest.mark.torch
 class TestScaleFreeActionPolicy:
     def test_output_shape(self) -> None:
@@ -67,7 +74,17 @@ class TestScaleFreeActionPolicy:
     def test_initial_policy_repeats_last_action_baseline(self) -> None:
         model = ScaleFreeActionPolicy(dim=32, hidden_dim=64, depth=1, heads=4, dropout=0.5)
         history, z_t, mask, action, dt = _make_inputs(dim=32)
-        out = model(history, z_t, mask, action, dt)
+        action_history, action_history_mask, camera_history_path = _make_history_inputs()
+        out = model(
+            history,
+            z_t,
+            mask,
+            action,
+            dt,
+            action_history_scale_free=action_history,
+            action_history_mask=action_history_mask,
+            camera_history_path_scale_free=camera_history_path,
+        )
         expected = action.unsqueeze(1).expand(-1, HORIZON, -1)
         assert torch.allclose(out, expected, atol=1e-7)
 
@@ -103,6 +120,50 @@ class TestScaleFreeActionPolicy:
             out_masked = model(history, z_t, masked, action, dt)
         assert not torch.allclose(out_all, out_masked, atol=1e-6)
 
+    def test_past_action_history_changes_residual_output(self) -> None:
+        model = ScaleFreeActionPolicy(dim=32, hidden_dim=64, depth=1, heads=4)
+        _enable_residual_output(model)
+        model.eval()
+        history, z_t, mask, action, dt = _make_inputs(batch_size=1, dim=32)
+        action_history, action_history_mask, camera_history_path = _make_history_inputs(batch_size=1)
+        changed_history = action_history.clone()
+        changed_history[:, -1, 1] += 4.0
+        with torch.no_grad():
+            out1 = model(
+                history,
+                z_t,
+                mask,
+                action,
+                dt,
+                action_history_scale_free=action_history,
+                action_history_mask=action_history_mask,
+                camera_history_path_scale_free=camera_history_path,
+            )
+            out2 = model(
+                history,
+                z_t,
+                mask,
+                action,
+                dt,
+                action_history_scale_free=changed_history,
+                action_history_mask=action_history_mask,
+                camera_history_path_scale_free=camera_history_path,
+            )
+        assert not torch.allclose(out1, out2, atol=1e-6)
+
+    def test_rejects_bad_action_history_shape(self) -> None:
+        model = ScaleFreeActionPolicy(dim=32, hidden_dim=64, depth=1, heads=4)
+        history, z_t, mask, action, dt = _make_inputs(dim=32)
+        with pytest.raises(ValueError, match="action_history_scale_free"):
+            model(
+                history,
+                z_t,
+                mask,
+                action,
+                dt,
+                action_history_scale_free=torch.zeros(2, HISTORY + 1, SCALE_FREE_ACTION_DIM),
+            )
+
     def test_rejects_bad_head_divisibility(self) -> None:
         with pytest.raises(ValueError, match="hidden_dim"):
             ScaleFreeActionPolicy(dim=32, hidden_dim=63, heads=4)
@@ -115,9 +176,11 @@ class TestScaleFreeActionPolicy:
             "odom_reference_speed",
             "target_actions",
             "target_actions_scale_free",
+            "future_action_history",
         }
         assert forbidden.isdisjoint(sig.parameters)
         assert "last_action_scale_free" in sig.parameters
+        assert "action_history_scale_free" in sig.parameters
 
 
 def test_policy_module_does_not_import_b1_predictor() -> None:

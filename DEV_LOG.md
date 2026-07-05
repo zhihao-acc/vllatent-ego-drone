@@ -84,7 +84,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.5 — B2 trainer + local training-policy verification | blocked | 2026-07-05 | Trainer implemented/tested, but local source-split gate failed: best balanced smoke margin +1.99% (< required +10%); no H20 command |
 | B2.6 — B2a diagnosis + B1-arch replan | done | 2026-07-05 | Direct-policy B2a is diagnostic only; next target is corrected scale-free supervision plus stronger B1/WAM checkpoint |
 | B2.7 — Repair supervision/loss contract | done | 2026-07-05 | Speed-ratio targets are clipped/masked, diagnostics added, loss path term now uses normalized path geometry; local cache has 0 unmasked speed outliers |
-| B2.8 — Past-only action/camera-history conditioning | pending | — | Add causal scale-free action/camera trajectory history inputs; future labels remain target-only |
+| B2.8 — Past-only action/camera-history conditioning | done | 2026-07-05 | Added causal action-history/path tensors through loader/collate/trainer and optional direct-policy conditioning; future-delta leakage test covers history inputs |
 | B2.9 — Re-run repaired direct-policy diagnostic | pending | — | Validate corrected signal locally; direct policy remains baseline/probe, not final H20 artifact |
 | B2.10 — Control-relevant B1/WAM architecture | pending | — | Latent/world predictor + action head; accepted by action-margin improvement, not raw DINO cosine |
 | B2.11 — Local B1-arch training-policy verification | pending | — | Must beat inertia and repaired direct-policy baseline locally before H20 |
@@ -93,6 +93,35 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.8 past-only action/camera-history conditioning
+
+**Status:** B2.8 is done. Next AUTO step is B2.9 repaired direct-policy diagnostic.
+
+**Data contract.** `SportsSample` and `ActionPolicyBatch` now include
+`action_history_scale_free (H,4)`, `action_history_mask (H)`, and
+`camera_history_path_scale_free (H,3)`. These are computed from observed deltas ending at the
+prediction anchor; at clip start the masks are false and path is zero.
+
+**No leakage.** The existing targeted future-delta mutation test now also asserts
+`action_history_scale_free`, `action_history_mask`, and `camera_history_path_scale_free` are
+unchanged when only future target deltas change. Future action labels remain target-only.
+
+**Model conditioning.** `ScaleFreeActionPolicy.forward()` accepts optional past-history tensors and
+adds action/path embeddings to the history tokens before temporal encoding. The residual output head
+remains zero-initialized, so initial predictions still exactly repeat `last_action_scale_free`.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_sports_loader.py tests/test_collate.py tests/test_action_policy.py`
+  -> 61 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_train_sports_b2.py tests/test_action_metrics.py tests/test_losses.py`
+  -> 35 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check ...`
+  -> all checks passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile ...`
+  -> pass.
 
 ---
 

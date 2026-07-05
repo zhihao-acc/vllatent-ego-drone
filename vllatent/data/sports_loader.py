@@ -34,6 +34,7 @@ from pathlib import Path
 import numpy as np
 
 from vllatent.scale_free_targets import (
+    SCALE_FREE_LOG_SPEED_CLAMP,
     SCALE_FREE_SPEED_EPS,
     future_deltas_to_scale_free_targets,
     reference_speed_from_deltas,
@@ -85,6 +86,9 @@ class SportsSample:
     target_actions_moving_mask: np.ndarray      # (T,) bool — valid translation direction targets
     target_actions_speed_mask: np.ndarray       # (T,) bool — valid unclipped speed-ratio targets
     last_action_scale_free: np.ndarray          # (4,) f32 — B2 previous observed action input
+    action_history_scale_free: np.ndarray       # (H, 4) f32 — past-observed action history
+    action_history_mask: np.ndarray             # (H,) bool — True where action-history slot is real
+    camera_history_path_scale_free: np.ndarray  # (H, 3) f32 — cumulative past camera path
     odom_reference_speed: float                 # arbitrary-scale observed speed reference for diagnostics
     vo_confidence: np.ndarray    # (T,) f32 — per-step VO confidence
     frame_quality: float         # composite quality of z_t frame
@@ -158,6 +162,36 @@ def _observed_reference_speed(observed_velocities: np.ndarray, t: int) -> float:
         return SCALE_FREE_SPEED_EPS
     lo = max(0, t - HISTORY)
     return reference_speed_from_deltas(observed_velocities[lo:t])
+
+
+def _scale_free_step_vectors_np(actions: np.ndarray) -> np.ndarray:
+    """Convert scale-free action vectors to arbitrary-scale relative path steps."""
+    dirs = actions[..., :3].astype(np.float64, copy=False)
+    log_speed = np.clip(actions[..., 3], -SCALE_FREE_LOG_SPEED_CLAMP, SCALE_FREE_LOG_SPEED_CLAMP)
+    speed_ratio = np.exp(log_speed.astype(np.float64, copy=False))
+    return (dirs * speed_ratio[..., None]).astype(np.float32)
+
+
+def _observed_action_history(
+    observed_velocities: np.ndarray,
+    t: int,
+    reference_speed: float,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Past-only scale-free action and path history ending at the anchor frame."""
+    actions = np.zeros((HISTORY, 4), dtype=np.float32)
+    actions[:, 0] = 1.0
+    mask = np.zeros(HISTORY, dtype=MASK_DTYPE)
+    for h in range(HISTORY):
+        delta_idx = t - HISTORY + h
+        if 0 <= delta_idx < observed_velocities.shape[0]:
+            actions[h] = scale_free_actions_from_deltas(
+                observed_velocities[delta_idx],
+                reference_speed=reference_speed,
+            ).actions
+            mask[h] = True
+    steps = _scale_free_step_vectors_np(actions) * mask.astype(np.float32)[:, None]
+    path = np.cumsum(steps, axis=0, dtype=np.float32)
+    return actions, mask, path.astype(np.float32, copy=False)
 
 
 def _load_clip(path: Path) -> dict[str, np.ndarray]:
@@ -380,6 +414,11 @@ class SportsTrainingDataset:
             last_observed_velocity,
             reference_speed=odom_reference_speed,
         ).actions
+        action_history, action_history_mask, camera_history_path = _observed_action_history(
+            observed_velocities,
+            t,
+            odom_reference_speed,
+        )
 
         fq = float(clip["frame_quality"][t])
 
@@ -394,6 +433,9 @@ class SportsTrainingDataset:
             target_actions_moving_mask=target_actions.moving_mask,
             target_actions_speed_mask=target_actions.speed_valid_mask,
             last_action_scale_free=last_action_scale_free,
+            action_history_scale_free=action_history,
+            action_history_mask=action_history_mask,
+            camera_history_path_scale_free=camera_history_path,
             odom_reference_speed=float(odom_reference_speed),
             vo_confidence=vo_conf,
             frame_quality=fq,

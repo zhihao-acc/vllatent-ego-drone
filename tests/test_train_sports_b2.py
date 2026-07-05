@@ -61,6 +61,9 @@ def _manual_batch(target: torch.Tensor, last_action: torch.Tensor) -> ActionPoli
         target_actions_moving_mask=torch.ones(batch_size, HORIZON, dtype=torch.bool),
         target_actions_speed_mask=torch.ones(batch_size, HORIZON, dtype=torch.bool),
         last_action_scale_free=last_action,
+        action_history_scale_free=torch.zeros(batch_size, HISTORY, SCALE_FREE_ACTION_DIM),
+        action_history_mask=torch.ones(batch_size, HISTORY, dtype=torch.bool),
+        camera_history_path_scale_free=torch.zeros(batch_size, HISTORY, 3),
         dt_seconds=torch.full((batch_size, HORIZON), 0.2),
         odom_reference_speed=torch.ones(batch_size),
         vo_confidence=torch.ones(batch_size, HORIZON),
@@ -74,7 +77,7 @@ class _ConstantPolicy(torch.nn.Module):
         super().__init__()
         self.register_buffer("action", action)
 
-    def forward(self, history_latents, z_t, history_mask, last_action_scale_free, dt_seconds):  # noqa: ANN001
+    def forward(self, history_latents, z_t, history_mask, last_action_scale_free, dt_seconds, **kwargs):  # noqa: ANN001
         return self.action[: z_t.shape[0]].to(z_t.device)
 
 

@@ -190,6 +190,12 @@ class TestSportsTrainingDataset:
         assert sample.target_actions_speed_mask.dtype == MASK_DTYPE
         assert sample.last_action_scale_free.shape == (SCALE_FREE_ACTION_DIM,)
         assert sample.last_action_scale_free.dtype == np.float32
+        assert sample.action_history_scale_free.shape == (HISTORY, SCALE_FREE_ACTION_DIM)
+        assert sample.action_history_scale_free.dtype == np.float32
+        assert sample.action_history_mask.shape == (HISTORY,)
+        assert sample.action_history_mask.dtype == MASK_DTYPE
+        assert sample.camera_history_path_scale_free.shape == (HISTORY, 3)
+        assert sample.camera_history_path_scale_free.dtype == np.float32
         assert isinstance(sample.odom_reference_speed, float)
         assert sample.vo_confidence.shape == (HORIZON,)
         assert sample.dt_seconds.shape == (HORIZON,)
@@ -211,12 +217,17 @@ class TestSportsTrainingDataset:
         s0 = ds[0]
         np.testing.assert_array_equal(s0.last_action, np.zeros(DOF, dtype=np.float32))
         np.testing.assert_allclose(s0.last_action_scale_free, [1.0, 0.0, 0.0, 0.0], atol=1e-6)
+        assert not np.any(s0.action_history_mask)
+        np.testing.assert_allclose(s0.camera_history_path_scale_free, 0.0, atol=1e-6)
 
     def test_last_action_nonzero_after_start(self, tmp_path: Path) -> None:
         _make_clip_npz(tmp_path / "clip01.npz", n_frames=20, constant_delta=True)
         ds = SportsTrainingDataset(tmp_path)
         s5 = ds[5]
         assert not np.allclose(s5.last_action, np.zeros(DOF))
+        assert s5.action_history_mask.tolist() == [True, True, True]
+        np.testing.assert_allclose(s5.action_history_scale_free[-1], s5.last_action_scale_free, atol=1e-6)
+        assert np.all(np.isfinite(s5.camera_history_path_scale_free))
 
     def test_gt_history_not_predicted(self, tmp_path: Path) -> None:
         """History latents must be the actual cached latents, not zeros/predicted."""
@@ -359,6 +370,13 @@ class TestSportsTrainingDataset:
         b = SportsTrainingDataset(tmp_path / "b")[sample_t]
 
         np.testing.assert_allclose(a.last_action_scale_free, b.last_action_scale_free, atol=1e-6)
+        np.testing.assert_allclose(a.action_history_scale_free, b.action_history_scale_free, atol=1e-6)
+        np.testing.assert_array_equal(a.action_history_mask, b.action_history_mask)
+        np.testing.assert_allclose(
+            a.camera_history_path_scale_free,
+            b.camera_history_path_scale_free,
+            atol=1e-6,
+        )
         assert a.odom_reference_speed == pytest.approx(b.odom_reference_speed)
         assert not np.allclose(a.target_actions_scale_free, b.target_actions_scale_free)
 

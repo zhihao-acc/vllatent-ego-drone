@@ -77,6 +77,9 @@ def _to_device(batch: ActionPolicyBatch, device: str) -> ActionPolicyBatch:
         target_actions_moving_mask=batch.target_actions_moving_mask.to(device),
         target_actions_speed_mask=batch.target_actions_speed_mask.to(device),
         last_action_scale_free=batch.last_action_scale_free.to(device),
+        action_history_scale_free=batch.action_history_scale_free.to(device),
+        action_history_mask=batch.action_history_mask.to(device),
+        camera_history_path_scale_free=batch.camera_history_path_scale_free.to(device),
         dt_seconds=batch.dt_seconds.to(device),
         odom_reference_speed=batch.odom_reference_speed.to(device),
         vo_confidence=batch.vo_confidence.to(device),
@@ -155,6 +158,9 @@ def evaluate_action_policy(
                         history_mask=batch.history_mask,
                         last_action_scale_free=batch.last_action_scale_free,
                         dt_seconds=batch.dt_seconds,
+                        action_history_scale_free=batch.action_history_scale_free,
+                        action_history_mask=batch.action_history_mask,
+                        camera_history_path_scale_free=batch.camera_history_path_scale_free,
                     )
                 preds.append(pred.float().cpu())
                 targets.append(batch.target_actions_scale_free.float().cpu())
@@ -195,6 +201,9 @@ def _train_batch(
         history_mask=batch.history_mask,
         last_action_scale_free=batch.last_action_scale_free,
         dt_seconds=batch.dt_seconds,
+        action_history_scale_free=batch.action_history_scale_free,
+        action_history_mask=batch.action_history_mask,
+        camera_history_path_scale_free=batch.camera_history_path_scale_free,
     )
     loss = action_policy_loss(
         pred.float(),

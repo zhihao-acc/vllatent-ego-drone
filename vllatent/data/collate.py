@@ -44,6 +44,9 @@ class ActionPolicyBatch(NamedTuple):
     target_actions_moving_mask: torch.Tensor  # (B, T) bool
     target_actions_speed_mask: torch.Tensor   # (B, T) bool
     last_action_scale_free: torch.Tensor      # (B, 4) f32
+    action_history_scale_free: torch.Tensor   # (B, H, 4) f32
+    action_history_mask: torch.Tensor         # (B, H) bool
+    camera_history_path_scale_free: torch.Tensor  # (B, H, 3) f32
     dt_seconds: torch.Tensor                  # (B, T) f32
     odom_reference_speed: torch.Tensor        # (B,) f32, diagnostic/reference only
     vo_confidence: torch.Tensor               # (B, T) f32
@@ -93,6 +96,9 @@ def collate_action_policy_batch(samples: list[SportsSample]) -> ActionPolicyBatc
     target_mask = torch.from_numpy(np.stack([s.target_actions_moving_mask for s in samples]))
     target_speed_mask = torch.from_numpy(np.stack([s.target_actions_speed_mask for s in samples]))
     last_action = torch.from_numpy(np.stack([s.last_action_scale_free for s in samples]))
+    action_history = torch.from_numpy(np.stack([s.action_history_scale_free for s in samples]))
+    action_history_mask = torch.from_numpy(np.stack([s.action_history_mask for s in samples]))
+    camera_history_path = torch.from_numpy(np.stack([s.camera_history_path_scale_free for s in samples]))
     dt_sec = torch.from_numpy(np.stack([s.dt_seconds for s in samples]))
     vo_conf = torch.from_numpy(np.stack([s.vo_confidence for s in samples]))
 
@@ -108,6 +114,9 @@ def collate_action_policy_batch(samples: list[SportsSample]) -> ActionPolicyBatc
         target_actions_moving_mask=target_mask,
         target_actions_speed_mask=target_speed_mask,
         last_action_scale_free=last_action,
+        action_history_scale_free=action_history,
+        action_history_mask=action_history_mask,
+        camera_history_path_scale_free=camera_history_path,
         dt_seconds=dt_sec,
         odom_reference_speed=odom_ref,
         vo_confidence=vo_conf,
