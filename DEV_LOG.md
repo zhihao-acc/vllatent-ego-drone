@@ -80,7 +80,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.1 — Pure scale-free action target contract | done | 2026-07-05 | `vllatent/scale_free_targets.py`: locked `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]` target, pure numpy, scale-invariant, finite/masked degenerates, target-only API |
 | B2.2 — Loader emits B2 action targets additively | done | 2026-07-05 | Sports loader keeps B1 fields and adds B2 scale-free target/input fields plus separate `ActionPolicyBatch`; past input path is causal/no-future |
 | B2.3 — Direct scale-free action policy | done | 2026-07-05 | `ScaleFreeActionPolicy`: mean-pooled frozen DINO history/current + history mask + previous observed scale-free action + dt → future action sequence; no B1 predictor or future-label inputs |
-| B2.4 — Action losses, metrics, baselines | pending | — | Direction/yaw/speed/path-shape metrics and baseline margins |
+| B2.4 — Action losses, metrics, baselines | done | 2026-07-05 | `action_policy_loss` plus direction/angular, path ADE/FDE, speed-ratio, aggregate score, deterministic baselines, and best-baseline margin |
 | B2.5 — B2 trainer + local training-policy verification | pending | — | Local B2a gate before any H20 command |
 | B2.6 — B2a technical readout + USER gate | pending | — | Stop with one paste-ready B2b H20 command only if local gate passes |
 | B2.7 — H20 scale-free action-policy run | pending | — | USER-GATED; do not operate H20/SSH/docker |
@@ -88,6 +88,32 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.9 — Jetson action-policy speed check | pending | — | USER-GATED after useful B2 checkpoint exists |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.4 action losses, metrics, and baselines
+
+**Status:** B2.4 is done. Next AUTO step is B2.5 B2 trainer and local training-policy verification.
+
+**Metrics added.** Added `vllatent/train/action_metrics.py` for the locked B2 action vector
+`[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]`. Metrics include direction cosine,
+angular error, normalized path-shape ADE/FDE, speed-ratio MAE, and lower-is-better aggregate score.
+No yaw-rate metric is included because yaw is not part of the B2.1 contract.
+
+**Baselines and margins.** Added deterministic `repeat_last`, `no_turn`, `zero`, `mean`, and
+`linear` baselines plus `score_action_predictions()`, where margin is positive only when the model
+beats the best baseline.
+
+**Loss added.** Added masked differentiable `action_policy_loss()` to `vllatent/train/losses.py`,
+combining direction, speed-ratio, and path losses with optional sample weighting.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_action_metrics.py tests/test_losses.py`
+  -> 27 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check vllatent/train/action_metrics.py vllatent/train/losses.py tests/test_action_metrics.py tests/test_losses.py`
+  -> all checks passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile vllatent/train/action_metrics.py vllatent/train/losses.py tests/test_action_metrics.py tests/test_losses.py`
+  -> pass.
 
 ---
 

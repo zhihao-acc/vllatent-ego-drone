@@ -1081,7 +1081,7 @@ Each B2 step follows the same loop:
   - direction cosine / angular error;
   - normalized path-shape ADE/FDE;
   - speed-ratio MAE;
-  - yaw-rate MAE;
+  - no yaw-rate metric in the locked B2.1 action vector;
   - aggregate score where lower is better;
   - margins against repeat-last-motion, no-turn, zero/mean, and linear extrapolation baselines.
 - **DoD:** perfect prediction scores near zero error, bad prediction is worse, repeat-last baseline

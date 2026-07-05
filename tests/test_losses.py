@@ -8,6 +8,7 @@ torch = pytest.importorskip("torch")
 from vllatent.schemas import DOF, EMBED_DIM, HORIZON, PATCH_TOKENS  # noqa: E402
 from vllatent.train.losses import (  # noqa: E402
     LossOutput,
+    action_policy_loss,
     combined_loss,
     latent_loss,
     waypoint_loss,
@@ -93,6 +94,54 @@ class TestWaypointLoss:
         loss = waypoint_loss(pred, tgt, w)
         loss.backward()
         assert pred.grad is not None
+
+
+@pytest.mark.torch
+class TestActionPolicyLoss:
+    def test_zero_loss_on_identical(self) -> None:
+        x = torch.zeros(B, T, DOF)
+        x[..., 0] = 1.0
+        mask = torch.ones(B, T, dtype=torch.bool)
+        loss = action_policy_loss(x, x, mask)
+        assert loss.item() == pytest.approx(0.0, abs=1e-7)
+
+    def test_bad_prediction_positive_loss(self) -> None:
+        target = torch.zeros(B, T, DOF)
+        target[..., 0] = 1.0
+        pred = target.clone()
+        pred[..., 0] = -1.0
+        pred[..., 3] = 1.0
+        mask = torch.ones(B, T, dtype=torch.bool)
+        loss = action_policy_loss(pred, target, mask)
+        assert loss.item() > 1.0
+
+    def test_differentiable(self) -> None:
+        target = torch.zeros(B, T, DOF)
+        target[..., 0] = 1.0
+        pred = torch.randn(B, T, DOF, requires_grad=True)
+        mask = torch.ones(B, T, dtype=torch.bool)
+        loss = action_policy_loss(pred, target, mask)
+        loss.backward()
+        assert pred.grad is not None
+
+    def test_masked_steps_ignored(self) -> None:
+        target = torch.zeros(1, T, DOF)
+        target[..., 0] = 1.0
+        pred = target.clone()
+        pred[:, 1:, 0] = -1.0
+        mask = torch.tensor([[True, False, False, False]])
+        loss = action_policy_loss(pred, target, mask)
+        assert loss.item() == pytest.approx(0.0, abs=1e-7)
+
+    def test_sample_weight_changes_loss(self) -> None:
+        target = torch.zeros(2, T, DOF)
+        target[..., 0] = 1.0
+        pred = target.clone()
+        pred[1, :, 0] = -1.0
+        mask = torch.ones(2, T, dtype=torch.bool)
+        equal = action_policy_loss(pred, target, mask)
+        weighted = action_policy_loss(pred, target, mask, sample_weight=torch.tensor([10.0, 1.0]))
+        assert weighted < equal
 
 
 @pytest.mark.torch
