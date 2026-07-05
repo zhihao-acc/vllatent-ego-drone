@@ -35,6 +35,23 @@ class TestLatentPredictor:
         out = model(history, z_t, action, dt)
         assert out.shape == (2, HORIZON, PATCH_TOKENS, 384)
 
+    def test_residual_mode_zero_init_matches_persistence(self) -> None:
+        model = LatentPredictor(dim=32, depth=1, heads=4, prediction_mode="residual")
+        model.eval()
+        B = 1
+        history = torch.randn(B, HISTORY, PATCH_TOKENS, 32)
+        z_t = torch.randn(B, PATCH_TOKENS, 32)
+        action = torch.randn(B, DOF)
+        dt = torch.full((B, HORIZON), 0.2)
+        with torch.no_grad():
+            out = model(history, z_t, action, dt)
+        expected = z_t.unsqueeze(1).expand(-1, HORIZON, -1, -1)
+        assert torch.allclose(out, expected, atol=1e-6)
+
+    def test_rejects_unknown_prediction_mode(self) -> None:
+        with pytest.raises(ValueError, match="prediction_mode"):
+            LatentPredictor(dim=32, depth=1, heads=4, prediction_mode="bogus")
+
     def test_param_count_depth6(self) -> None:
         model = LatentPredictor(dim=EMBED_DIM, depth=6, heads=12)
         n_params = sum(p.numel() for p in model.parameters())

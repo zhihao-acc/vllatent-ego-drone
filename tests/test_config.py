@@ -130,6 +130,9 @@ def test_train_config_recovery_defaults() -> None:
     assert c.early_stop_metric == "val_margin"
     assert c.adam_beta1 == 0.9
     assert c.adam_beta2 == 0.95
+    assert c.prediction_mode == "absolute"
+    assert c.latent_loss_mode == "absolute"
+    assert c.delta_loss_weight == 0.0
 
 
 @pytest.mark.parametrize("factory", [
@@ -142,6 +145,9 @@ def test_train_config_recovery_defaults() -> None:
     lambda: TrainConfig(adam_beta1=-0.1),
     lambda: TrainConfig(adam_beta2=1.0),
     lambda: TrainConfig(adam_beta1=0.99, adam_beta2=0.95),
+    lambda: TrainConfig(prediction_mode="bogus"),
+    lambda: TrainConfig(latent_loss_mode="bogus"),
+    lambda: TrainConfig(delta_loss_weight=-1.0),
 ])
 def test_ingest_config_rejects_bad(factory) -> None:
     with pytest.raises(ValueError):

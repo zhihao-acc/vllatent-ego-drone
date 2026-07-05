@@ -653,7 +653,8 @@ STOP CHECK at `started_step + 3`, user-gated stays `in_progress`.
 
 ### Group 8 — Latent World-Model Training + Verification (B-1)
 
-> **REPLANNED 2026-06-28 · scope-cut 2026-06-29 · B1.22e recovery 2026-06-30.**
+> **REPLANNED 2026-06-28 · scope-cut 2026-06-29 · B1.22e recovery 2026-06-30 ·
+> residual replan approved 2026-07-05.**
 > Supersedes the single-step B1.22.
 > **B-1 now trains the latent predictor ONLY — the waypoint head is DEFERRED to B-2** (user
 > 2026-06-29). Rationale: the head's `L_wp` target is the **MegaSaM delta**, whose monocular-VO
@@ -705,20 +706,23 @@ latent-pretraining source** (B-1's own `L_latent` objective): pretrain on real+g
 cosine on a real held-out val** (safety net against domain pollution). This turns "is there
 enough data?" into a measured experiment.
 
-**B1.22e recovery diagnosis (2026-06-30).** The first H20 depth-6/action-FiLM/bf16 run completed
-but failed DoD: best finite epoch 16 had `val_cos=0.7318`, persistence `0.8094`, margin `-0.0777`;
-epoch 23 collapsed and epoch 24 became NaN. The leading causal diagnosis is **not** a bad cosine
-implementation or a `ski03`-dominated split. The metric is apples-to-apples: model and persistence
-compare against the same future DINO latents. The split had 919 clips / 39 sources; val was 85 clips
-/ 8 sources / 1425 windows, and `ski03` was only 35 windows. The root problem is objective/inductive
-bias: at 5 Hz and horizon 1-4, whole-frame frozen DINO latents are highly persistent, so an absolute
-latent predictor must reconstruct the large static component before learning the small motion
-residual needed to beat `z_t`. Train-batch cosine only reached ~0.81 while cache-only train
-persistence was ~0.87, so the model likely did not beat persistence even on train. The late NaN is
-a separate stability defect: collapse started around step 7510 before first NaN at step 7840 while
-LR was still ~1.8e-4. Therefore B1.22e is now a **diagnostic recovery step**: first prove train
-margin and numerical stability, then run the next user-gated H20 variant. Do not silently relax the
-DoD; per-horizon margin over persistence remains the pass gate.
+**B1.22e recovery diagnosis (2026-06-30 through run2 paste-back 2026-07-05).** The first H20
+depth-6/action-FiLM/bf16 run completed but failed DoD: best finite epoch 16 had `val_cos=0.7318`,
+persistence `0.8094`, margin `-0.0777`; epoch 23 collapsed and epoch 24 became NaN. Recovery run2 is
+now the active baseline: depth 4, LR `1e-4`, AdamW betas `(0.9,0.95)`, bf16, `--exclude-source ski03`,
+`--eval-train`, and `--eval-by-source`. It had cleaner numerics, but still failed persistence on
+both held-out val and train. Best visible val was epoch 25 / step 8008 with `val_cos=0.7593`,
+`val_persistence=0.8576`, `val_margin=-0.0983`; best visible train eval was epoch 27 / step 8624
+with `train_cos=0.8003`, `train_persistence=0.8685`, `train_margin=-0.0683`. Because the predictor
+does not beat persistence even on train, stop treating split variance, `ski03`, depth, or LR as the
+primary blocker. The metric is apples-to-apples: model and persistence compare against the same
+future DINO latents. The root problem is objective/parameterization: at 5 Hz and horizon 1-4,
+whole-frame frozen DINO latents are highly persistent, so an absolute predictor must reconstruct the
+large static component before learning the small motion residual needed to beat `z_t`. User approved
+the next AUTO direction on 2026-07-05: replan to a persistence-residual predictor
+`z_hat = z_t + delta_hat`, with a zero/near-zero-initialized residual path so the untrained model
+starts at or near persistence. Do not silently relax the DoD; per-horizon margin over persistence
+remains the pass gate.
 
 #### A. Revised training policy (replaces "AdamW + cosine, batch-to-GPU")
 
@@ -775,6 +779,13 @@ predictor and trains the head on top (design in the B-2 section below).
   param groups, AdamW betas `(0.9, 0.95)`, bf16, dropout 0.1, batch 64. Early-stop on
   **val latent cosine vs persistence margin** (`--early-stop-metric val_margin` after the failed
   first H20 run).
+- **Residual replan (approved 2026-07-05):** add a `z_hat = z_t + delta_hat` predictor mode.
+  The residual path must be zero/near-zero initialized so initialization evaluates at approximately
+  the persistence baseline. Keep the existing absolute `SmoothL1(z_hat, z_future)` path as the
+  default eval-compatible loss, and expose delta-loss ablations:
+  `SmoothL1(delta_hat, z_future - z_t)` and a combined absolute+delta loss. Select checkpoints by
+  margin, inspect every per-horizon margin, and log the minimum horizon margin so a positive average
+  cannot hide a failed short horizon.
 - **Action conditioning (kept).** action-FiLM is fed the normalized `last_action` (previous
   observed delta) and dt-FiLM the `dt_seconds` — this is what makes it a *world-action* model,
   not just a video model. The MegaSaM scale problem is **non-load-bearing here** (soft
@@ -910,18 +921,18 @@ latent-pretraining slice.**
 
 **B1.22e — B-1 training run: latent world model on H20 (predictor only, `L_latent`).**
 - Tier TORCH / **USER-GATED** (H20)
-- §B. **Recovery sequence after failed H20 B1.22e.** AUTO first: add finite-loss/gradient
-  fail-fast, align optimizer betas with the plan, and log train-set + per-source persistence
-  margins. Then run a cheap local diagnostic before any H20 spend. If **train margin is still
-  negative**, treat the absolute-prediction formulation as the blocker and replan a
-  persistence-residual parameterization (`z_hat = z_t + delta_hat`, zero-init delta path) before
-  another full run. If train margin is positive but val margin is negative, focus on split/data
-  scale/generalization.
-- H20 recovery candidate after the AUTO diagnostics: `--latent-only`, bf16 or fp32 smoke,
-  **depth 2-4 first**, LR 1e-4 to 1.5e-4, AdamW betas `(0.9,0.95)`, WD 0.05 param groups,
-  batch 64, scene-split sacred val, `--early-stop-metric val_margin`, optional
-  `--no-action-film` because MegaSaM deltas are noisy conditioning. Save `ckpt_best.pt`
-  (predictor) + train-only `norm_stats.npz`.
+- §B. **Recovery sequence after failed H20 B1.22e and run2.** AUTO first: implement the approved
+  persistence-residual parameterization (`z_hat = z_t + delta_hat`, zero/near-zero-initialized
+  residual path), retain finite-loss/gradient fail-fast, and log train-set + per-source persistence
+  margins. If **train margin remains negative after residual training**, stop again before data/game
+  scaling and inspect residual loss alignment, action-noise ablations, and delta normalization. If
+  train margin is positive but val margin is negative, focus on split/data scale/generalization.
+- H20 residual candidate after AUTO implementation: `--latent-only`, bf16, depth 4, LR `1e-4`,
+  AdamW betas `(0.9,0.95)`, WD 0.05 param groups, batch 64, scene-split sacred val,
+  `--early-stop-metric val_margin`, `--eval-train`, `--eval-by-source`, `--exclude-source ski03`.
+  Run residual loss variants before another architecture sweep: absolute-on-`z_hat` first, then
+  delta-only or combined delta auxiliary if train margin is not clearly positive. Save
+  `ckpt_best.pt` (predictor) + train-only `norm_stats.npz`.
 - The original depth-6/action-FiLM/LR2e-4 command is now a **failed baseline**, not the default
   next run. Do not activate game pretraining until the real-only train-margin failure mode is
   understood. `ski03` should be excluded or regenerated because it is an orphan/provenance-gap
@@ -974,13 +985,13 @@ latent-pretraining slice.**
    `rsync -avP -e 'ssh -p <PORT>' ingest_data/latent_cache/*.npz root@<H20>:/root/vllatent-ego-drone/ingest_data/latent_cache/`
    (never the videos/frames; never git). Paste the encode summary (count, fp16, BGR→RGB, per-clip OK).
    The H20 is rented from step 4 onward (training only), not for encode.
-4. **B-1 latent recovery run (B1.22e):** after AUTO diagnostics are committed, first run the
-   paste block provided by Codex for the selected recovery candidate. The default next candidate is
-   a smaller/stabler real-only run such as
-   `$PY scripts/train_sports.py --cache-dir ingest_data/latent_cache --run-dir runs/b1_latent_recovery --latent-only --amp-dtype bf16 --depth 4 --batch-size 64 --lr 1e-4 --warmup-frac 0.05 --weight-decay 0.05 --val-frac 0.2 --eval-every-epochs 1 --early-stop-patience 8 --early-stop-metric val_margin --eval-train --eval-by-source --device cuda --exclude-source ski03`
+4. **B-1 latent residual run (B1.22e):** after AUTO residual implementation is committed, first run
+   the paste block provided by Codex for the selected residual candidate. The default next candidate
+   is the run2 recipe plus residual output:
+   `$PY scripts/train_sports.py --cache-dir ingest_data/latent_cache --run-dir runs/b1_latent_residual_abs --latent-only --prediction-mode residual --latent-loss-mode absolute --amp-dtype bf16 --depth 4 --batch-size 64 --lr 1e-4 --warmup-frac 0.05 --weight-decay 0.05 --val-frac 0.2 --eval-every-epochs 1 --early-stop-patience 8 --early-stop-metric val_margin --eval-train --eval-by-source --device cuda --exclude-source ski03`
    → paste train/val metric tails (per-horizon cosine **+ persistence margin**), source metrics,
    steps/sec, GPU mem; confirm `ckpt_best.pt` + `norm_stats.npz`. If train margin remains negative,
-   stop and replan residual prediction before another full H20 run.
+   stop before data/game scaling and run the delta-loss ablation.
    - **Game-pretraining variant (optional, after B1.22d):** train on the combined real+game cache with `--domain-weight 0.4`, then fine-tune real-only from that checkpoint; keep the predictor only if real-val cosine beats the real-only run.
 5. **Pull artifacts (off git):** `rsync -avP -e 'ssh -p <PORT>' root@<H20>:/root/vllatent-ego-drone/runs/ ./runs/` (`ckpt_best.pt`, `norm_stats.npz`, `*_metrics.jsonl`). Never `git add` these.
 6. **Jetson (B1.23):** on Orin NX, export `ckpt_best` (encoder+predictor) to TorchScript/ONNX and bench end-to-end; paste latency (<50 ms = GO).
@@ -996,9 +1007,9 @@ latent-pretraining slice.**
    step-201 gradients. Plumbing smoke.
 2. **Dev smoke** (5060 Ti, tiny, fp32): predictor-only `L_latent` strictly decreases + per-horizon
    cosine rises **above persistence**; confirms the `--latent-only` path before spending H20 time.
-3. **B1.22e recovery diagnostics:** full-train eval reports train margin; source metrics identify
-   whether a small number of sources explain the val failure; finite guards abort before a corrupt
-   optimizer step.
+3. **B1.22e residual diagnostics:** initialization evaluates at approximately persistence margin
+   (`~0`), full-train eval reports train margin, source metrics identify whether a small number of
+   sources explain val failure, and finite guards abort before a corrupt optimizer step.
 4. **H20 latent run:** scene-split val cosine **beats persistence** per-horizon (t=1..4) + 2–3
    folds; `t=1` cosine high (directional ≥0.7); best by val cosine-vs-persistence.
 5. **Game-pretraining variant (if run):** real-val cosine with game-pretrain > real-only — else
