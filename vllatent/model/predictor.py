@@ -23,6 +23,8 @@ import torch.nn.functional as F
 
 from vllatent.schemas import DOF, EMBED_DIM, HISTORY, HORIZON, PATCH_TOKENS
 
+PREDICTION_MODES = ("absolute", "residual")
+
 
 class FiLMProjection(nn.Module):
     """Project a conditioning signal to (scale, shift) for FiLM modulation."""
@@ -135,13 +137,17 @@ class LatentPredictor(nn.Module):
         history: int = HISTORY,
         horizon: int = HORIZON,
         use_action_film: bool = True,
+        prediction_mode: str = "absolute",
     ) -> None:
         super().__init__()
+        if prediction_mode not in PREDICTION_MODES:
+            raise ValueError(f"prediction_mode must be one of {PREDICTION_MODES}, got {prediction_mode!r}")
         self.dim = dim
         self.depth = depth
         self.history = history
         self.horizon = horizon
         self.use_action_film = use_action_film
+        self.prediction_mode = prediction_mode
         self.n_patches = PATCH_TOKENS
 
         self.blocks = nn.ModuleList([
@@ -163,6 +169,10 @@ class LatentPredictor(nn.Module):
         nn.init.trunc_normal_(self.temporal_embed, std=0.02)
 
         self.output_norm = nn.LayerNorm(dim)
+        if self.prediction_mode == "residual":
+            self.residual_out = nn.Linear(dim, dim)
+            nn.init.zeros_(self.residual_out.weight)
+            nn.init.zeros_(self.residual_out.bias)
 
     def _build_block_causal_mask(
         self, n_frames: int, device: torch.device
@@ -255,4 +265,12 @@ class LatentPredictor(nn.Module):
         x = x.reshape(B, n_frames, self.n_patches, self.dim)
         predicted = x[:, self.history + 1:]
 
+        if self.prediction_mode == "residual":
+            delta = self.residual_out(predicted)
+            base = z_t.unsqueeze(1).expand(-1, self.horizon, -1, -1)
+            return base + delta
+
         return predicted
+
+
+__all__ = ["LatentPredictor", "PREDICTION_MODES"]

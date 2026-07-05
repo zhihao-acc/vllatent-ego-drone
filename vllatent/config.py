@@ -33,6 +33,8 @@ _ENV_RE = re.compile(r"\$\{([A-Z0-9_]+)(?::-(.*?))?\}")
 ENCODER_DTYPES = ("float16", "float32")
 AMP_DTYPES = ("bf16", "fp16", "fp32")
 EARLY_STOP_METRICS = ("val_cos", "val_margin")
+PREDICTION_MODES = ("absolute", "residual")
+LATENT_LOSS_MODES = ("absolute", "delta", "combined")
 
 
 def _expand_env(value: Any) -> Any:
@@ -141,6 +143,9 @@ class TrainConfig:
     eval_every_epochs: int = 1
     early_stop_patience: int = 8      # evals without val improvement before stopping
     early_stop_metric: str = "val_margin"  # one of EARLY_STOP_METRICS
+    prediction_mode: str = "absolute"      # "absolute" or "residual" z_hat=z_t+delta_hat
+    latent_loss_mode: str = "absolute"     # "absolute", "delta", or "combined"
+    delta_loss_weight: float = 0.0          # auxiliary weight when latent_loss_mode="combined"
     domain_weight: float = 1.0        # sampling weight for domain=game clips (1.0 = no game mix)
     use_action_film: bool = True      # False ⇒ action-free predictor ablation (dt-FiLM only)
     grad_clip: float = 1.0            # 0 disables clipping
@@ -166,6 +171,8 @@ class TrainConfig:
             raise ValueError(f"train.val_frac must be in [0, 1), got {self.val_frac}")
         if self.domain_weight < 0:
             raise ValueError(f"train.domain_weight must be >= 0, got {self.domain_weight}")
+        if self.delta_loss_weight < 0:
+            raise ValueError(f"train.delta_loss_weight must be >= 0, got {self.delta_loss_weight}")
         if self.grad_clip < 0:
             raise ValueError(f"train.grad_clip must be >= 0, got {self.grad_clip}")
         for name in ("batch_size", "epochs", "eval_every_epochs", "early_stop_patience"):
@@ -180,6 +187,16 @@ class TrainConfig:
             raise ValueError(
                 f"train.early_stop_metric must be one of {EARLY_STOP_METRICS}, got {self.early_stop_metric!r}"
             )
+        if self.prediction_mode not in PREDICTION_MODES:
+            raise ValueError(
+                f"train.prediction_mode must be one of {PREDICTION_MODES}, got {self.prediction_mode!r}"
+            )
+        if self.latent_loss_mode not in LATENT_LOSS_MODES:
+            raise ValueError(
+                f"train.latent_loss_mode must be one of {LATENT_LOSS_MODES}, got {self.latent_loss_mode!r}"
+            )
+        if self.latent_loss_mode in {"delta", "combined"} and self.prediction_mode != "residual":
+            raise ValueError("train.latent_loss_mode delta/combined requires prediction_mode='residual'")
 
 
 @dataclass(frozen=True)

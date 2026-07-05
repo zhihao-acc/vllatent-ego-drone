@@ -71,13 +71,71 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.22c — Curate + ingest more REAL YouTube FPV (FRONT-LOADED) | done | 2026-06-29 | USER signaled local 45-candidate data generation/QC passed; source-level QC HTML generated for 44 clips (`cand01`–`cand13`, `cand15`–`cand45`; no `cand14` frames) |
 | B1.22b — Generate full dataset ON DEV BOX → rsync .npz to H20 | done | 2026-06-30 | Local 919 `.npz` cache was rsynced/used for H20 B1.22e run; never git-add latents |
 | B1.22d — [CONDITIONAL] Game footage → domain=game pretrain slice | pending | — | Real-only B1.22e missed persistence; do NOT activate game blindly — first diagnose/replan B1.22e, then decide |
-| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | in_progress | 2026-06-30 | H20 run completed but missed DoD; recovery replan + AUTO guards/diagnostics done; next = user-gated H20 depth-4/lower-LR diagnostic, stop if train margin stays negative |
+| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | in_progress | 2026-07-05 | Run2 depth4/lr1e-4 also missed persistence on train and val; residual predictor AUTO implementation done; next = user-gated H20 residual run |
 | B1.22f — Stage 2: waypoint head on frozen predictor | superseded | 2026-06-29 | **→ Phase B-2a** (deferred: MegaSaM scale + prober undecided) |
 | B1.22g — Stage 3: conditional joint fine-tune | superseded | 2026-06-29 | **→ Phase B-2a** |
 | B1.23 — Jetson inference speed check (encoder+predictor) | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
 | B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B1.22e run2-based residual replan + AUTO implementation
+
+**Status:** B1.22e remains **in_progress**. Do not proceed to B1.23/B1.24. The next step is a
+USER-GATED H20 residual run, not another absolute-prediction depth/LR sweep.
+
+**Run2 is now the active baseline.** User-pasted recovery run2 used depth 4, LR `1e-4`, bf16,
+AdamW betas `(0.9,0.95)`, `--exclude-source ski03`, `--eval-train`, and `--eval-by-source`.
+Best visible val was epoch 25 / step 8008: `val_cos=0.7592678`, persistence `0.8575975`,
+margin `-0.0983296`; best visible train eval was epoch 27 / step 8624: `train_cos=0.8002520`,
+persistence `0.8685168`, margin `-0.0682648`. Run2 artifacts are not present locally under
+`runs/`, so these run2 facts are recorded from the user's paste-back, not re-parsed JSONL.
+
+**Diagnosis/research gate.** Two focused research agents plus local metric review converged on the
+same conclusion: because run2 misses persistence even on train, split variance, `ski03`, depth, and
+LR are not the primary blocker. The failure is objective/parameterization mismatch: absolute
+future-DINO prediction must relearn the large persistent static component before it can learn the
+small motion residual that beats `z_t`. Paper-backed direction: JEPA/V-JEPA/DINO-WM/DINO-world
+support frozen-feature latent world models; copy-last remains a valid video baseline; residual and
+zero-init/identity-start methods support a persistence-residual parameterization.
+
+**Plan revised first.** `plans/phase-b-sports-training.md` now treats run2 as the active baseline,
+keeps the DoD unchanged, and defines the approved next AUTO direction:
+`z_hat = z_t + delta_hat`, with zero/near-zero residual initialization so the untrained residual
+model starts at approximately persistence.
+
+**AUTO code changes.**
+- `LatentPredictor` accepts `prediction_mode={"absolute","residual"}`. The default absolute path is
+  unchanged. Residual mode adds a zero-initialized `residual_out` projection and returns
+  `z_t + delta_hat`.
+- `SportsFollowingModel` passes `prediction_mode` through to the predictor.
+- `TrainConfig` and `scripts/train_sports.py` expose `--prediction-mode`,
+  `--latent-loss-mode {absolute,delta,combined}`, and `--delta-loss-weight`.
+- Latent-only training keeps absolute `SmoothL1(z_hat, z_future)` by default; delta and combined
+  modes train against `z_future - z_t` as an optimization ablation while evaluation remains on
+  reconstructed `z_hat`.
+- `evaluate()` now logs `val_min_margin` so the worst horizon is visible alongside average margin.
+
+**TDD/verification.**
+- RED gate before production code:
+  `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_predictor.py::TestLatentPredictor::test_residual_mode_zero_init_matches_persistence tests/test_predictor.py::TestLatentPredictor::test_rejects_unknown_prediction_mode tests/test_config.py::test_train_config_recovery_defaults tests/test_train_sports_residual.py`
+  → 5 intended failures for missing `prediction_mode` / residual loss plumbing.
+- GREEN targeted rerun of the same command → 5 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_config.py tests/test_evaluate.py tests/test_train_sports_residual.py`
+  → 42 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_predictor.py tests/test_model.py tests/test_config.py tests/test_evaluate.py tests/test_train_sports_residual.py`
+  → 64 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile scripts/train_sports.py vllatent/config.py vllatent/model/predictor.py vllatent/model/sports_model.py vllatent/train/evaluate.py`
+  → pass.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check scripts/train_sports.py vllatent/config.py vllatent/model/predictor.py vllatent/model/sports_model.py vllatent/train/evaluate.py tests/test_predictor.py tests/test_config.py tests/test_evaluate.py tests/test_train_sports_residual.py`
+  → all checks passed.
+
+**Next USER gate.** Run the residual H20 command and paste: tail of `val_metrics.jsonl`, tail of
+`train_eval_metrics.jsonl`, `source_metrics.jsonl`, steps/sec, GPU memory, and confirmation that
+`ckpt_best.pt` + `norm_stats.npz` exist. If train margin is still negative, stop before game/data
+scaling and run the delta-loss ablation.
 
 ---
 

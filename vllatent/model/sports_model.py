@@ -36,7 +36,11 @@ class SportsFollowingModel(nn.Module):
     """Predictor + waypoint head, config-driven."""
 
     def __init__(
-        self, cfg: PredictorConfig, dim: int = EMBED_DIM, use_action_film: bool = True
+        self,
+        cfg: PredictorConfig,
+        dim: int = EMBED_DIM,
+        use_action_film: bool = True,
+        prediction_mode: str = "absolute",
     ) -> None:
         super().__init__()
         self.predictor = LatentPredictor(
@@ -48,6 +52,7 @@ class SportsFollowingModel(nn.Module):
             history=cfg.history,
             horizon=cfg.horizon,
             use_action_film=use_action_film,
+            prediction_mode=prediction_mode,
         )
         self.waypoint_head = WaypointHead(dim=dim)
 
@@ -70,6 +75,15 @@ class SportsFollowingModel(nn.Module):
 
     @classmethod
     def from_config(
-        cls, cfg: PredictorConfig, dim: int = EMBED_DIM, use_action_film: bool = True
+        cls,
+        cfg: PredictorConfig,
+        dim: int = EMBED_DIM,
+        use_action_film: bool = True,
+        prediction_mode: str = "absolute",
     ) -> SportsFollowingModel:
-        return cls(cfg=cfg, dim=dim, use_action_film=use_action_film)
+        return cls(
+            cfg=cfg,
+            dim=dim,
+            use_action_film=use_action_film,
+            prediction_mode=prediction_mode,
+        )

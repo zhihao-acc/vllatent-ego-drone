@@ -44,7 +44,7 @@ def test_residual_absolute_loss_starts_from_persistence() -> None:
     persistence = batch.z_t.unsqueeze(1).expand_as(batch.target_latents)
     expected = latent_loss(persistence, batch.target_latents, torch.ones(1), beta=0.1)
     assert torch.allclose(predicted, persistence, atol=1e-6)
-    assert loss_out.latent == pytest.approx(expected)
+    assert loss_out.latent.item() == pytest.approx(expected.item())
 
 
 def test_residual_combined_loss_adds_delta_auxiliary() -> None:
@@ -65,4 +65,4 @@ def test_residual_combined_loss_adds_delta_auxiliary() -> None:
     zero_delta = predicted - persistence
     expected_abs = latent_loss(persistence, batch.target_latents, torch.ones(1), beta=0.1)
     expected_delta = latent_loss(zero_delta, target_delta, torch.ones(1), beta=0.1)
-    assert loss_out.latent == pytest.approx(expected_abs + 0.5 * expected_delta)
+    assert loss_out.latent.item() == pytest.approx((expected_abs + 0.5 * expected_delta).item())

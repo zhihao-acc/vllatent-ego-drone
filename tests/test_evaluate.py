@@ -81,6 +81,7 @@ def test_evaluate_margin_is_cos_minus_persistence() -> None:
     for k in range(HORIZON):
         expected = out["per_horizon_cos"][k] - out["per_horizon_persistence"][k]
         assert abs(out["per_horizon_margin"][k] - expected) < 1e-5
+    assert out["val_min_margin"] == pytest.approx(min(out["per_horizon_margin"]))
 
 
 def test_evaluate_persistence_is_one_when_target_equals_zt() -> None:

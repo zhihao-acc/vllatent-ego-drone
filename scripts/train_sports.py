@@ -30,7 +30,13 @@ import torch
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
-from vllatent.config import Config, PredictorConfig, TrainConfig
+from vllatent.config import (
+    LATENT_LOSS_MODES,
+    PREDICTION_MODES,
+    Config,
+    PredictorConfig,
+    TrainConfig,
+)
 from vllatent.data.collate import collate_sports_batch
 from vllatent.data.sports_loader import SportsTrainingDataset, clip_source, split_clips_by_source
 from vllatent.model.sports_model import SportsFollowingModel
@@ -145,9 +151,22 @@ def _forward_loss(
         )
         # Loss in fp32 (cast all loss inputs out of autocast); domain weighting is via the sampler.
         w_quality = batch.frame_quality.float().clamp(min=0.1)
-        l_lat = latent_loss(predicted.float(), batch.target_latents.float(), w_quality, beta=0.1)
+        pred_f = predicted.float()
+        target_f = batch.target_latents.float()
+        if tcfg.latent_loss_mode == "absolute":
+            l_lat = latent_loss(pred_f, target_f, w_quality, beta=0.1)
+        else:
+            z_rep = batch.z_t.float().unsqueeze(1).expand_as(target_f)
+            pred_delta = pred_f - z_rep
+            target_delta = target_f - z_rep
+            l_delta = latent_loss(pred_delta, target_delta, w_quality, beta=0.1)
+            if tcfg.latent_loss_mode == "delta":
+                l_lat = l_delta
+            else:
+                l_abs = latent_loss(pred_f, target_f, w_quality, beta=0.1)
+                l_lat = l_abs + tcfg.delta_loss_weight * l_delta
         with torch.no_grad():
-            cos = cosine_similarity_diagnostic(predicted.float(), batch.target_latents.float())
+            cos = cosine_similarity_diagnostic(pred_f, target_f)
         zero = torch.zeros((), device=device)
         return LossOutput(total=l_lat, latent=l_lat, waypoint=zero, cosine_sim=cos), predicted, None
 
@@ -243,6 +262,9 @@ def train(args: argparse.Namespace) -> None:
         eval_every_epochs=args.eval_every_epochs,
         early_stop_patience=args.early_stop_patience,
         early_stop_metric=args.early_stop_metric,
+        prediction_mode=args.prediction_mode,
+        latent_loss_mode=args.latent_loss_mode,
+        delta_loss_weight=args.delta_loss_weight,
         domain_weight=args.domain_weight,
         use_action_film=not args.no_action_film,
         grad_clip=args.grad_clip,
@@ -262,10 +284,16 @@ def train(args: argparse.Namespace) -> None:
     autocast = (
         torch.autocast("cuda", dtype=amp_dtype) if use_amp else _nullcontext()
     )
-    model = SportsFollowingModel(pred_cfg, dim=EMBED_DIM, use_action_film=tcfg.use_action_film).to(device)
+    model = SportsFollowingModel(
+        pred_cfg,
+        dim=EMBED_DIM,
+        use_action_film=tcfg.use_action_film,
+        prediction_mode=tcfg.prediction_mode,
+    ).to(device)
     opt_target = model.predictor if tcfg.latent_only else model
     n_params = sum(p.numel() for p in opt_target.parameters() if p.requires_grad)
     print(f"[train] Model: {n_params:,} optimized params (latent_only={tcfg.latent_only}, "
+          f"prediction_mode={tcfg.prediction_mode}, latent_loss_mode={tcfg.latent_loss_mode}, "
           f"action_film={tcfg.use_action_film}, amp={tcfg.amp_dtype})")
     optimizer = torch.optim.AdamW(
         build_param_groups(opt_target, tcfg.weight_decay),
@@ -530,6 +558,12 @@ def main() -> None:
     parser.add_argument("--eval-every-epochs", type=int, default=1)
     parser.add_argument("--early-stop-patience", type=int, default=8)
     parser.add_argument("--early-stop-metric", default="val_margin", choices=("val_cos", "val_margin"))
+    parser.add_argument("--prediction-mode", default="absolute", choices=PREDICTION_MODES,
+                        help="absolute: predict z_future directly; residual: predict z_t + delta")
+    parser.add_argument("--latent-loss-mode", default="absolute", choices=LATENT_LOSS_MODES,
+                        help="absolute loss on z_hat, delta loss on residual, or combined")
+    parser.add_argument("--delta-loss-weight", type=float, default=0.0,
+                        help="Auxiliary delta loss weight when --latent-loss-mode combined")
 
     # game-domain mix (B1.22d)
     parser.add_argument("--domain-weight", type=float, default=1.0,

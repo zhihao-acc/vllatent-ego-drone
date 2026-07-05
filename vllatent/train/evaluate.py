@@ -104,6 +104,7 @@ def evaluate(
         "val_cos": float(mean_cos.mean()),
         "val_persistence": float(mean_pers.mean()),
         "val_margin": float(margin.mean()),
+        "val_min_margin": float(margin.min()),
         "per_horizon_cos": [float(x) for x in mean_cos.tolist()],
         "per_horizon_persistence": [float(x) for x in mean_pers.tolist()],
         "per_horizon_margin": [float(x) for x in margin.tolist()],
