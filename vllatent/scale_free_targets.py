@@ -180,7 +180,7 @@ def scale_free_actions_from_deltas(
     actions = np.empty(arr.shape[:-1] + (SCALE_FREE_ACTION_DIM,), dtype=DELTA_DTYPE)
     actions[..., :3] = unit
     actions[..., 3] = log_ratio
-    return ScaleFreeActionTargets(actions=actions, moving_mask=moving.astype(np.bool_))
+    return ScaleFreeActionTargets(actions=actions, moving_mask=np.asarray(moving, dtype=np.bool_))
 
 
 def future_deltas_to_scale_free_targets(

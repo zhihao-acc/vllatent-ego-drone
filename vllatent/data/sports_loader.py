@@ -20,6 +20,10 @@ Delta preprocessing pipeline (applied once at dataset construction):
   3. Velocity normalization (delta / dt)
   4. Per-dimension z-score normalization (store mean/std for inference)
 
+B2 scale-free action labels use the pre-z-score velocity-like target path. B2
+previous-observed action inputs use a separate causal path (physics clip +
+velocity, no centered median) so future deltas cannot affect model inputs.
+
 numpy-only emission — torch enters at DataLoader collation (B1.14).
 """
 from __future__ import annotations
@@ -29,6 +33,12 @@ from pathlib import Path
 
 import numpy as np
 
+from vllatent.scale_free_targets import (
+    SCALE_FREE_SPEED_EPS,
+    future_deltas_to_scale_free_targets,
+    reference_speed_from_deltas,
+    scale_free_actions_from_deltas,
+)
 from vllatent.schemas import (
     DOF,
     EMBED_DIM,
@@ -71,6 +81,10 @@ class SportsSample:
     target_latents: np.ndarray   # (T, P, D) fp16 — GT future latents (L_latent targets)
     target_deltas: np.ndarray    # (T, 4) f32 — preprocessed future deltas (L_wp targets)
     last_action: np.ndarray      # (4,) f32 — most recent known action (delta t-1→t), zeros at clip start
+    target_actions_scale_free: np.ndarray       # (T, 4) f32 — B2 target-only future actions
+    target_actions_moving_mask: np.ndarray      # (T,) bool — valid translation direction targets
+    last_action_scale_free: np.ndarray          # (4,) f32 — B2 previous observed action input
+    odom_reference_speed: float                 # arbitrary-scale observed speed reference for diagnostics
     vo_confidence: np.ndarray    # (T,) f32 — per-step VO confidence
     frame_quality: float         # composite quality of z_t frame
     dt_seconds: np.ndarray       # (T,) f32 — inter-frame time deltas
@@ -127,6 +141,22 @@ def _preprocess_deltas(
     clipped = physics_clip(deltas, dt)
     filtered = median_filter_deltas(clipped)
     return velocity_normalize(filtered, dt)
+
+
+def _observed_velocity_deltas(
+    deltas: np.ndarray,
+    dt: np.ndarray,
+) -> np.ndarray:
+    """Causal observed-motion path for B2 inputs: no centered smoothing."""
+    return velocity_normalize(physics_clip(deltas, dt), dt)
+
+
+def _observed_reference_speed(observed_velocities: np.ndarray, t: int) -> float:
+    """Reference speed from past-only observed motion before frame ``t``."""
+    if t <= 0:
+        return SCALE_FREE_SPEED_EPS
+    lo = max(0, t - HISTORY)
+    return reference_speed_from_deltas(observed_velocities[lo:t])
 
 
 def _load_clip(path: Path) -> dict[str, np.ndarray]:
@@ -224,6 +254,7 @@ class SportsTrainingDataset:
         self._clips: list[dict[str, np.ndarray]] = []
         self._clip_ids: list[str] = []
         self._clip_velocities: list[np.ndarray] = []
+        self._clip_observed_velocities: list[np.ndarray] = []
         self._clip_dt: list[np.ndarray] = []
         self._clip_domains: list[str] = []
 
@@ -236,10 +267,12 @@ class SportsTrainingDataset:
             ts = clip["timestamps"]
             dt = np.diff(ts).astype(np.float32)
             velocities = _preprocess_deltas(clip["deltas"], dt)
+            observed_velocities = _observed_velocity_deltas(clip["deltas"], dt)
 
             self._clips.append(clip)
             self._clip_ids.append(p.stem)
             self._clip_velocities.append(velocities)
+            self._clip_observed_velocities.append(observed_velocities)
             self._clip_dt.append(dt)
             self._clip_domains.append(_clip_domain(clip))
 
@@ -283,6 +316,7 @@ class SportsTrainingDataset:
         clip_idx, t = self._samples[idx]
         clip = self._clips[clip_idx]
         velocities = self._clip_velocities[clip_idx]
+        observed_velocities = self._clip_observed_velocities[clip_idx]
         dt_all = self._clip_dt[clip_idx]
 
         if self._augment:
@@ -308,12 +342,14 @@ class SportsTrainingDataset:
             target_lat = np.concatenate([target_lat, pad], axis=0)
 
         target_v = np.zeros((HORIZON, DOF), dtype=np.float32)
+        target_velocity_like = np.zeros((HORIZON, DOF), dtype=np.float32)
         dt_sec = np.full(HORIZON, 0.2, dtype=np.float32)
         vo_conf = np.ones(HORIZON, dtype=np.float32)
 
         for k in range(HORIZON):
             delta_idx = t + k
             if delta_idx < velocities.shape[0]:
+                target_velocity_like[k] = velocities[delta_idx]
                 target_v[k] = self._norm_stats.normalize(velocities[delta_idx])
                 dt_sec[k] = dt_all[delta_idx]
             if t + k < clip["vo_confidence"].shape[0]:
@@ -330,6 +366,20 @@ class SportsTrainingDataset:
         else:
             last_act = np.zeros(DOF, dtype=np.float32)
 
+        odom_reference_speed = _observed_reference_speed(observed_velocities, t)
+        target_actions = future_deltas_to_scale_free_targets(
+            target_velocity_like,
+            reference_speed=odom_reference_speed,
+        )
+        if t > 0 and t - 1 < observed_velocities.shape[0]:
+            last_observed_velocity = observed_velocities[t - 1]
+        else:
+            last_observed_velocity = np.zeros(DOF, dtype=np.float32)
+        last_action_scale_free = scale_free_actions_from_deltas(
+            last_observed_velocity,
+            reference_speed=odom_reference_speed,
+        ).actions
+
         fq = float(clip["frame_quality"][t])
 
         return SportsSample(
@@ -339,6 +389,10 @@ class SportsTrainingDataset:
             target_latents=target_lat,
             target_deltas=target_v,
             last_action=last_act,
+            target_actions_scale_free=target_actions.actions,
+            target_actions_moving_mask=target_actions.moving_mask,
+            last_action_scale_free=last_action_scale_free,
+            odom_reference_speed=float(odom_reference_speed),
             vo_confidence=vo_conf,
             frame_quality=fq,
             dt_seconds=dt_sec,

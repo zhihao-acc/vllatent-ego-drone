@@ -78,7 +78,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.24 — Phase B-1 DoD verification (good latent model) | superseded | 2026-07-05 | Original B1 model DoD failed; B1 closed by decision and B2 activated |
 | B2.0 — Close B1 and activate B2 Ralph loop | done | 2026-07-05 | Plan/rules/log/AGENTS updated; next active implementation step is B2.1 |
 | B2.1 — Pure scale-free action target contract | done | 2026-07-05 | `vllatent/scale_free_targets.py`: locked `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]` target, pure numpy, scale-invariant, finite/masked degenerates, target-only API |
-| B2.2 — Loader emits B2 action targets additively | pending | — | Keep B1 target_deltas path; add scale-free target/action fields and B2 collate |
+| B2.2 — Loader emits B2 action targets additively | done | 2026-07-05 | Sports loader keeps B1 fields and adds B2 scale-free target/input fields plus separate `ActionPolicyBatch`; past input path is causal/no-future |
 | B2.3 — Direct scale-free action policy | pending | — | Frozen DINO history/current latents + previous observed motion → future action sequence |
 | B2.4 — Action losses, metrics, baselines | pending | — | Direction/yaw/speed/path-shape metrics and baseline margins |
 | B2.5 — B2 trainer + local training-policy verification | pending | — | Local B2a gate before any H20 command |
@@ -88,6 +88,40 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.9 — Jetson action-policy speed check | pending | — | USER-GATED after useful B2 checkpoint exists |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.2 additive loader/collate scale-free action fields
+
+**Status:** B2.2 is done. Next AUTO step is B2.3 direct scale-free action policy.
+
+**Loader changes.** `SportsSample` now keeps existing B1 fields (`target_deltas`, `last_action`) and
+additively emits B2 fields: `target_actions_scale_free`, `target_actions_moving_mask`,
+`last_action_scale_free`, and `odom_reference_speed`. B2 future labels come from the pre-z-score
+velocity-like target path. B2 previous-observed action inputs use a separate causal observed path
+(physics clip + velocity, no centered median), so target/future deltas cannot affect B2 model inputs.
+
+**Collate changes.** `TrainingBatch` and `collate_sports_batch()` remain B1-compatible and do not
+expose the B2 target fields. Added separate `ActionPolicyBatch` and `collate_action_policy_batch()`
+for B2 direct action-policy training.
+
+**Leakage guard.** Added a targeted test that changes only future deltas for a sample. It changes
+`target_actions_scale_free` while preserving `last_action_scale_free` and `odom_reference_speed`,
+proving the B2 action-like input is past-only. Source split tests remain green.
+
+**B2.1 regression fixed.** The scale-free target helper now returns an ndarray scalar mask for a
+single-delta action, with a regression test. This was found by B2.2's `last_action_scale_free`
+single-delta path.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_sports_loader.py tests/test_collate.py tests/test_scale_free_targets.py`
+  -> 66 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_sports_loader.py tests/test_collate.py tests/test_scale_free_targets.py tests/test_train_split.py`
+  -> 76 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check vllatent/data/sports_loader.py vllatent/data/collate.py vllatent/scale_free_targets.py tests/test_sports_loader.py tests/test_collate.py tests/test_scale_free_targets.py`
+  -> all checks passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile vllatent/data/sports_loader.py vllatent/data/collate.py vllatent/scale_free_targets.py tests/test_sports_loader.py tests/test_collate.py tests/test_scale_free_targets.py`
+  -> pass.
 
 ---
 

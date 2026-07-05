@@ -58,6 +58,14 @@ def test_target_shape_dtype_and_unit_norm() -> None:
     np.testing.assert_allclose(unit_norms, np.ones_like(unit_norms), atol=1e-6)
 
 
+def test_single_delta_returns_vector_action_and_scalar_mask() -> None:
+    targets = future_deltas_to_scale_free_targets(np.array([1.0, 0.0, 0.0, 0.0], dtype=DELTA_DTYPE))
+    assert targets.actions.shape == (SCALE_FREE_ACTION_DIM,)
+    assert targets.moving_mask.shape == ()
+    assert bool(targets.moving_mask)
+    np.testing.assert_allclose(targets.actions, [1.0, 0.0, 0.0, 0.0], atol=1e-6)
+
+
 @pytest.mark.parametrize("scale", [0.01, 0.5, 7.0, 123.0])
 def test_uniform_translation_scale_invariance_with_internal_reference(scale: float) -> None:
     base = _future_deltas()

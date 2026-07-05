@@ -17,6 +17,7 @@ from vllatent.data.sports_loader import (
     physics_clip,
     velocity_normalize,
 )
+from vllatent.scale_free_targets import SCALE_FREE_ACTION_DIM
 from vllatent.schemas import DOF, EMBED_DIM, HISTORY, HORIZON, LATENT_DTYPE, MASK_DTYPE, PATCH_TOKENS
 
 
@@ -28,11 +29,14 @@ def _make_clip_npz(
     constant_delta: bool = False,
     spike_frame: int | None = None,
     domain: str | None = None,
+    deltas_override: np.ndarray | None = None,
 ) -> None:
     """Write a synthetic sports .npz clip."""
     rng = np.random.default_rng(0)
     latents = rng.standard_normal((n_frames, PATCH_TOKENS, EMBED_DIM)).astype(LATENT_DTYPE)
     deltas = rng.standard_normal((n_frames - 1, DOF)).astype(np.float32) * 0.1
+    if deltas_override is not None:
+        deltas = deltas_override.astype(np.float32)
     if constant_delta:
         deltas[:] = [0.1, 0.05, -0.02, 1.0]
     if spike_frame is not None and spike_frame < n_frames - 1:
@@ -178,6 +182,13 @@ class TestSportsTrainingDataset:
         assert sample.target_deltas.dtype == np.float32
         assert sample.last_action.shape == (DOF,)
         assert sample.last_action.dtype == np.float32
+        assert sample.target_actions_scale_free.shape == (HORIZON, SCALE_FREE_ACTION_DIM)
+        assert sample.target_actions_scale_free.dtype == np.float32
+        assert sample.target_actions_moving_mask.shape == (HORIZON,)
+        assert sample.target_actions_moving_mask.dtype == MASK_DTYPE
+        assert sample.last_action_scale_free.shape == (SCALE_FREE_ACTION_DIM,)
+        assert sample.last_action_scale_free.dtype == np.float32
+        assert isinstance(sample.odom_reference_speed, float)
         assert sample.vo_confidence.shape == (HORIZON,)
         assert sample.dt_seconds.shape == (HORIZON,)
         assert isinstance(sample.frame_quality, float)
@@ -197,6 +208,7 @@ class TestSportsTrainingDataset:
         ds = SportsTrainingDataset(tmp_path)
         s0 = ds[0]
         np.testing.assert_array_equal(s0.last_action, np.zeros(DOF, dtype=np.float32))
+        np.testing.assert_allclose(s0.last_action_scale_free, [1.0, 0.0, 0.0, 0.0], atol=1e-6)
 
     def test_last_action_nonzero_after_start(self, tmp_path: Path) -> None:
         _make_clip_npz(tmp_path / "clip01.npz", n_frames=20, constant_delta=True)
@@ -308,6 +320,34 @@ class TestSportsTrainingDataset:
         assert sample.target_deltas.shape == (HORIZON, DOF)
         raw_delta = np.array([0.1, 0.05, -0.02, 1.0], dtype=np.float32)
         assert not np.allclose(sample.target_deltas[0], raw_delta, atol=0.01)
+
+    def test_scale_free_targets_are_finite(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "clip01.npz", n_frames=20)
+        ds = SportsTrainingDataset(tmp_path)
+        sample = ds[5]
+        assert np.all(np.isfinite(sample.target_actions_scale_free))
+        assert np.all(np.isfinite(sample.last_action_scale_free))
+        assert np.isfinite(sample.odom_reference_speed)
+        moving = sample.target_actions_moving_mask
+        unit_norms = np.linalg.norm(sample.target_actions_scale_free[moving, :3], axis=1)
+        np.testing.assert_allclose(unit_norms, np.ones_like(unit_norms), atol=1e-6)
+
+    def test_future_delta_changes_do_not_change_b2_past_inputs(self, tmp_path: Path) -> None:
+        """B2 previous-action inputs must be computed from observed past motion only."""
+        n_frames = 20
+        sample_t = 6
+        base = np.tile(np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32), (n_frames - 1, 1))
+        changed = base.copy()
+        changed[sample_t:sample_t + HORIZON] = np.array([0.0, 2.0, 0.0, 0.0], dtype=np.float32)
+
+        _make_clip_npz(tmp_path / "a" / "clip01.npz", n_frames=n_frames, deltas_override=base)
+        _make_clip_npz(tmp_path / "b" / "clip01.npz", n_frames=n_frames, deltas_override=changed)
+        a = SportsTrainingDataset(tmp_path / "a")[sample_t]
+        b = SportsTrainingDataset(tmp_path / "b")[sample_t]
+
+        np.testing.assert_allclose(a.last_action_scale_free, b.last_action_scale_free, atol=1e-6)
+        assert a.odom_reference_speed == pytest.approx(b.odom_reference_speed)
+        assert not np.allclose(a.target_actions_scale_free, b.target_actions_scale_free)
 
 
 class TestDomainPlumbing:

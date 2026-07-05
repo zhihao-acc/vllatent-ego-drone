@@ -6,11 +6,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from vllatent.scale_free_targets import SCALE_FREE_ACTION_DIM
 from vllatent.schemas import DOF, EMBED_DIM, HISTORY, HORIZON, LATENT_DTYPE, PATCH_TOKENS
 
 torch = pytest.importorskip("torch")
 
-from vllatent.data.collate import TrainingBatch, collate_sports_batch  # noqa: E402
+from vllatent.data.collate import (  # noqa: E402
+    ActionPolicyBatch,
+    TrainingBatch,
+    collate_action_policy_batch,
+    collate_sports_batch,
+)
 from vllatent.data.sports_loader import SportsTrainingDataset  # noqa: E402
 
 
@@ -47,6 +53,8 @@ class TestCollate:
         assert batch.frame_quality.shape == (B,)
         assert batch.dt_seconds.shape == (B, HORIZON)
         assert batch.sample_weight.shape == (B,)
+        assert not hasattr(batch, "target_actions_scale_free")
+        assert not hasattr(batch, "last_action_scale_free")
 
     def test_dtypes(self, tmp_path: Path) -> None:
         _make_clip_npz(tmp_path / "c1.npz")
@@ -91,6 +99,51 @@ class TestCollate:
         batch = next(iter(loader))
         assert isinstance(batch, TrainingBatch)
         assert batch.z_t.shape[0] == 4
+
+    def test_action_policy_batch_shapes(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "c1.npz")
+        ds = SportsTrainingDataset(tmp_path)
+        samples = [ds[i] for i in range(4)]
+        batch = collate_action_policy_batch(samples)
+
+        assert isinstance(batch, ActionPolicyBatch)
+        B = 4
+        assert batch.z_t.shape == (B, PATCH_TOKENS, EMBED_DIM)
+        assert batch.history_latents.shape == (B, HISTORY, PATCH_TOKENS, EMBED_DIM)
+        assert batch.history_mask.shape == (B, HISTORY)
+        assert batch.target_actions_scale_free.shape == (B, HORIZON, SCALE_FREE_ACTION_DIM)
+        assert batch.target_actions_moving_mask.shape == (B, HORIZON)
+        assert batch.last_action_scale_free.shape == (B, SCALE_FREE_ACTION_DIM)
+        assert batch.dt_seconds.shape == (B, HORIZON)
+        assert batch.odom_reference_speed.shape == (B,)
+        assert batch.vo_confidence.shape == (B, HORIZON)
+        assert batch.frame_quality.shape == (B,)
+        assert batch.sample_weight.shape == (B,)
+
+    def test_action_policy_batch_dtypes(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "c1.npz")
+        ds = SportsTrainingDataset(tmp_path)
+        batch = collate_action_policy_batch([ds[0], ds[1]])
+
+        assert batch.z_t.dtype == torch.float16
+        assert batch.history_latents.dtype == torch.float16
+        assert batch.history_mask.dtype == torch.bool
+        assert batch.target_actions_scale_free.dtype == torch.float32
+        assert batch.target_actions_moving_mask.dtype == torch.bool
+        assert batch.last_action_scale_free.dtype == torch.float32
+        assert batch.dt_seconds.dtype == torch.float32
+        assert batch.odom_reference_speed.dtype == torch.float32
+        assert batch.sample_weight.dtype == torch.float32
+
+    def test_action_policy_dataloader(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "c1.npz", n_frames=20)
+        ds = SportsTrainingDataset(tmp_path)
+        loader = torch.utils.data.DataLoader(
+            ds, batch_size=4, collate_fn=collate_action_policy_batch,
+        )
+        batch = next(iter(loader))
+        assert isinstance(batch, ActionPolicyBatch)
+        assert batch.target_actions_scale_free.shape[0] == 4
 
 
 class TestImportPurity:
