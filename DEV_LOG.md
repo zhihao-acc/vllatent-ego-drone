@@ -70,14 +70,60 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B1.22a — train_sports.py upgrade (val/scene-split/warmup/bf16/--latent-only) | done | 2026-06-29 | --latent-only + evaluate()+persistence + split_clips_by_source + train-only NormStats→val + SequentialLR warmup→cosine + ckpt_best/early-stop + bf16(no-scaler) + AdamW param-groups + --no-action-film + --domain-weight(WeightedRandomSampler) + per-worker RNG + frozen TrainConfig(PURE); 478 pure / 64 torch / lint / mypy green; CPU latent-only smoke learns |
 | B1.22c — Curate + ingest more REAL YouTube FPV (FRONT-LOADED) | done | 2026-06-29 | USER signaled local 45-candidate data generation/QC passed; source-level QC HTML generated for 44 clips (`cand01`–`cand13`, `cand15`–`cand45`; no `cand14` frames) |
 | B1.22b — Generate full dataset ON DEV BOX → rsync .npz to H20 | done | 2026-06-30 | Local 919 `.npz` cache was rsynced/used for H20 B1.22e run; never git-add latents |
-| B1.22d — [CONDITIONAL] Game footage → domain=game pretrain slice | pending | — | Real-only B1.22e missed persistence; do NOT activate game blindly — first diagnose/replan B1.22e, then decide |
-| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | in_progress | 2026-07-05 | Run2 depth4/lr1e-4 also missed persistence on train and val; residual predictor AUTO implementation done; next = user-gated H20 residual run |
+| B1.22d — [CONDITIONAL] Game footage → domain=game pretrain slice | superseded | 2026-07-05 | Do not activate game to chase B1 DINO-latent persistence; revisit only after B2 action-policy label/target gates |
+| B1.22e — B-1 run: latent predictor (L_latent), DoD beats persistence | done | 2026-07-05 | Closed diagnostic-complete / model-incomplete; absolute, run2, and residual attempts did not produce an accepted latent-world checkpoint |
 | B1.22f — Stage 2: waypoint head on frozen predictor | superseded | 2026-06-29 | **→ Phase B-2a** (deferred: MegaSaM scale + prober undecided) |
 | B1.22g — Stage 3: conditional joint fine-tune | superseded | 2026-06-29 | **→ Phase B-2a** |
-| B1.23 — Jetson inference speed check (encoder+predictor) | pending | — | Phase B-1 Group 8: USER-GATED (Orin NX) |
-| B1.24 — Phase B-1 DoD verification (good latent model) | pending | — | Phase B-1 Group 8: USER-GATED |
+| B1.23 — Jetson inference speed check (encoder+predictor) | superseded | 2026-07-05 | No accepted B1 predictor checkpoint; B2 will benchmark encoder+action policy after B2b |
+| B1.24 — Phase B-1 DoD verification (good latent model) | superseded | 2026-07-05 | Original B1 model DoD failed; B1 closed by decision and B2 activated |
+| B2.0 — Close B1 and activate B2 Ralph loop | done | 2026-07-05 | Plan/rules/log/AGENTS updated; next active implementation step is B2.1 |
+| B2.1 — Pure scale-free action target contract | pending | — | Define scale-free future-action target; prove scale invariance and no torch import |
+| B2.2 — Loader emits B2 action targets additively | pending | — | Keep B1 target_deltas path; add scale-free target/action fields and B2 collate |
+| B2.3 — Direct scale-free action policy | pending | — | Frozen DINO history/current latents + previous observed motion → future action sequence |
+| B2.4 — Action losses, metrics, baselines | pending | — | Direction/yaw/speed/path-shape metrics and baseline margins |
+| B2.5 — B2 trainer + local training-policy verification | pending | — | Local B2a gate before any H20 command |
+| B2.6 — B2a technical readout + USER gate | pending | — | Stop with one paste-ready B2b H20 command only if local gate passes |
+| B2.7 — H20 scale-free action-policy run | pending | — | USER-GATED; do not operate H20/SSH/docker |
+| B2.8 — B2b readout + escalation decision | pending | — | Decide pass vs label diagnosis vs architecture escalation before another run |
+| B2.9 — Jetson action-policy speed check | pending | — | USER-GATED after useful B2 checkpoint exists |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B1 closed; B2 scale-free future-action plan activated
+
+**Status:** B1.22e is closed as **diagnostic-complete / model-incomplete**. B1.23/B1.24 are
+superseded. B2.0 is done; B2.1 is the next implementation step. Older historical entries below
+still mention B1.22e as `in_progress`; the status table and this entry supersede them.
+
+**User decision.** The project should not keep spending H20 attempts on raw DINO future-latent
+cosine. Future action sequence is the target, never an input. Youtube/MegaSaM scale is not trusted;
+metric scale comes from onboard odometry during real drone inference. Commanded speed must be
+clamped below `7.5 m/s`.
+
+**Research-backed B2 direction.**
+- ViNT supports direct future waypoint/action prediction from current/past observations and
+  normalizes waypoints by robot top speed, with robot-specific controller unnormalization.
+- NoMaD supports future action-sequence policies and later diffusion escalation for multimodal
+  futures.
+- FutureNav supports action prediction as the inference path, with inverse/forward/future-state
+  objectives as auxiliary training support rather than the primary gate.
+- Monocular VIO scale ambiguity supports the decision to treat Youtube/MegaSaM translation
+  magnitude as scale-free shape supervision, not metric speed.
+
+**Plan/rules changes.**
+- `plans/phase-b-sports-training.md` now closes B1, supersedes B1.23/B1.24, and defines ordered
+  B2.0-B2.9 steps with tier, gate, DoD, tests, and dependencies.
+- `AGENTS.md` now names B2 as the active repo guidance.
+- `.codex/ralph-rules.md` now points to B2 and blocks further B1 latent H20 reruns.
+- B2a DoD: local scale-free training-policy gate, including scale-invariance tests, no future-action
+  leakage tests, overfit-tiny, and source-split margin over dumb baselines.
+- B2b DoD: one user-approved H20 run beats the best scale-free baseline by at least 15%, improves
+  on a majority of held-out sources, and saves checkpoint/config/metrics with no metric-flight claim.
+
+**Next AUTO step:** B2.1 pure scale-free action target contract. Do not implement PI-Prober,
+diffusion, language, game data, or auxiliary latent/world losses before the direct B2a gate.
 
 ---
 

@@ -1,11 +1,11 @@
-# Ralph Rules - vllatent-ego-drone Phase B-1
+# Ralph Rules - vllatent-ego-drone Phase B2
 
-These rules are the Codex-local Ralph-loop protocol. They supersede the stale
-Phase-A wording in `.claude/ralph-rules.md` for Codex work.
+These are the Codex-local Ralph-loop rules for the active Phase B queue. They
+supersede the older B1 latent-world-model loop.
 
 ## Completion Promise
 
-Default promise: `B-1 LATENT WORLD MODEL READY FOR USER-GATED TRAINING`.
+Default promise: `B-2 SCALE-FREE FUTURE-ACTION POLICY READY FOR USER-GATED H20 TRAINING`.
 Default backstop: `--max-iterations 10`.
 
 Stop when the promise is satisfied, the backstop is reached, a repeated blocker
@@ -15,96 +15,86 @@ requires user action, or the next step is user-gated.
 
 Every iteration starts by reading:
 
-1. `DEV_LOG.md` - find the lowest pending/in-progress B1.x step and latest user
-   facts.
+1. `DEV_LOG.md` - current step status and latest user-verified facts.
 2. This file - protocol and gates.
-3. `plans/phase-b-sports-training.md`, Group 8 - DoD and runbook.
-4. Relevant code/tests only after the step is identified.
-
-The filename `plans/handoff-2026-06-24-b1.10c-onwards.md` is historical. Treat
-the latest `DEV_LOG.md` entries and the Group 8 plan as authoritative.
+3. `plans/phase-b-sports-training.md`, especially the Phase B-2 section.
+4. Relevant code/tests only after the active B2 step is identified.
 
 ## Current Queue Discipline
 
-- B1.21b and B1.22a are done.
-- B1.22b/B1.22c data generation and curation are user-gated. The user may paste
-  updated verification showing more encoded clips than `DEV_LOG.md` currently
-  records. When that happens, update `DEV_LOG.md` with the pasted numbers before
-  marking any user-gated step done.
-- Before B1.22e training, perform a local QC pass over `ingest_data/latent_cache`
-  if the files are present. QC is an AUTO preflight, but it does not by itself
-  close B1.22b/B1.22c; only user-pasted verification closes user-gated steps.
-- B1.22e is user-gated H20 training. Stop and hand the user a paste-ready command
-  block; do not SSH, rent, operate H20, or run docker.
-- B1.23 and B1.24 are also user-gated.
+- B1.22e is closed as diagnostic-complete / model-incomplete.
+- B1.23 and B1.24 are superseded until a useful B2 action-policy checkpoint exists.
+- Do not launch another B1 latent H20 run.
+- Do not activate game pretraining to chase the B1 DINO-latent persistence metric.
+- The next active queue is:
+  - `B2.0` docs/rules activation, then
+  - `B2.1` pure scale-free action target contract,
+  - `B2.2` additive loader/collate target fields,
+  - `B2.3` direct scale-free action policy,
+  - `B2.4` action losses/metrics/baselines,
+  - `B2.5` local B2a training-policy verification,
+  - `B2.6` USER gate before any H20 command.
 
 ## Iteration Protocol
 
-1. Identify the lowest actionable step from `DEV_LOG.md`.
+1. Identify the lowest actionable B2.x step from `DEV_LOG.md`.
 2. Review its DoD and test command in the plan.
 3. Make one bounded improvement or run one bounded verification.
-4. Run the narrowest useful check.
-5. Record facts in `DEV_LOG.md` only when verified. User-gated steps remain
-   `in_progress` until the user provides pasted output.
-6. Commit with specific paths only, using `feat(phaseB): B1.x - ...` for real
-   step work or `chore(phaseB): ...` for loop/rule maintenance.
-7. Stop-check: stop at user gates, at `started_step + 3`, after an unfixable
-   test failure, or when the completion promise is satisfied.
+4. Run the narrowest useful check listed for that step.
+5. Record verified facts in `DEV_LOG.md`.
+6. Commit with specific paths only, using `feat(phaseB): B2.x - ...` for code
+   steps, `test(phaseB): B2.x - ...` for RED tests, or `docs(phaseB): ...` for
+   plan/rule updates.
+7. Stop at USER gates, after an unfixable test failure, or when the completion
+   promise is satisfied.
 
-## Quality Gates
+## B2 Quality Gates
 
+- Future action sequence is the target, never an input.
+- The only action-like model input in B2a is previous observed motion.
+- Youtube/MegaSaM translation scale is not metric truth. B2a targets must be
+  invariant to positive rescaling of all translation deltas.
+- Metric speed is supplied at inference by onboard odometry/controller scale.
+- Controller conversion must clamp speed strictly below `7.5 m/s`.
+- Keep B2a direct and small: no PI-Prober, no NoMaD-style diffusion, no language
+  cross-attention, no game data, and no auxiliary latent/world loss until the
+  direct scale-free policy gate passes or fails with a recorded diagnosis.
+- Scene/source split remains mandatory. Do not split sub-clips from one source
+  video across train/val.
 - Pure tier stays pure: no torch/transformers/timm/airsim in
-  `vllatent.{schemas,actions,frames,config,manifest,audit}`.
-- Torch imports stay lazy in torch-tier modules.
-- No EMA, VICReg, target-EMA, anti-collapse losses, PI-Prober implementation, or
-  visual bottleneck in B-1.
-- Do not train the waypoint head in B-1. No `--stage 2/3`, predictor-freeze
-  head path, `L_wp` training run, or head-input experiments.
-- Scene split by source video, not sub-clip.
-- Validation uses train-only `NormStats`.
-- Latent metrics must include per-horizon cosine, persistence cosine, and margin.
+  `vllatent.{schemas,actions,frames,config,manifest,audit}` or any new pure
+  target-transform module.
 - No blobs: never commit `runs/`, weights, `.npz`, videos, raw frames, or QC
   artifact directories.
 
-## Pre-B1.22e QC Checklist
+## B2a Verification Checklist
 
-Use the repo's QC tooling when available (`scripts/qc_report.py` /
-`scripts/qc_lib.py`) and inspect the generated cache before training. A healthy
-QC handoff should report:
+A healthy B2a local handoff should report:
 
-- number of `.npz` clips and total frames/windows;
-- latent shape `(N, 196, 768)` and dtype `float16`;
-- finite latents and no all-zero/constant clips;
-- required action/quality arrays present and aligned to frame count;
-- manifest validates and records BGR-to-RGB plus center-square-crop provenance;
-- domain field is present (`real` unless explicitly game);
-- source-video grouping has enough train/val sources for a non-leaking split;
-- per-clip errors or rejected clips are listed explicitly.
-
-If QC finds corrupt caches, stale stretch-encoded outputs, missing manifests, or
-source leakage risk, stop before B1.22e and report the exact files.
+- scale-free target shape/dtype and finite behavior;
+- translation-scale invariance test results;
+- explicit no-future-action-input/leakage tests;
+- overfit-tiny action-policy result vs best dumb baseline;
+- local source-split aggregate action score and per-source metrics;
+- whether B2a beat the best baseline by at least 10%;
+- exact next USER gate if H20 is justified.
 
 ## User-Gated Paste Blocks
 
-For B1.22e, provide a block derived from the plan runbook, currently:
+Do not provide a B2b H20 paste block until B2.5 passes and B2.6 is reached.
 
-```bash
-$PY scripts/train_sports.py --cache-dir ingest_data/latent_cache --run-dir runs/b1_latent \
-  --latent-only --amp-dtype bf16 --depth 6 --batch-size 64 --lr 2e-4 --warmup-frac 0.05 \
-  --weight-decay 0.05 --val-frac 0.2 --eval-every-epochs 1 --early-stop-patience 8 \
-  --early-stop-metric val_cos --device cuda
-```
+At B2.6, provide one command only, derived from the verified local recipe, and
+ask the user to paste:
 
-Ask the user to paste:
-
-- tail of `runs/b1_latent/val_metrics.jsonl`;
-- per-horizon cosine, persistence cosine, and margin;
+- tail of `val_action_metrics.jsonl`;
+- tail of train metrics if enabled;
+- `source_action_metrics.jsonl`;
 - steps/sec and GPU memory;
-- confirmation that `ckpt_best.pt` and `norm_stats.npz` exist.
+- confirmation that `ckpt_best.pt`, config snapshot, and metrics files exist.
 
 Artifacts are pulled out-of-band with rsync and never committed.
 
 ## Deterministic Stop
 
-Codex does not need Claude's stop hook. If local loop state is ever introduced,
-keep it under `.codex/ralph-loop.local.md`; it is ignored by git.
+Codex does not need Claude's stop hook. If local loop state is introduced, keep
+it under `.codex/ralph-loop.local.md`; it is ignored by git.

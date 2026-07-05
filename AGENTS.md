@@ -6,41 +6,46 @@ Read this before working in this repo. It is the Codex-facing companion to
 
 ## Project Snapshot
 
-`vllatent` is a compact latent world-action model for a sports-following drone
-(skiing primary). The current Phase B-1 deliverable is a **latent predictor**:
+`vllatent` is a compact world-action model for a sports-following drone
+(skiing primary). Phase B-1 is closed as diagnostic-complete / model-incomplete:
+raw future-DINO latent prediction did not beat the persistence baseline on the
+real held-out action-video cache. The active Phase B-2 deliverable is a
+**scale-free future-action policy**:
 
 ```text
-RGB 224^2 -> frozen cached DINOv3 ViT-B/16 -> z_t (196x768 fp16)
-         + action(4-DoF, FiLM) + dt(FiLM)
-         -> LatentPredictor, block-causal ViT, depth=6
-         -> predicted future DINOv3 latents
+RGB 224^2 -> frozen cached DINOv3 ViT-B/16 -> z_t / history latents
+                                      + previous observed motion + dt
+                            [direct scale-free action policy]
+                                      -> future action sequence
 ```
 
-B-1 trains the latent predictor only. Waypoint-head training, `L_wp`, MegaSaM
-scale fixes, and the MLP vs PI-Prober vs attentive-pool decision are Phase B-2a.
-Do not add Stage 2/3 head training to B-1.
+The future action sequence is the **target**, never an input. Youtube/MegaSaM
+translation scale is not trusted; B-2 trains on scale-free path shape and leaves
+metric scale to onboard odometry/controller logic at inference. Commanded speed
+must be clamped below `7.5 m/s`.
 
 ## Required Read Order
 
 1. `DEV_LOG.md` - current step status and latest user-verified facts.
 2. `.codex/ralph-rules.md` - Codex Ralph-loop protocol and stop gates.
-3. `plans/phase-b-sports-training.md` - authoritative Phase B plan, especially Group 8.
+3. `plans/phase-b-sports-training.md` - authoritative Phase B plan, especially Phase B-2.
 4. `CLAUDE.md` - broader project invariants and historical context.
 
 For project-memory context, use the vault in the order named by `CLAUDE.md`.
 Repo state is authoritative for code; vault notes are authoritative for why.
 
-## Current B-1 Guardrails
+## Current B-2 Guardrails
 
 - Frozen DINOv3 ViT-B/16, D=768, cached fp16 latents.
-- Latent predictor depth=6 unless the plan or user explicitly changes it.
-- No EMA, no VICReg, no anti-collapse machinery.
+- Predict future scale-free action sequence from observation/history and previous
+  observed motion. Do not condition on future actions.
+- B-2a starts with a direct action head/policy. Do not add PI-Prober, diffusion,
+  language cross-attention, game data, or auxiliary latent/world losses before
+  the direct-policy local gate passes or fails with a recorded diagnosis.
 - Scene split by **source video**, not sub-clip (`stem.split("_")[0]`).
-- Train-only `NormStats`; validation must not recompute stats on val clips.
-- B-1 success means per-horizon validation cosine beats the persistence
-  baseline `cos(z_t, z_{t+k})` by a clear margin.
-- The waypoint head is deferred. Do not train it or add head-specific command
-  flags while working B-1.
+- Youtube/MegaSaM translation magnitude is diagnostics only, not metric truth.
+- Real metric scale is supplied by onboard odometry/controller at inference.
+- Controller conversion must clamp commanded speed below `7.5 m/s`.
 
 ## Tier Rules
 

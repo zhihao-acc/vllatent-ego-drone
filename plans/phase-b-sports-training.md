@@ -919,222 +919,269 @@ latent-pretraining slice.**
   provenance; user verifies the encode.
 - **Deps:** Blocked-by: B1.22a (domain plumbing). Feeds B1.22e game-pretraining variant.
 
-**B1.22e — B-1 training run: latent world model on H20 (predictor only, `L_latent`).**
+**B1.22e — B-1 training run: latent world model on H20 (predictor only, `L_latent`).** ✅ CLOSED BY DECISION 2026-07-05
 - Tier TORCH / **USER-GATED** (H20)
-- §B. **Recovery sequence after failed H20 B1.22e and run2.** AUTO first: implement the approved
-  persistence-residual parameterization (`z_hat = z_t + delta_hat`, zero/near-zero-initialized
-  residual path), retain finite-loss/gradient fail-fast, and log train-set + per-source persistence
-  margins. If **train margin remains negative after residual training**, stop again before data/game
-  scaling and inspect residual loss alignment, action-noise ablations, and delta normalization. If
-  train margin is positive but val margin is negative, focus on split/data scale/generalization.
-- H20 residual candidate after AUTO implementation: `--latent-only`, bf16, depth 4, LR `1e-4`,
-  AdamW betas `(0.9,0.95)`, WD 0.05 param groups, batch 64, scene-split sacred val,
-  `--early-stop-metric val_margin`, `--eval-train`, `--eval-by-source`, `--exclude-source ski03`.
-  Run residual loss variants before another architecture sweep: absolute-on-`z_hat` first, then
-  delta-only or combined delta auxiliary if train margin is not clearly positive. Save
-  `ckpt_best.pt` (predictor) + train-only `norm_stats.npz`.
-- The original depth-6/action-FiLM/LR2e-4 command is now a **failed baseline**, not the default
-  next run. Do not activate game pretraining until the real-only train-margin failure mode is
-  understood. `ski03` should be excluded or regenerated because it is an orphan/provenance-gap
-  cache file, but it is not the aggregate-margin root cause.
-- **DoD (good latent world model):** per-horizon val latent cosine **beats the persistence
-  baseline** by a clear margin and `t=1` cosine is high (directional ≥0.7 at N=11 sources,
-  rotate 2–3 folds); cosine degrades gracefully over the horizon; `ckpt_best` + `norm_stats`
-  saved; user pastes `val_metrics.jsonl` tail (cosine + persistence margin per horizon) +
-  steps/sec + GPU mem.
-- **Deps:** Blocked-by: B1.22a, B1.22b. Blocks: B1.23. (B1.22c/B1.22d feed the data-scale variant.)
+- **Outcome.** B1.22e is diagnostic-complete and model-incomplete. The original absolute run
+  failed persistence on validation and later hit non-finite loss. Run2, based on the latest
+  recovery code and excluding `ski03`, also failed persistence on both train and validation. The
+  residual `z_hat = z_t + delta_hat` follow-up initialized at persistence and quickly fit train
+  slightly above persistence, but validation stayed at or below persistence and degraded by epoch 2.
+- **Decision.** Do not launch another B1 latent H20 run. Do not activate game pretraining to chase
+  the DINO-latent persistence metric. The B1 latent-cosine DoD remains unmet, but the result is
+  informative enough to close B1 and move to B2: the deployable signal must be future action
+  prediction, not raw future-DINO cosine.
+- **Recorded B1 evidence.**
+  - Run2 best visible val: `val_cos=0.7593`, persistence `0.8576`, margin `-0.0983`.
+  - Run2 best visible train: `train_cos=0.8003`, persistence `0.8685`, margin `-0.0683`.
+  - Residual run train epoch 2: margin `+0.0017`; residual val epoch 2: margin `-0.0020`.
+- **DoD disposition.** Original B1 "good latent world model" DoD failed. B1 is closed as
+  **pipeline/data/training-diagnostics complete**, with no accepted predictor checkpoint.
+- **Deps:** Blocked-by: B1.22a, B1.22b. Superseded by B2.0/B2.1.
 
 > **B1.22f / B1.22g (waypoint head Stage 2 + Stage 3) → MOVED to Phase B-2** (deferred
 > 2026-06-29: unresolved MegaSaM scale + undecided head architecture). See the Phase B-2 section.
 
-**B1.23 — Jetson Orin NX inference speed check (<50 ms / 20 Hz).**
-- Tier RESEARCH / **USER-GATED** (Orin NX)
-- Export the shipped `ckpt_best` (predictor) to TorchScript/ONNX; on Orin NX measure frozen
-  DINOv3 encoder + predictor (depth=6, or the swept depth) end-to-end. The waypoint head (tiny
-  MLP, added in B-2) has negligible cost — note it, don't block on it. Folds in the deferred
-  B1.11 Orin benchmark — if the predictor TRT FP16 budget is blown, the depth-2–4 sweep
-  checkpoint is the fallback.
-- **DoD:** written benchmark; encoder+predictor <50 ms = GO, else CONDITIONAL-GO with the
-  smaller-depth checkpoint; user pastes latency.
-- **Deps:** Blocked-by: B1.22e. Blocks: B1.24.
+**B1.23 — Jetson Orin NX inference speed check (<50 ms / 20 Hz).** ⛔ SUPERSEDED 2026-07-05
+- No accepted B1 predictor checkpoint exists, so encoder+predictor benchmarking is no longer the
+  active gate. B2 will benchmark the encoder + direct scale-free action policy when B2b has a
+  candidate checkpoint.
 
-**B1.24 — Phase B-1 DoD verification (good latent world model).**
+**B1.24 — Phase B-1 DoD verification (good latent world model).** ⛔ SUPERSEDED 2026-07-05
+- The original B1 model DoD failed. The completion record is now the B1 closure note in
+  `DEV_LOG.md` plus this plan revision. The next active Ralph loop starts at B2.0.
+
+#### E. B2 USER-GATED runbook preview
+
+1. **No B1 H20 command remains active.** The previous residual latent command is historical only.
+2. **B2a local gate first.** Codex must complete B2.1-B2.5 and record local metrics before any
+   H20 command is proposed.
+3. **B2.6 USER gate.** Codex provides exactly one paste-ready B2b H20 command after local B2a
+   passes. The user approves it or asks for more diagnosis.
+4. **B2.7 USER-GATED H20 run.** User runs the approved command and pastes
+   `val_action_metrics.jsonl`, train metrics if enabled, source metrics, steps/sec, GPU memory,
+   and checkpoint/config existence.
+5. **B2.8 readout before another run.** A second paid run requires a recorded decision: pass,
+   label-quality diagnosis, attentive-pool escalation, diffusion escalation, or real-odom data.
+
+#### F. B2 verification ladder preview
+
+1. Target contract: translation-scale invariance and finite zero-speed behavior.
+2. No leakage: future action labels are targets only, never model inputs.
+3. Overfit-tiny: direct action policy beats the best dumb baseline.
+4. Local source-split: B2a beats best baseline by at least 10% aggregate or stops with diagnosis.
+5. H20 B2b: one approved run beats best baseline by at least 15%, improves on a majority of held-out sources, and saves checkpoint/config/metrics.
+6. Jetson: encoder + action policy is benchmarked only after a useful B2 checkpoint exists.
+
+---
+
+## Phase B-2: Scale-Free Future-Action Policy
+
+> **Replanned 2026-07-05 after B1 closure.** B2 is no longer "train a waypoint head on top of a
+> successful B1 latent predictor." B1 produced useful diagnostics but no accepted predictor
+> checkpoint. B2 therefore starts from the frozen DINOv3 cache and trains a **direct scale-free
+> future-action policy**. The future action sequence is the **target**, never an input.
+
+### B2 framing
+
+**Crux.** YouTube + MegaSaM provides useful ego-motion shape, but not trustworthy metric scale.
+Metric scale must come from onboard odometry during real drone inference. B2 must therefore learn
+scale-free motion intent from video and leave metric conversion to the controller.
+
+**Research basis.**
+- ViNT predicts future action waypoints from current/past observations and normalizes relative
+  waypoints by robot top speed; deployment unnormalizes through a robot-specific controller.
+- NoMaD treats future action sequences as the policy output and uses diffusion only when the action
+  distribution is multimodal; this is a later escalation, not the first B2 implementation.
+- FutureNav keeps action prediction as the inference path and uses inverse/forward/future-state
+  objectives as auxiliary training support. B2 may add auxiliary world/dynamics losses later, but
+  action quality is the gate.
+- Monocular VIO scale is not observable from YouTube RGB alone. Odom/IMU/range/GPS can resolve
+  scale on the real platform; MegaSaM's Youtube scale must not be treated as metric truth.
+
+**B2 locked defaults.**
+- **Target representation:** per-horizon scale-free action vector:
+  `unit_xyz` (3D body-frame direction), `log_speed_ratio` (relative speed profile), and
+  `yaw_rate_norm` (bounded yaw-rate command). Raw MegaSaM metric magnitude is diagnostics only.
+- **Inference conversion:** `speed_cmd = min(odom_reference_speed * exp(log_speed_ratio), 7.5 m/s)`.
+  The controller must clamp strictly below `7.5 m/s`; B2 never learns an absolute Youtube speed.
+- **Architecture:** direct action head first. Inputs are frozen DINO history/current latents,
+  history mask, `dt_seconds`, and previous observed scale-free action from the past. Do not depend
+  on B1 predictor rollout in B2a.
+- **Deferred:** PI-Prober, NoMaD-style diffusion, language cross-attention, game pretraining, and
+  auxiliary latent/world losses are not allowed until the direct scale-free policy gate is passed or
+  fails with a diagnosed reason.
+
+### B2 Ralph-loop protocol
+
+Each B2 step follows the same loop:
+
+1. Read `DEV_LOG.md`, `.codex/ralph-rules.md`, this B2 section, then only the relevant code/tests.
+2. Execute the **lowest active B2.x** step.
+3. Make one bounded implementation or verification change.
+4. Run the listed narrow test before broad tests.
+5. Record verified facts in `DEV_LOG.md`.
+6. Commit with specific paths only; never `git add -A`.
+7. Stop at every USER-GATED step with paste-ready commands. Do not operate H20/SSH/docker for the user.
+
+### B2a — Training-policy gate (AUTO unless noted)
+
+**B2.0 — Close B1 and activate B2 rules.**
+- Tier DOC / AUTO
+- Update this plan, `AGENTS.md`, `.codex/ralph-rules.md`, and `DEV_LOG.md`: B1.22e closed as
+  diagnostic-complete / model-incomplete; B1.23/B1.24 superseded; next active step is B2.1.
+- **DoD:** docs agree on B2 active queue and no further B1 H20 latent run is requested.
+- **Test:** `rg -n "B2.1|diagnostic-complete|future action sequence is the target" plans/phase-b-sports-training.md .codex/ralph-rules.md DEV_LOG.md`
+- **Deps:** blocked-by user approval of B1 closure. Blocks B2.1.
+
+**B2.1 — Pure scale-free action target contract.**
+- Tier PURE / AUTO
+- Add a pure numpy target module for scale-free future actions. It must expose the locked action
+  dimension and transformation utilities from raw/preprocessed velocity-like deltas:
+  `unit_xyz`, `log_speed_ratio`, `yaw_rate_norm`, plus inverse/control helper docs showing odom
+  scale and the `7.5 m/s` cap live outside Youtube training.
+- Required invariants:
+  - multiplying all translational deltas by any positive scalar leaves `unit_xyz` and
+    `log_speed_ratio` unchanged;
+  - yaw target is unaffected by translation scaling;
+  - zero/near-zero speed is finite and explicitly masked or mapped to a stable fallback;
+  - future actions are never returned as model inputs.
+- **DoD:** pure tests prove scale invariance, finite zero-speed behavior, shape/dtype, and no torch import.
+- **Test:** `$PY -m pytest -q tests/test_scale_free_targets.py`
+- **Deps:** B2.0. Blocks B2.2/B2.3.
+
+**B2.2 — Sports loader emits B2 action targets without breaking B1.**
+- Tier TORCH-DATA / AUTO
+- Extend `SportsSample` and collation additively: keep `target_deltas` and `last_action` for B1
+  compatibility, and add B2 fields for `target_actions_scale_free`, `last_action_scale_free`, and
+  `odom_reference_speed` diagnostics. B2 collation returns a separate action-policy batch so B1
+  `TrainingBatch` tests and `scripts/train_sports.py` remain reproducible.
+- **Leakage rule:** `last_action_scale_free` is computed only from observed past motion. Future
+  horizon labels may supervise `target_actions_scale_free` but must never appear in inputs.
+- **DoD:** loader tests cover additive shapes, source split still holds, old B1 tests still pass,
+  and a targeted leakage test changes future deltas while preserving past inputs.
+- **Test:** `$PY -m pytest -q tests/test_sports_loader.py tests/test_collate.py tests/test_scale_free_targets.py`
+- **Deps:** B2.1. Blocks B2.3/B2.4.
+
+**B2.3 — Direct scale-free action policy.**
+- Tier TORCH / AUTO
+- Add a small direct policy module. It reads frozen DINO history/current latents, `history_mask`,
+  `dt_seconds`, and previous observed scale-free action, then predicts the full future action
+  sequence. It does not call the B1 latent predictor and does not accept future action labels.
+- Default architecture: mean-pool patch tokens per frame, temporal tokens over history/current,
+  a small Transformer/MLP context block, horizon embeddings, and a per-horizon output head with
+  `SCALE_FREE_ACTION_DIM` outputs. Attentive pooling is an escalation only if B2a underfits.
+- **DoD:** output shape `(B,T,SCALE_FREE_ACTION_DIM)`, deterministic eval, differentiable, no
+  dependency on `target_actions_scale_free` in `forward`.
+- **Test:** `$PY -m pytest -q tests/test_action_policy.py tests/test_heads.py`
+- **Deps:** B2.2. Blocks B2.4.
+
+**B2.4 — Action losses, baselines, and metrics.**
+- Tier TORCH / AUTO
+- Add action-policy loss and evaluation metrics:
+  - direction cosine / angular error;
+  - normalized path-shape ADE/FDE;
+  - speed-ratio MAE;
+  - yaw-rate MAE;
+  - aggregate score where lower is better;
+  - margins against repeat-last-motion, no-turn, zero/mean, and linear extrapolation baselines.
+- **DoD:** perfect prediction scores near zero error, bad prediction is worse, repeat-last baseline
+  is deterministic, metrics are sample-count weighted, and margins are positive only when the
+  model beats the best baseline.
+- **Test:** `$PY -m pytest -q tests/test_action_metrics.py tests/test_losses.py`
+- **Deps:** B2.2. Blocks B2.5.
+
+**B2.5 — B2 trainer and local training-policy verification.**
+- Tier TORCH / AUTO
+- Add a B2 training script or explicit B2 mode that trains only the direct action policy. It must
+  save config snapshots, checkpoint best-by-action-margin, write `val_action_metrics.jsonl`,
+  optionally write `source_action_metrics.jsonl`, and support overfit-tiny.
+- Default local recipe: depth small, fp32 or bf16 depending device, train source split, val source
+  split, no latent loss, no language, no game.
+- **B2a DoD:** target invariance tests pass; no-leakage tests pass; tiny overfit beats baseline;
+  local source-split smoke beats the best dumb baseline by at least **10%** on aggregate
+  scale-free action score or stops with a label/metric diagnosis before any H20 run.
+- **Test:** `$PY -m pytest -q tests/test_train_sports_b2.py tests/test_action_policy.py tests/test_action_metrics.py`
+- **Deps:** B2.3/B2.4. Blocks B2.6.
+
+**B2.6 — B2a technical readout and USER gate.**
 - Tier DOC / **USER-GATED**
-- Verify: (1) pipeline bugs fixed, (2) schemas revised + trust cleanup, (3) encoder locked
-  (D=768 depth=6), (4) pilot encoded + (recommended) real data expanded + quality validated,
-  (5) cache pipeline green, (6) **latent predictor trains — overfit passes; the H20 run beats
-  persistence on real held-out val; per-horizon cosine acceptable as a directional signal**,
-  (7) encoder+predictor Jetson speed OK. Waypoint head, `L_wp`, prober choice, and MegaSaM-scale
-  are explicitly **out of B-1 scope** (B-2).
-- **DoD:** written Phase B-1 completion note; `make test && make test-torch && make lint &&
-  make typecheck` all green; `ckpt_best` lineage + val metrics recorded.
-- **Test:** `make test && make test-torch && make lint && make typecheck`
-- **Deps:** blocked-by B1.22a–e, B1.23.
+- Summarize B2a local evidence in `DEV_LOG.md`: target invariance, leakage, tiny overfit, local
+  source-split metrics, best baseline, and per-source failure modes. If the local gate fails, do
+  not propose H20; replan labels/metrics first.
+- **DoD:** user approves exactly one B2b H20 command block, or asks for another B2a diagnosis.
+- **Test:** docs-only plus any failed/passed command outputs recorded.
+- **Deps:** B2.5. Blocks B2b.
 
-#### E. End-to-end USER-GATED runbook (H20 — SSH hands-off; agent pastes, user runs)
+### B2b — Stronger checkpoint (USER-GATED H20)
 
-1. **H20 setup** (paste-run on the rented box): activate conda `vllatent-ego-drone` (Py3.10 /
-   torch 2.8 / cu12x / transformers≥4.56 / timm≥1.0.20); `export HF_ENDPOINT=https://hf-mirror.com`;
-   set the GitHub mirror chain; `pip install -e '.[torch]'`. Verify bf16:
-   `python -c "import torch;print(torch.cuda.get_device_name(0), torch.cuda.is_bf16_supported())"`
-   (expect H20 / True).
-2. **Code sync:** `git pull` (mirror) for the B1.22a upgrades. Never commit/rsync `.npz`/`runs/`/weights.
-3. **Generate the dataset (B1.22b) ON THE DEV BOX** (5060 Ti — proven in B1.10c; saves H20 $$):
-   `python scripts/ingest_youtube_pilot.py --device cuda` (full chain) → `ingest_data/latent_cache/*.npz`.
-   MegaSaM is the bottleneck → run overnight. Then push **only the latents** to the H20:
-   `rsync -avP -e 'ssh -p <PORT>' ingest_data/latent_cache/*.npz root@<H20>:/root/vllatent-ego-drone/ingest_data/latent_cache/`
-   (never the videos/frames; never git). Paste the encode summary (count, fp16, BGR→RGB, per-clip OK).
-   The H20 is rented from step 4 onward (training only), not for encode.
-4. **B-1 latent residual run (B1.22e):** after AUTO residual implementation is committed, first run
-   the paste block provided by Codex for the selected residual candidate. The default next candidate
-   is the run2 recipe plus residual output:
-   `$PY scripts/train_sports.py --cache-dir ingest_data/latent_cache --run-dir runs/b1_latent_residual_abs --latent-only --prediction-mode residual --latent-loss-mode absolute --amp-dtype bf16 --depth 4 --batch-size 64 --lr 1e-4 --warmup-frac 0.05 --weight-decay 0.05 --val-frac 0.2 --eval-every-epochs 1 --early-stop-patience 8 --early-stop-metric val_margin --eval-train --eval-by-source --device cuda --exclude-source ski03`
-   → paste train/val metric tails (per-horizon cosine **+ persistence margin**), source metrics,
-   steps/sec, GPU mem; confirm `ckpt_best.pt` + `norm_stats.npz`. If train margin remains negative,
-   stop before data/game scaling and run the delta-loss ablation.
-   - **Game-pretraining variant (optional, after B1.22d):** train on the combined real+game cache with `--domain-weight 0.4`, then fine-tune real-only from that checkpoint; keep the predictor only if real-val cosine beats the real-only run.
-5. **Pull artifacts (off git):** `rsync -avP -e 'ssh -p <PORT>' root@<H20>:/root/vllatent-ego-drone/runs/ ./runs/` (`ckpt_best.pt`, `norm_stats.npz`, `*_metrics.jsonl`). Never `git add` these.
-6. **Jetson (B1.23):** on Orin NX, export `ckpt_best` (encoder+predictor) to TorchScript/ONNX and bench end-to-end; paste latency (<50 ms = GO).
-7. **Paste-back at every gate:** `val_metrics.jsonl` tail (per-horizon cosine + persistence margin), `ckpt_best` path, steps/sec, GPU mem. USER-GATED steps stay `in_progress` until pasted.
+**B2.7 — H20 scale-free action-policy run.**
+- Tier TORCH / **USER-GATED** (H20)
+- User runs the approved B2 command on the existing 919-file cache. Do not operate H20/SSH/docker
+  from Codex. Validation stays source-split. Save `ckpt_best.pt`, config snapshot, metrics JSONL,
+  and source metrics under `runs/`.
+- **B2b DoD:** one H20 run beats the best baseline by at least **15%** aggregate, improves on a
+  majority of held-out sources, saves checkpoint/config/metrics, and produces prediction samples
+  showing sane direction/yaw/relative-speed behavior. No metric flight claim.
+- **Paste-back requested:** tail of `val_action_metrics.jsonl`, tail of `train_action_metrics.jsonl`
+  if enabled, source metrics, steps/sec, GPU memory, and checkpoint existence.
+- **Deps:** B2.6. Blocks B2.8.
 
-> Waypoint-head training commands (Stage 2/3, joint control) are **B-2** — added when the head
-> pipeline and MegaSaM-scale fix land.
+**B2.8 — B2b readout and escalation decision.**
+- Tier DOC / **USER-GATED**
+- Parse pasted B2b metrics and decide:
+  - pass → move to B2.9 Jetson/action-policy speed check;
+  - label failure → inspect MegaSaM direction/yaw quality and source filtering;
+  - model underfit → try attentive pooling before PI-Prober;
+  - multimodal averaging → consider NoMaD-style diffusion;
+  - scale/speed limitation → defer to real odom data.
+- **DoD:** decision recorded in plan/DEV_LOG before another paid training attempt.
+- **Deps:** B2.7. Blocks B2.9 or replanned B2a.
 
-#### F. Verification ladder
+**B2.9 — Jetson action-policy speed check.**
+- Tier RESEARCH / **USER-GATED** (Orin NX)
+- Benchmark frozen DINOv3 encoder + direct action policy end-to-end. The B2 speed target inherits
+  the original onboard constraint: <50 ms / 20 Hz if possible, otherwise conditional smaller policy
+  or encoder distillation is opened.
+- **DoD:** written benchmark; user-pasted latency; decision whether B2 checkpoint is feasible for
+  Phase-D closed-loop experiments.
+- **Deps:** B2.8 pass.
 
-1. **Overfit-tiny** (re-run B1.20 on a REAL encoded clip; dev box; `--latent-only`; fp32):
-   `L_latent` beats the persistence/zeros baseline within 200 steps; resume@200 → identical
-   step-201 gradients. Plumbing smoke.
-2. **Dev smoke** (5060 Ti, tiny, fp32): predictor-only `L_latent` strictly decreases + per-horizon
-   cosine rises **above persistence**; confirms the `--latent-only` path before spending H20 time.
-3. **B1.22e residual diagnostics:** initialization evaluates at approximately persistence margin
-   (`~0`), full-train eval reports train margin, source metrics identify whether a small number of
-   sources explain val failure, and finite guards abort before a corrupt optimizer step.
-4. **H20 latent run:** scene-split val cosine **beats persistence** per-horizon (t=1..4) + 2–3
-   folds; `t=1` cosine high (directional ≥0.7); best by val cosine-vs-persistence.
-5. **Game-pretraining variant (if run):** real-val cosine with game-pretrain > real-only — else
-   discard the game contribution (measured, not assumed).
-6. **B-1 DoD:** `make test && make test-torch && make lint && make typecheck` green; val metrics
-   reviewed as directional; `ckpt_best` (predictor, not `ckpt_final`) ships.
-7. **Jetson:** exported encoder+predictor end-to-end <50 ms = GO; else CONDITIONAL-GO with
-   depth-2–4 ckpt.
+### B3 preview — Metric scale and deployment data
 
-#### G. Open decisions surfaced to user (defaults in effect unless changed)
-
-- **Data timing** — DEFAULT: run the pilot latent-validation (B1.22e) as soon as the encode
-  finishes; curate expanded real (B1.22c) + game (B1.22d) in parallel. (Alt: expand first.)
-- **Action conditioning** — DEFAULT: action-conditioned predictor (normalized `last_action`
-  FiLM). (Alt: `--no-action-film` pure video model, fully MegaSaM-independent.)
-- **Depth** — DEFAULT: depth=6. Optional depth-2–4 overfitting-mitigation sweep alongside (depth
-  is an OPEN Phase-B knob).
-- **Game footage** — RESOLVED (user 2026-06-28): latent-pretraining source, fine-tune on
-  real-only, keep only if real-val improves. **Ego-Exo4D demoted** (wrong motion/domain).
-- **Waypoint head → B-2** (user 2026-06-29). The head-input (mean vs `mean_minus_zt` vs attentive
-  pool), the **prober decision** (MLP vs PI-Prober), the **MegaSaM-scale fix**, and the optional
-  joint fine-tune are all B-2 open problems — see the Phase B-2 section.
+- Real drone odometry/IMU supplies metric scale at inference and for future custom training labels.
+- Custom GoPro/drone odom collection becomes the first metric waypoint dataset; Youtube remains
+  scale-free pretraining/shape supervision.
+- Language cross-attention, scheduled sampling, PI-Prober, and controller integration move here
+  only after the B2 direct action policy has a validated baseline.
 
 ---
 
-## Phase B-2 & B-3 (high-level)
-
-### B-2: Waypoint Head + Language Cross-Attention
-
-**B-2a — Waypoint head training (MOVED FROM B-1, 2026-06-29).** B-1 ships a frozen latent
-predictor; B-2 trains the action decoder on top. Resolve two open problems FIRST:
-- **MegaSaM scale inconsistency (BLOCKING).** `L_wp` regresses MegaSaM deltas whose monocular
-  scale is per-clip ambiguous + drifting. Candidates to evaluate: (a) **metric-depth anchoring**
-  from MegaSaM's UniDepth stage (absolute per-clip scale); (b) **scale-free parameterization** —
-  predict unit-direction + log-speed (or normalized magnitude) so the head is invariant to
-  per-clip scale; (c) per-clip Sim(3)/scale alignment to a common reference; (d) GPS/IMU anchoring
-  on custom GoPro data (B-3). Pick after a scale-drift audit on the pilot VO (reuse
-  `vo_validation.scale_drift`).
-- **Prober decision (head architecture).** MLP (lean default, `D→256→128→4` over pooled latents)
-  vs SkyJEPA-style **PI-Prober** (residual on a kinematic prior — bounded drift, MPPI-composable;
-  REFERENCE `training-policy-research-2026-06-25.md` §3.3 notes it ≈ a reparameterized MLP under
-  GT-`v_prev` supervision, so its real payoff is Phase-D MPPI/SO(3)) vs a tiny **attentive pool**
-  head (1 query over 196 tokens) fixing the mean-pool-washes-out-heading risk. Decide via a small
-  bake-off once scale is fixed.
-- **Staged head training (design parked from B-1):** load the B-1 `ckpt_best` predictor, **freeze
-  it** (`requires_grad_(False)` + `eval()` + `no_grad`), train the head only on `L_wp` reading the
-  predictor's **PREDICTED** mean-pooled latents (never GT — matches inference). LR 1e-3 probe, WD
-  0, same train NormStats. Optional **Stage 3** joint low-LR fine-tune (predictor LR 2e-5–5e-5;
-  hard-abort if val latent cosine regresses >0.02). Optional **joint-training control**.
-  Head-input escalation if it underfits: `mean` → `mean_minus_zt` (latent-delta) → attentive pool.
-- **DoD:** denormalized waypoint val-L1 within ~2× a clean train L1 on real held-out, on a
-  **scale-consistent** target. Ships the full predictor+head model toward Phase-D closed-loop.
-
-**B-2b — Language Cross-Attention.**
-- RefCOCOg warm-start: download RefCOCOg (~237K expressions), train Flamingo-style zero-init
-  gated cross-attention (every other predictor block) on grounding task.
-- Auto-captioning pipeline: SAM-2 + VLM on sports clips -> verified (frame, expression, mask)
-  triplets. ~5-20K pairs.
-- Integrate cross-attention into predictor. Zero-init gating -> graceful visual-only fallback.
-- **Scheduled sampling for history latents**: begin mixing GT + predicted history with increasing
-  predicted fraction. This bridges the gap between GT-history training (B-1) and auto-regressive
-  deployment (Phase D).
-- Validate: language conditioning improves prediction on captioned val clips.
-
-### B-3: Domain Fine-Tune + Scale
-- Expand YouTube curation (50-100 clips). Include MTB/snowboard for diversity.
-- Ego-Exo4D sports subset integration (soccer, basketball, bouldering — ~26M frames).
-- Fine-tune language-conditioned model on full dataset.
-- Ablation: measure contribution of each data source + language conditioning.
-- Custom GoPro+IMU collection (Southern Hemisphere ski season July-Oct for 2026 timing).
-
----
-
-## Dependency Graph (B-1)
+## Dependency Graph (B1 closed, B2 active)
 
 ```
-DONE — TRACK A (pipeline fixes + content filter):
-  B1.1 ✓ B1.2 ✓ B1.3 ✓ B1.4 ✓ B1.5 ✓ B1.6 ✓
-  B1.7a ✓ B1.7b ✓ (+ B1.10f threshold patch) B1.7c ✓ B1.7 ✓
+DONE — B1 DATA / INFRA / DIAGNOSTICS:
+  B1.1-B1.22c ✓
+  B1.22e closed diagnostic-complete / model-incomplete
+  B1.23/B1.24 superseded
 
-DONE — TRACK B (data + quality dashboards):
-  B1.8 ✓ (DESCOPED) B1.8b ✓ B1.9 ✓ B1.9b ✓
-
-DONE — VO VALIDATION:
-  B1.10a ✓ B1.10b ✓ B1.10d ✓ B1.10e ✓ B1.10c ✓ (E2E GO) B1.10f ✓ (SBD threshold fix)
-
-DONE — TRAINING INFRA:
-  B1.19 ✓ (checkpoint)
-
-REMAINING — CRITICAL PATH (blocked on B1.11 encoder gate):
-  B1.11 (Orin NX bench) ---> B1.12 (lock D) --+
-                                                |
-  GROUP 4 (loader):                            |
-    B1.13 (sports loader) <-- B1.12            |
-    B1.14 (collate) <-- B1.13                  |
-                                                |
-  GROUP 5 (model):                             |
-    B1.15 (predictor) <-- B1.12                |
-    B1.16 (heads) <-- B1.12                    |
-    B1.17 (assembly) <-- B1.15, B1.16          |
-                                                |
-  GROUP 6 (training):                          |
-    B1.18 (losses) <-- B1.17                   |
-    B1.20 (overfit-tiny) <-- B1.14,B1.17,B1.18,B1.19✓,data✓
-    B1.21 (sanity+viz) <-- B1.13,B1.18         |
-                                                |
-  GROUP 8 (B-1 LATENT WORLD MODEL — REPLANNED 2026-06-28, scope-cut 2026-06-29):
-    B1.21b (trust cleanup, AUTO) ......... none
-    B1.22a (latent train-script upgrade, AUTO)  B1.18,B1.19,B1.21✓
-    B1.22b (pilot encode, H20) ........... B1.7✓,B1.10c✓        ──┐
-    B1.22c (expand real YouTube) ......... B1.7✓   [parallel]     │
-    B1.22d (game footage latent-pretrain). B1.22a [parallel]      │
-    B1.22e (B-1 run: predictor, L_latent)  B1.22a,B1.22b <────────┘
-    B1.23  (Jetson: encoder+predictor) ... B1.22e
-    B1.24  (B-1 DoD: good latent model) .. ALL
-    ── waypoint head (Stage 2/3) → Phase B-2a (deferred 2026-06-29) ──
+ACTIVE — B2 SCALE-FREE FUTURE-ACTION POLICY:
+  B2.0  (close B1 + activate B2 rules) ........ user approval
+    └─> B2.1  (pure scale-free target contract)
+          └─> B2.2  (loader + collate additive B2 action fields)
+                ├─> B2.3  (direct scale-free action policy)
+                └─> B2.4  (action losses, metrics, baselines)
+                      └─> B2.5  (B2 trainer + local training-policy verification)
+                            └─> B2.6  (USER gate: approve one B2b H20 command)
+                                  └─> B2.7  (USER-GATED H20 action-policy run)
+                                        └─> B2.8  (USER gate: readout + escalation decision)
+                                              └─> B2.9  (USER-GATED Jetson action-policy speed check)
 ```
 
-**Critical path (B-1):** B1.20✓(fixes landed) → **B1.22a → B1.22b → B1.22e (latent run) →
-B1.23 → B1.24**. B1.22c/B1.22d (data scale-up) run in parallel. Waypoint head training (former
-B1.22f/g) is **Phase B-2a** — blocked on the MegaSaM-scale fix + prober decision.
+**Critical path (B2):** B2.0 → B2.1 → B2.2 → B2.3/B2.4 → B2.5 → B2.6 USER gate. No H20 run
+is allowed before B2.5 passes the local training-policy gate.
 
-**All data-track and pipeline prerequisites are satisfied; B1.11/B1.12 accepted the D=768
-default (DEV_LOG 2026-06-26).** The gating prerequisite for the first real run is **B1.22b
-(full pilot encode on H20)** — today only one clip is cached.
+**Highest-risk invariant:** future action labels are targets only. They must never be provided to
+the model as conditioning inputs. The only action-like input in B2a is previous observed motion.
 
 ---
 
