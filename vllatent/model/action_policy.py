@@ -15,7 +15,12 @@ from vllatent.schemas import EMBED_DIM, HISTORY, HORIZON
 
 
 class ScaleFreeActionPolicy(nn.Module):
-    """Small direct action policy over mean-pooled DINO frame tokens."""
+    """Small direct action policy over mean-pooled DINO frame tokens.
+
+    The output is anchored at the deterministic repeat-last-action baseline and
+    the network learns a residual.  This keeps local training-policy checks from
+    wasting capacity relearning the strongest B2.4 dumb baseline.
+    """
 
     def __init__(
         self,
@@ -79,6 +84,10 @@ class ScaleFreeActionPolicy(nn.Module):
 
         nn.init.trunc_normal_(self.temporal_embed, std=0.02)
         nn.init.trunc_normal_(self.horizon_embed, std=0.02)
+        final = self.head[-1]
+        if isinstance(final, nn.Linear):
+            nn.init.zeros_(final.weight)
+            nn.init.zeros_(final.bias)
 
     def forward(
         self,
@@ -139,4 +148,6 @@ class ScaleFreeActionPolicy(nn.Module):
         dt_context = self.dt_proj(dt_seconds.to(device=device, dtype=dtype).unsqueeze(-1))
         query = context.unsqueeze(1) + action_context + dt_context + self.horizon_embed[:, : self.horizon]
 
-        return self.head(self.output_norm(query))
+        base = last_action_scale_free.to(device=device, dtype=dtype).unsqueeze(1).expand(-1, self.horizon, -1)
+        residual = self.head(self.output_norm(query))
+        return base + residual

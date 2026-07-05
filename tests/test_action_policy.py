@@ -23,6 +23,11 @@ def _make_inputs(batch_size: int = 2, dim: int = 32):
     return history, z_t, history_mask, last_action, dt
 
 
+def _enable_residual_output(model: ScaleFreeActionPolicy) -> None:
+    torch.nn.init.normal_(model.head[-1].weight, std=0.02)
+    torch.nn.init.normal_(model.head[-1].bias, std=0.02)
+
+
 @pytest.mark.torch
 class TestScaleFreeActionPolicy:
     def test_output_shape(self) -> None:
@@ -59,6 +64,13 @@ class TestScaleFreeActionPolicy:
         assert z_t.grad is not None
         assert any(p.grad is not None for p in model.parameters())
 
+    def test_initial_policy_repeats_last_action_baseline(self) -> None:
+        model = ScaleFreeActionPolicy(dim=32, hidden_dim=64, depth=1, heads=4, dropout=0.5)
+        history, z_t, mask, action, dt = _make_inputs(dim=32)
+        out = model(history, z_t, mask, action, dt)
+        expected = action.unsqueeze(1).expand(-1, HORIZON, -1)
+        assert torch.allclose(out, expected, atol=1e-7)
+
     def test_previous_action_changes_output(self) -> None:
         model = ScaleFreeActionPolicy(dim=32, hidden_dim=64, depth=1, heads=4)
         model.eval()
@@ -70,6 +82,7 @@ class TestScaleFreeActionPolicy:
 
     def test_dt_changes_output(self) -> None:
         model = ScaleFreeActionPolicy(dim=32, hidden_dim=64, depth=1, heads=4)
+        _enable_residual_output(model)
         model.eval()
         history, z_t, mask, action, _ = _make_inputs(batch_size=1, dim=32)
         with torch.no_grad():
@@ -79,6 +92,7 @@ class TestScaleFreeActionPolicy:
 
     def test_history_mask_changes_output(self) -> None:
         model = ScaleFreeActionPolicy(dim=32, hidden_dim=64, depth=1, heads=4)
+        _enable_residual_output(model)
         model.eval()
         history, z_t, mask, action, dt = _make_inputs(batch_size=1, dim=32)
         history[:, 0] = history[:, 0] + 20.0

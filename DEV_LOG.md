@@ -81,13 +81,53 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.2 — Loader emits B2 action targets additively | done | 2026-07-05 | Sports loader keeps B1 fields and adds B2 scale-free target/input fields plus separate `ActionPolicyBatch`; past input path is causal/no-future |
 | B2.3 — Direct scale-free action policy | done | 2026-07-05 | `ScaleFreeActionPolicy`: mean-pooled frozen DINO history/current + history mask + previous observed scale-free action + dt → future action sequence; no B1 predictor or future-label inputs |
 | B2.4 — Action losses, metrics, baselines | done | 2026-07-05 | `action_policy_loss` plus direction/angular, path ADE/FDE, speed-ratio, aggregate score, deterministic baselines, and best-baseline margin |
-| B2.5 — B2 trainer + local training-policy verification | pending | — | Local B2a gate before any H20 command |
-| B2.6 — B2a technical readout + USER gate | pending | — | Stop with one paste-ready B2b H20 command only if local gate passes |
+| B2.5 — B2 trainer + local training-policy verification | blocked | 2026-07-05 | Trainer implemented/tested, but local source-split gate failed: best balanced smoke margin +1.99% (< required +10%); no H20 command |
+| B2.6 — B2a technical readout + USER gate | pending | — | Stop without H20 command unless B2.5 local gate is replanned and passes |
 | B2.7 — H20 scale-free action-policy run | pending | — | USER-GATED; do not operate H20/SSH/docker |
 | B2.8 — B2b readout + escalation decision | pending | — | Decide pass vs label diagnosis vs architecture escalation before another run |
 | B2.9 — Jetson action-policy speed check | pending | — | USER-GATED after useful B2 checkpoint exists |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.5 action trainer and local gate
+
+**Status:** B2.5 trainer is implemented and tested, but the B2a local source-split gate failed.
+Do not proceed to B2.6 H20 instructions from this state.
+
+**Trainer added.** Added `scripts/train_sports_b2.py`, separate from the B1 latent trainer. It trains
+only `ScaleFreeActionPolicy`, writes B2 config snapshots, checkpoints best-by-action-margin, logs
+`train_action_metrics.jsonl` / `val_action_metrics.jsonl` / optional `source_action_metrics.jsonl`,
+and supports local smoke limits including source-balanced `--max-clips-per-source`.
+
+**Policy correction from local evidence.** The initial source smoke showed the unanchored policy had
+to relearn the strongest dumb baseline. `ScaleFreeActionPolicy` is now residual around repeated
+`last_action_scale_free`, with the residual head zero-initialized. This preserves the B2.3 input
+contract and starts exactly at the deterministic repeat-last baseline.
+
+**Local evidence.**
+- Tiny overfit after residual anchor: model score `2.9037`, best baseline `repeat_last=3.0929`,
+  margin `+0.1892` (`+6.12%`) over 16 samples.
+- Source-split smoke, sorted 120-clip cap, residual depth-2/hidden-128: best margin `+0.0086`
+  (`+0.59%`) over best baseline `repeat_last=1.4501`.
+- Source-balanced smoke (`--max-clips-per-source 4`, 10 held-out sources): best aggregate model score
+  `1.7638`, best baseline `repeat_last=1.7996`, margin `+0.0358` (`+1.99%`), below the required
+  `+10%` B2a local gate. At best epoch, 7/10 held-out sources improved, but worst source margin was
+  `-18.64%` and best source margin was `+9.01%`.
+
+**Diagnosis.** The trainer can optimize finite losses and the residual policy can slightly improve
+on inertia, but current B2 labels/model/training do not clear the local source-split action baseline.
+Repeat-last/no-turn remains too strong for the direct visual residual policy in this smoke. Per B2.5,
+stop before H20 and replan/diagnose locally rather than spending a B2b run.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_train_sports_b2.py tests/test_action_policy.py tests/test_action_metrics.py`
+  -> 23 passed.
+- Local CPU overfit: `scripts/train_sports_b2.py --overfit-tiny ... --max-steps 50` -> positive
+  tiny margin `+6.12%`.
+- Local CPU source-balanced smoke: `scripts/train_sports_b2.py ... --max-clips-per-source 4`
+  -> best margin `+1.99%`, gate failed.
 
 ---
 
