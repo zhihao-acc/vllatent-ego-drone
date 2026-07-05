@@ -943,8 +943,8 @@ latent-pretraining slice.**
 
 **B1.23 — Jetson Orin NX inference speed check (<50 ms / 20 Hz).** ⛔ SUPERSEDED 2026-07-05
 - No accepted B1 predictor checkpoint exists, so encoder+predictor benchmarking is no longer the
-  active gate. B2 will benchmark the encoder + direct scale-free action policy when B2b has a
-  candidate checkpoint.
+  active gate. B2 will benchmark the encoder + B1/WAM action checkpoint when B2b has a candidate
+  checkpoint.
 
 **B1.24 — Phase B-1 DoD verification (good latent world model).** ⛔ SUPERSEDED 2026-07-05
 - The original B1 model DoD failed. The completion record is now the B1 closure note in
@@ -953,39 +953,58 @@ latent-pretraining slice.**
 #### E. B2 USER-GATED runbook preview
 
 1. **No B1 H20 command remains active.** The previous residual latent command is historical only.
-2. **B2a local gate first.** Codex must complete B2.1-B2.5 and record local metrics before any
-   H20 command is proposed.
-3. **B2.6 USER gate.** Codex provides exactly one paste-ready B2b H20 command after local B2a
-   passes. The user approves it or asks for more diagnosis.
-4. **B2.7 USER-GATED H20 run.** User runs the approved command and pastes
-   `val_action_metrics.jsonl`, train metrics if enabled, source metrics, steps/sec, GPU memory,
-   and checkpoint/config existence.
-5. **B2.8 readout before another run.** A second paid run requires a recorded decision: pass,
-   label-quality diagnosis, attentive-pool escalation, diffusion escalation, or real-odom data.
+2. **B2a direct-policy diagnostic ran locally and failed the gate.** Do not promote the B2.5
+   direct policy to H20. Its job was to expose the target/loss problem and provide a baseline.
+3. **B2 recovery first.** Codex must repair the scale-free supervision/loss contract, add
+   past-only action/camera-motion history conditioning, and locally verify the corrected signal.
+4. **B2 target artifact is a stronger B1-architecture checkpoint.** The H20 candidate should be a
+   decoupled world-action model: latent/world rollout plus action head, judged by action metrics.
+5. **USER gate before paid training.** Codex provides exactly one paste-ready H20 command only
+   after the local B1-arch gate passes. The user runs it and pastes metrics/checkpoint evidence.
 
 #### F. B2 verification ladder preview
 
 1. Target contract: translation-scale invariance and finite zero-speed behavior.
 2. No leakage: future action labels are targets only, never model inputs.
-3. Overfit-tiny: direct action policy beats the best dumb baseline.
-4. Local source-split: B2a beats best baseline by at least 10% aggregate or stops with diagnosis.
-5. H20 B2b: one approved run beats best baseline by at least 15%, improves on a majority of held-out sources, and saves checkpoint/config/metrics.
-6. Jetson: encoder + action policy is benchmarked only after a useful B2 checkpoint exists.
+3. Direct-policy diagnostic: the trainer can learn, but source-held-out improvement must be
+   interpreted against inertia and label outliers.
+4. Supervision repair: speed-ratio outliers are clipped/masked or replaced, and the training loss
+   optimizes the same normalized path/direction objective used by evaluation.
+5. Past-history conditioning: only observed scale-free action/camera trajectory history is input;
+   future labels remain target-only.
+6. Local B1-arch gate: a decoupled latent/world predictor + action head beats the best inertia
+   baseline and the repaired direct-policy baseline before H20.
+7. H20 B2b: one approved run produces a stronger B1-architecture checkpoint, beats best baseline by
+   at least 15%, improves on a majority of held-out sources, and saves checkpoint/config/metrics.
+8. Jetson: encoder + B1-arch policy is benchmarked only after a useful B2 checkpoint exists.
 
 ---
 
-## Phase B-2: Scale-Free Future-Action Policy
+## Phase B-2: Scale-Free Control-Relevant World-Action Model
 
-> **Replanned 2026-07-05 after B1 closure.** B2 is no longer "train a waypoint head on top of a
-> successful B1 latent predictor." B1 produced useful diagnostics but no accepted predictor
-> checkpoint. B2 therefore starts from the frozen DINOv3 cache and trains a **direct scale-free
-> future-action policy**. The future action sequence is the **target**, never an input.
+> **Replanned 2026-07-05 after B1 closure and B2a diagnostic failure.** B2a direct-policy training
+> was a diagnostic probe, not the desired endpoint. It showed the trainer can learn, but the
+> source-held-out gain over inertia is weak and the speed-ratio/loss contract is unstable. The B2
+> target artifact is now a **stronger B1-architecture checkpoint**: a decoupled latent/world
+> predictor plus action head, trained and judged by corrected scale-free future-action metrics.
+> The future action sequence is the **target**, never an input. Past observed action/camera-motion
+> history is allowed as conditioning.
 
 ### B2 framing
 
 **Crux.** YouTube + MegaSaM provides useful ego-motion shape, but not trustworthy metric scale.
 Metric scale must come from onboard odometry during real drone inference. B2 must therefore learn
-scale-free motion intent from video and leave metric conversion to the controller.
+scale-free motion intent from video and leave metric conversion to the controller. The B2.5 local
+gate added a sharper diagnosis: repeat-last inertia is very strong, and the current
+`log_speed_ratio = log(future_speed / past_reference_speed)` label can explode when the past
+reference speed is tiny. The current loss then uses unnormalized cumulative path vectors while the
+metric evaluates normalized path shape. This mismatch can train on VO-relative speed spikes while
+judging on shape.
+
+**B1 connection.** A decoupled WAM remains the target architecture, but the B1 latent predictor must
+earn its place through control-relevant action improvement. Raw future-DINO cosine and absolute
+latent persistence are no longer accepted as the B1/B2 success signal. The accepted checkpoint must
+show that latent/world rollout helps a future-action head beat inertia and the direct-policy probe.
 
 **Research basis.**
 - ViNT predicts future action waypoints from current/past observations and normalizes relative
@@ -997,19 +1016,26 @@ scale-free motion intent from video and leave metric conversion to the controlle
   action quality is the gate.
 - Monocular VIO scale is not observable from YouTube RGB alone. Odom/IMU/range/GPS can resolve
   scale on the real platform; MegaSaM's Youtube scale must not be treated as metric truth.
+- Standard world-action models may be action-conditioned, but here the future action sequence is
+  the prediction target. Therefore only **past** observed scale-free motion/camera trajectory may
+  condition the model; future actions must never condition latent rollout.
 
 **B2 locked defaults.**
-- **Target representation:** per-horizon scale-free action vector:
-  `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]`. Raw MegaSaM metric magnitude is
-  diagnostics only; yaw-rate targets stay out of the locked B2.1 direct-policy contract.
+- **Supervision signal:** direction and normalized path shape are primary. Speed intent is
+  secondary and must be robust to VO/reference-speed spikes: use a reference-speed floor and
+  `valid_speed_mask`, or replace raw `log_speed_ratio` loss with a clipped/bucketed relative-speed
+  target after B2.7 tests justify the choice. Raw MegaSaM metric magnitude is diagnostics only.
 - **Inference conversion:** `speed_cmd = min(odom_reference_speed * exp(log_speed_ratio), 7.5 m/s)`.
   The controller must clamp strictly below `7.5 m/s`; B2 never learns an absolute Youtube speed.
-- **Architecture:** direct action head first. Inputs are frozen DINO history/current latents,
-  history mask, `dt_seconds`, and previous observed scale-free action from the past. Do not depend
-  on B1 predictor rollout in B2a.
+- **Architecture target:** decoupled B1-style world-action model. Inputs are frozen DINO
+  history/current latents, history mask, `dt_seconds`, and past observed scale-free
+  action/camera-motion history. The model produces a latent/world rollout and an action head
+  predicts the future action sequence from that rollout.
+- **Diagnostic baseline:** the direct residual action policy remains a local baseline/probe. It is
+  not the final B2 artifact and should not be sent to H20 unless explicitly replanned.
 - **Deferred:** PI-Prober, NoMaD-style diffusion, language cross-attention, game pretraining, and
-  auxiliary latent/world losses are not allowed until the direct scale-free policy gate is passed or
-  fails with a diagnosed reason.
+  real metric waypoint training remain deferred until the corrected B1-arch action gate passes or
+  fails with a recorded reason.
 
 ### B2 Ralph-loop protocol
 
@@ -1023,7 +1049,7 @@ Each B2 step follows the same loop:
 6. Commit with specific paths only; never `git add -A`.
 7. Stop at every USER-GATED step with paste-ready commands. Do not operate H20/SSH/docker for the user.
 
-### B2a — Training-policy gate (AUTO unless noted)
+### B2a — Local diagnosis, supervision repair, and WAM training-policy gate (AUTO unless noted)
 
 **B2.0 — Close B1 and activate B2 rules.**
 - Tier DOC / AUTO
@@ -1103,48 +1129,119 @@ Each B2 step follows the same loop:
 - **Test:** `$PY -m pytest -q tests/test_train_sports_b2.py tests/test_action_policy.py tests/test_action_metrics.py`
 - **Deps:** B2.3/B2.4. Blocks B2.6.
 
-**B2.6 — B2a technical readout and USER gate.**
+**B2.6 — B2a failure diagnosis and B1-arch replan.**
+- Tier DOC / AUTO
+- Record the B2.5 result as a successful diagnostic and a failed training gate: tiny overfit
+  `+6.12%`, source-balanced margin `+1.99%` vs required `+10%`, repeat-last as the strongest
+  baseline, speed-label outliers, and loss/metric mismatch. Reframe B2b as a stronger
+  B1-architecture checkpoint, not a direct-policy H20 run.
+- **DoD:** this plan, `.codex/ralph-rules.md`, `AGENTS.md`, and `DEV_LOG.md` agree that the next
+  AUTO step is supervision/loss repair and no H20 command is active.
+- **Test:** `rg -n "B2.7|stronger B1-architecture|loss/metric mismatch|past observed" plans/phase-b-sports-training.md .codex/ralph-rules.md DEV_LOG.md AGENTS.md`
+- **Deps:** B2.5 blocked result plus user approval to pivot. Blocks B2.7.
+
+**B2.7 — Repair scale-free supervision and align loss with metrics.**
+- Tier PURE + TORCH-DATA + TORCH / AUTO
+- Fix the action target/loss contract before more architecture work:
+  - add target diagnostics for `log_speed_ratio` percentiles, valid/moving masks, and
+    reference-speed floors;
+  - prevent tiny past reference speed from creating unbounded speed labels;
+  - make path-shape loss use the same normalized cumulative-path geometry as evaluation;
+  - reduce raw VO-relative magnitude influence through clipping, robust weighting, masking, or a
+    bucketed/coarse relative-speed target;
+  - keep all metric-scale conversion outside Youtube training.
+- **DoD:** target histograms/outlier tests show no unmasked `abs(log_speed_ratio) > 8` training
+  spikes; perfect prediction still scores near zero; loss and metric agree on normalized path
+  geometry; B1/B2 old tests still pass.
+- **Test:** `$PY -m pytest -q tests/test_scale_free_targets.py tests/test_action_metrics.py tests/test_losses.py tests/test_sports_loader.py`
+- **Deps:** B2.6. Blocks B2.8/B2.9.
+
+**B2.8 — Past-only action/camera-history conditioning.**
+- Tier TORCH-DATA + TORCH / AUTO
+- Extend the B2 batch contract so models can condition on observed motion history, not just a
+  single previous action. Add fields such as `action_history_scale_free`, `action_history_mask`,
+  and a cumulative `camera_history_path_scale_free` in the same local scale-free frame. These are
+  computed only from observed frames before the prediction anchor.
+- **Leakage rule:** changing any future target delta must not change any history-conditioning
+  tensor. Future action labels remain target-only.
+- **DoD:** loader/collate/model tests cover shapes, masks, finite behavior, and no leakage from
+  future labels into past action/camera-history inputs.
+- **Test:** `$PY -m pytest -q tests/test_sports_loader.py tests/test_collate.py tests/test_action_policy.py`
+- **Deps:** B2.7. Blocks B2.9/B2.10.
+
+**B2.9 — Re-run repaired direct-policy diagnostic.**
+- Tier TORCH / AUTO
+- Re-run the direct residual policy as a diagnostic baseline with the repaired target/loss and
+  past-history inputs. This validates the supervision signal before adding a learned latent/world
+  bottleneck.
+- **DoD:** tiny overfit beats inertia; local source-balanced smoke either beats best dumb baseline
+  by at least **10%** aggregate or records a source/label diagnosis. Passing B2.9 does not by
+  itself authorize H20; it authorizes the B1-arch model step.
+- **Test:** `$PY -m pytest -q tests/test_train_sports_b2.py tests/test_action_policy.py tests/test_action_metrics.py`
+- **Deps:** B2.7/B2.8. Blocks B2.10.
+
+**B2.10 — Control-relevant B1/WAM architecture.**
+- Tier TORCH / AUTO
+- Add a decoupled world-action model that resembles the intended B1 architecture:
+  frozen DINO history/current latents plus past scale-free action/camera history feed a
+  latent/world predictor, and an action head predicts the future scale-free action sequence from
+  the predicted/world tokens. The latent predictor may be residual/zero-initialized around a
+  persistence path, but its acceptance is action-margin improvement, not raw DINO cosine.
+- **No leakage:** the model may condition on past observed motion only. It must not accept future
+  action labels or future target latents as inputs.
+- **DoD:** forward shape, deterministic eval, gradient flow through predictor and action head,
+  optional diagnostic latent loss is off by default or clearly auxiliary, and direct-policy tests
+  remain green.
+- **Test:** `$PY -m pytest -q tests/test_world_action_model.py tests/test_action_policy.py tests/test_heads.py`
+- **Deps:** B2.9. Blocks B2.11.
+
+**B2.11 — Local B1-arch training-policy verification.**
+- Tier TORCH / AUTO
+- Train/evaluate the B1-arch WAM locally on source splits. Compare against repeat-last/no-turn/
+  linear baselines and the repaired direct-policy diagnostic checkpoint. Save config snapshots,
+  `val_action_metrics.jsonl`, `train_action_metrics.jsonl` if enabled, and source metrics.
+- **B2 local WAM DoD:** target/loss diagnostics pass; tiny overfit beats inertia; local
+  source-balanced smoke beats the best dumb baseline by at least **10%** aggregate and improves on
+  the repaired direct-policy score or records a precise blocker. Majority-source improvement is
+  required before H20.
+- **Test:** `$PY -m pytest -q tests/test_train_sports_b2.py tests/test_world_action_model.py tests/test_action_metrics.py`
+- **Deps:** B2.10. Blocks B2.12.
+
+**B2.12 — B1-arch H20 USER gate.**
 - Tier DOC / **USER-GATED**
-- Summarize B2a local evidence in `DEV_LOG.md`: target invariance, leakage, tiny overfit, local
-  source-split metrics, best baseline, and per-source failure modes. If the local gate fails, do
-  not propose H20; replan labels/metrics first.
-- **DoD:** user approves exactly one B2b H20 command block, or asks for another B2a diagnosis.
-- **Test:** docs-only plus any failed/passed command outputs recorded.
-- **Deps:** B2.5. Blocks B2b.
+- Summarize local WAM evidence in `DEV_LOG.md`: target diagnostics, outlier handling,
+  loss/metric alignment, direct-policy comparison, source-balanced metrics, and failure modes.
+  Provide exactly one paste-ready H20 command only if B2.11 passes.
+- **DoD:** user approves one H20 command block, or asks for another local diagnosis.
+- **Deps:** B2.11. Blocks B2.13.
 
-### B2b — Stronger checkpoint (USER-GATED H20)
+### B2b — Stronger B1-architecture checkpoint (USER-GATED H20)
 
-**B2.7 — H20 scale-free action-policy run.**
+**B2.13 — H20 scale-free B1-arch WAM run.**
 - Tier TORCH / **USER-GATED** (H20)
-- User runs the approved B2 command on the existing 919-file cache. Do not operate H20/SSH/docker
-  from Codex. Validation stays source-split. Save `ckpt_best.pt`, config snapshot, metrics JSONL,
-  and source metrics under `runs/`.
-- **B2b DoD:** one H20 run beats the best baseline by at least **15%** aggregate, improves on a
-  majority of held-out sources, saves checkpoint/config/metrics, and produces prediction samples
-  showing sane direction/yaw/relative-speed behavior. No metric flight claim.
+- User runs the approved command on the existing 919-file cache. Do not operate H20/SSH/docker
+  from Codex. Validation stays source-split. Save predictor/action-head checkpoint, config
+  snapshot, metrics JSONL, source metrics, and prediction samples under `runs/`.
+- **B2b DoD:** one H20 run produces a stronger B1-architecture checkpoint that beats the best
+  inertia baseline by at least **15%** aggregate, beats the repaired direct-policy diagnostic
+  score, improves on a majority of held-out sources, saves checkpoint/config/metrics, and produces
+  sane direction/path/relative-speed predictions. No metric flight claim.
 - **Paste-back requested:** tail of `val_action_metrics.jsonl`, tail of `train_action_metrics.jsonl`
-  if enabled, source metrics, steps/sec, GPU memory, and checkpoint existence.
-- **Deps:** B2.6. Blocks B2.8.
+  if enabled, source metrics, steps/sec, GPU memory, checkpoint/config existence, and several
+  prediction-vs-baseline samples.
+- **Deps:** B2.12. Blocks B2.14.
 
-**B2.8 — B2b readout and escalation decision.**
-- Tier DOC / **USER-GATED**
+**B2.14 — B2b readout and Jetson decision.**
+- Tier DOC + RESEARCH / **USER-GATED**
 - Parse pasted B2b metrics and decide:
-  - pass → move to B2.9 Jetson/action-policy speed check;
-  - label failure → inspect MegaSaM direction/yaw quality and source filtering;
-  - model underfit → try attentive pooling before PI-Prober;
-  - multimodal averaging → consider NoMaD-style diffusion;
-  - scale/speed limitation → defer to real odom data.
+  - pass -> Jetson encoder + B1-arch WAM speed benchmark;
+  - label failure -> inspect MegaSaM direction/yaw/scale-free target quality and source filtering;
+  - model underfit -> tune latent predictor/action-head capacity before PI-Prober;
+  - multimodal averaging -> consider NoMaD-style diffusion only after the deterministic WAM limit
+    is documented;
+  - scale/speed limitation -> defer metric-speed learning to real odom data.
 - **DoD:** decision recorded in plan/DEV_LOG before another paid training attempt.
-- **Deps:** B2.7. Blocks B2.9 or replanned B2a.
-
-**B2.9 — Jetson action-policy speed check.**
-- Tier RESEARCH / **USER-GATED** (Orin NX)
-- Benchmark frozen DINOv3 encoder + direct action policy end-to-end. The B2 speed target inherits
-  the original onboard constraint: <50 ms / 20 Hz if possible, otherwise conditional smaller policy
-  or encoder distillation is opened.
-- **DoD:** written benchmark; user-pasted latency; decision whether B2 checkpoint is feasible for
-  Phase-D closed-loop experiments.
-- **Deps:** B2.8 pass.
+- **Deps:** B2.13.
 
 ### B3 preview — Metric scale and deployment data
 
@@ -1152,7 +1249,7 @@ Each B2 step follows the same loop:
 - Custom GoPro/drone odom collection becomes the first metric waypoint dataset; Youtube remains
   scale-free pretraining/shape supervision.
 - Language cross-attention, scheduled sampling, PI-Prober, and controller integration move here
-  only after the B2 direct action policy has a validated baseline.
+  only after the B2 B1-architecture WAM has a validated baseline.
 
 ---
 
@@ -1164,24 +1261,30 @@ DONE — B1 DATA / INFRA / DIAGNOSTICS:
   B1.22e closed diagnostic-complete / model-incomplete
   B1.23/B1.24 superseded
 
-ACTIVE — B2 SCALE-FREE FUTURE-ACTION POLICY:
+ACTIVE — B2 SCALE-FREE CONTROL-RELEVANT WAM:
   B2.0  (close B1 + activate B2 rules) ........ user approval
     └─> B2.1  (pure scale-free target contract)
           └─> B2.2  (loader + collate additive B2 action fields)
                 ├─> B2.3  (direct scale-free action policy)
                 └─> B2.4  (action losses, metrics, baselines)
                       └─> B2.5  (B2 trainer + local training-policy verification)
-                            └─> B2.6  (USER gate: approve one B2b H20 command)
-                                  └─> B2.7  (USER-GATED H20 action-policy run)
-                                        └─> B2.8  (USER gate: readout + escalation decision)
-                                              └─> B2.9  (USER-GATED Jetson action-policy speed check)
+                            └─> B2.6  (diagnose failed direct-policy gate + replan)
+                                  └─> B2.7  (repair supervision/loss contract)
+                                        └─> B2.8  (past-only action/camera-history conditioning)
+                                              └─> B2.9  (rerun repaired direct-policy diagnostic)
+                                                    └─> B2.10 (B1/WAM latent predictor + action head)
+                                                          └─> B2.11 (local B1-arch training gate)
+                                                                └─> B2.12 (USER gate: approve one H20 command)
+                                                                      └─> B2.13 (USER-GATED H20 B1-arch run)
+                                                                            └─> B2.14 (USER gate: readout + Jetson decision)
 ```
 
-**Critical path (B2):** B2.0 → B2.1 → B2.2 → B2.3/B2.4 → B2.5 → B2.6 USER gate. No H20 run
-is allowed before B2.5 passes the local training-policy gate.
+**Critical path (B2):** B2.0 → B2.1 → B2.2 → B2.3/B2.4 → B2.5 diagnostic failure →
+B2.6 replan → B2.7 → B2.8 → B2.9 → B2.10 → B2.11 → B2.12 USER gate. No H20 run is allowed
+before the B1-architecture local training-policy gate passes.
 
 **Highest-risk invariant:** future action labels are targets only. They must never be provided to
-the model as conditioning inputs. The only action-like input in B2a is previous observed motion.
+the model as conditioning inputs. Action/camera-motion history inputs must be past-observed only.
 
 ---
 

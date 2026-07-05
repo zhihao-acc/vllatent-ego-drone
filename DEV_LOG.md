@@ -82,19 +82,57 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.3 — Direct scale-free action policy | done | 2026-07-05 | `ScaleFreeActionPolicy`: mean-pooled frozen DINO history/current + history mask + previous observed scale-free action + dt → future action sequence; no B1 predictor or future-label inputs |
 | B2.4 — Action losses, metrics, baselines | done | 2026-07-05 | `action_policy_loss` plus direction/angular, path ADE/FDE, speed-ratio, aggregate score, deterministic baselines, and best-baseline margin |
 | B2.5 — B2 trainer + local training-policy verification | blocked | 2026-07-05 | Trainer implemented/tested, but local source-split gate failed: best balanced smoke margin +1.99% (< required +10%); no H20 command |
-| B2.6 — B2a technical readout + USER gate | pending | — | Stop without H20 command unless B2.5 local gate is replanned and passes |
-| B2.7 — H20 scale-free action-policy run | pending | — | USER-GATED; do not operate H20/SSH/docker |
-| B2.8 — B2b readout + escalation decision | pending | — | Decide pass vs label diagnosis vs architecture escalation before another run |
-| B2.9 — Jetson action-policy speed check | pending | — | USER-GATED after useful B2 checkpoint exists |
+| B2.6 — B2a diagnosis + B1-arch replan | done | 2026-07-05 | Direct-policy B2a is diagnostic only; next target is corrected scale-free supervision plus stronger B1/WAM checkpoint |
+| B2.7 — Repair supervision/loss contract | pending | — | Fix speed-ratio outliers/reference-speed masking and align training loss with normalized path metrics |
+| B2.8 — Past-only action/camera-history conditioning | pending | — | Add causal scale-free action/camera trajectory history inputs; future labels remain target-only |
+| B2.9 — Re-run repaired direct-policy diagnostic | pending | — | Validate corrected signal locally; direct policy remains baseline/probe, not final H20 artifact |
+| B2.10 — Control-relevant B1/WAM architecture | pending | — | Latent/world predictor + action head; accepted by action-margin improvement, not raw DINO cosine |
+| B2.11 — Local B1-arch training-policy verification | pending | — | Must beat inertia and repaired direct-policy baseline locally before H20 |
+| B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
+| B2.13 — H20 scale-free B1-arch WAM run | pending | — | USER-GATED; target artifact is stronger B1-architecture checkpoint |
+| B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.6 diagnosis-driven replan to B1-architecture WAM
+
+**Status:** B2.6 docs/rules replan is done. Next AUTO step is B2.7 supervision/loss repair.
+
+**User correction.** The intended B2 DoD signal is not "a single direct policy model." The target
+artifact is a stronger B1-architecture checkpoint: a decoupled latent/world predictor plus action
+head, accepted by future-action quality and baseline margin.
+
+**Diagnosis carried forward from B2.5.**
+- The direct residual policy was useful as a probe, but failed the source-held-out gate: best
+  balanced smoke margin `+1.99%` vs required `+10%`.
+- Repeat-last inertia is the strongest baseline, so any accepted world model must add
+  non-inertial control information beyond past motion.
+- Current `log_speed_ratio` labels can explode when past observed reference speed is tiny, and the
+  training loss uses unnormalized cumulative path vectors while evaluation normalizes path shape.
+  This target/loss mismatch must be fixed before H20 or architecture-capacity escalation.
+
+**Plan update.** B2.7 repairs scale-free supervision and loss alignment. B2.8 adds past-only
+scale-free action/camera-history conditioning. B2.9 reruns the repaired direct policy only as a
+diagnostic baseline. B2.10-B2.11 then build and locally verify the control-relevant B1/WAM
+architecture. B2.12 is the next USER gate; no H20 command is active before then.
+
+**Verified.**
+- `rg -n "B2.7|stronger B1-architecture|loss/metric mismatch|past observed" plans/phase-b-sports-training.md .codex/ralph-rules.md DEV_LOG.md AGENTS.md`
+  -> expected B2.6/B2.7/B1-arch hits.
+- Stale active-gate scan for the old B2.6/H20 direct-policy phrases
+  -> no stale active-gate hits.
+- `git diff --check -- AGENTS.md .codex/ralph-rules.md DEV_LOG.md plans/phase-b-sports-training.md`
+  -> pass.
 
 ---
 
 ## 2026-07-05 — B2.5 action trainer and local gate
 
 **Status:** B2.5 trainer is implemented and tested, but the B2a local source-split gate failed.
-Do not proceed to B2.6 H20 instructions from this state.
+Do not proceed to the old B2.6 H20 instructions from this state; this was superseded by the B2.6
+diagnosis/replan entry above.
 
 **Trainer added.** Added `scripts/train_sports_b2.py`, separate from the B1 latent trainer. It trains
 only `ScaleFreeActionPolicy`, writes B2 config snapshots, checkpoints best-by-action-margin, logs
@@ -268,7 +306,8 @@ clamped below `7.5 m/s`.
 
 **Plan/rules changes.**
 - `plans/phase-b-sports-training.md` now closes B1, supersedes B1.23/B1.24, and defines ordered
-  B2.0-B2.9 steps with tier, gate, DoD, tests, and dependencies.
+  B2.0-B2.9 diagnostic steps with tier, gate, DoD, tests, and dependencies. Later B2.6 replan
+  entry above extends the active queue through B2.14.
 - `AGENTS.md` now names B2 as the active repo guidance.
 - `.codex/ralph-rules.md` now points to B2 and blocks further B1 latent H20 reruns.
 - B2a DoD: local scale-free training-policy gate, including scale-invariance tests, no future-action

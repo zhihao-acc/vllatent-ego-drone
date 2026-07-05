@@ -9,13 +9,15 @@ Read this before working in this repo. It is the Codex-facing companion to
 `vllatent` is a compact world-action model for a sports-following drone
 (skiing primary). Phase B-1 is closed as diagnostic-complete / model-incomplete:
 raw future-DINO latent prediction did not beat the persistence baseline on the
-real held-out action-video cache. The active Phase B-2 deliverable is a
-**scale-free future-action policy**:
+real held-out action-video cache. B2.1-B2.5 built a direct scale-free action
+policy as a diagnostic probe; the local source-split gate failed, exposing a
+speed-label/loss mismatch and a strong repeat-last inertia baseline. The active
+Phase B-2 deliverable is now a **scale-free, control-relevant B1/WAM checkpoint**:
 
 ```text
 RGB 224^2 -> frozen cached DINOv3 ViT-B/16 -> z_t / history latents
-                                      + previous observed motion + dt
-                            [direct scale-free action policy]
+                                      + past scale-free action/camera history + dt
+                            [latent/world predictor + action head]
                                       -> future action sequence
 ```
 
@@ -39,9 +41,15 @@ Repo state is authoritative for code; vault notes are authoritative for why.
 - Frozen DINOv3 ViT-B/16, D=768, cached fp16 latents.
 - Predict future scale-free action sequence from observation/history and previous
   observed motion. Do not condition on future actions.
-- B-2a starts with a direct action head/policy. Do not add PI-Prober, diffusion,
-  language cross-attention, game data, or auxiliary latent/world losses before
-  the direct-policy local gate passes or fails with a recorded diagnosis.
+- B2.5 direct-policy local gate failed. Do not proceed to H20 from that result.
+  The next AUTO work is B2.7 supervision/loss repair, then B2.8 past-only
+  action/camera-history conditioning, then a B1/WAM-style local gate.
+- The target H20 artifact is a stronger B1-architecture checkpoint: latent/world
+  predictor plus action head, accepted by action-margin improvement, not raw
+  DINO-cosine persistence.
+- Do not add PI-Prober, diffusion, language cross-attention, game data, or real
+  metric waypoint training before the corrected B1/WAM local gate passes or
+  fails with a recorded diagnosis.
 - Scene split by **source video**, not sub-clip (`stem.split("_")[0]`).
 - Youtube/MegaSaM translation magnitude is diagnostics only, not metric truth.
 - Real metric scale is supplied by onboard odometry/controller at inference.
