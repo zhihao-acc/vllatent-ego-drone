@@ -79,7 +79,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.0 — Close B1 and activate B2 Ralph loop | done | 2026-07-05 | Plan/rules/log/AGENTS updated; next active implementation step is B2.1 |
 | B2.1 — Pure scale-free action target contract | done | 2026-07-05 | `vllatent/scale_free_targets.py`: locked `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]` target, pure numpy, scale-invariant, finite/masked degenerates, target-only API |
 | B2.2 — Loader emits B2 action targets additively | done | 2026-07-05 | Sports loader keeps B1 fields and adds B2 scale-free target/input fields plus separate `ActionPolicyBatch`; past input path is causal/no-future |
-| B2.3 — Direct scale-free action policy | pending | — | Frozen DINO history/current latents + previous observed motion → future action sequence |
+| B2.3 — Direct scale-free action policy | done | 2026-07-05 | `ScaleFreeActionPolicy`: mean-pooled frozen DINO history/current + history mask + previous observed scale-free action + dt → future action sequence; no B1 predictor or future-label inputs |
 | B2.4 — Action losses, metrics, baselines | pending | — | Direction/yaw/speed/path-shape metrics and baseline margins |
 | B2.5 — B2 trainer + local training-policy verification | pending | — | Local B2a gate before any H20 command |
 | B2.6 — B2a technical readout + USER gate | pending | — | Stop with one paste-ready B2b H20 command only if local gate passes |
@@ -88,6 +88,29 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.9 — Jetson action-policy speed check | pending | — | USER-GATED after useful B2 checkpoint exists |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.3 direct scale-free action policy
+
+**Status:** B2.3 is done. Next AUTO step is B2.4 action losses, baselines, and metrics.
+
+**Policy added.** Added `vllatent/model/action_policy.py` with `ScaleFreeActionPolicy`. It mean-pools
+cached DINO patch tokens per frame, encodes history/current frame context with a small Transformer,
+then combines context with previous observed `last_action_scale_free`, per-horizon `dt_seconds`, and
+horizon embeddings to predict `(B, T, SCALE_FREE_ACTION_DIM)`.
+
+**No leakage / no B1 dependency.** The policy forward signature accepts only `history_latents`,
+`z_t`, `history_mask`, `last_action_scale_free`, and `dt_seconds`. Tests assert it has no future
+target/label or `odom_reference_speed` argument and does not import/call the B1 `LatentPredictor`.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_action_policy.py tests/test_heads.py`
+  -> 15 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check vllatent/model/action_policy.py tests/test_action_policy.py`
+  -> all checks passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile vllatent/model/action_policy.py tests/test_action_policy.py`
+  -> pass.
 
 ---
 
