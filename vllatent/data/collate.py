@@ -42,6 +42,7 @@ class ActionPolicyBatch(NamedTuple):
     history_mask: torch.Tensor                # (B, H) bool
     target_actions_scale_free: torch.Tensor   # (B, T, 4) f32
     target_actions_moving_mask: torch.Tensor  # (B, T) bool
+    target_actions_speed_mask: torch.Tensor   # (B, T) bool
     last_action_scale_free: torch.Tensor      # (B, 4) f32
     dt_seconds: torch.Tensor                  # (B, T) f32
     odom_reference_speed: torch.Tensor        # (B,) f32, diagnostic/reference only
@@ -90,6 +91,7 @@ def collate_action_policy_batch(samples: list[SportsSample]) -> ActionPolicyBatc
     history_mask = torch.from_numpy(np.stack([s.history_mask for s in samples]))
     target_actions = torch.from_numpy(np.stack([s.target_actions_scale_free for s in samples]))
     target_mask = torch.from_numpy(np.stack([s.target_actions_moving_mask for s in samples]))
+    target_speed_mask = torch.from_numpy(np.stack([s.target_actions_speed_mask for s in samples]))
     last_action = torch.from_numpy(np.stack([s.last_action_scale_free for s in samples]))
     dt_sec = torch.from_numpy(np.stack([s.dt_seconds for s in samples]))
     vo_conf = torch.from_numpy(np.stack([s.vo_confidence for s in samples]))
@@ -104,6 +106,7 @@ def collate_action_policy_batch(samples: list[SportsSample]) -> ActionPolicyBatc
         history_mask=history_mask,
         target_actions_scale_free=target_actions,
         target_actions_moving_mask=target_mask,
+        target_actions_speed_mask=target_speed_mask,
         last_action_scale_free=last_action,
         dt_seconds=dt_sec,
         odom_reference_speed=odom_ref,

@@ -75,6 +75,7 @@ def _to_device(batch: ActionPolicyBatch, device: str) -> ActionPolicyBatch:
         history_mask=batch.history_mask.to(device),
         target_actions_scale_free=batch.target_actions_scale_free.to(device),
         target_actions_moving_mask=batch.target_actions_moving_mask.to(device),
+        target_actions_speed_mask=batch.target_actions_speed_mask.to(device),
         last_action_scale_free=batch.last_action_scale_free.to(device),
         dt_seconds=batch.dt_seconds.to(device),
         odom_reference_speed=batch.odom_reference_speed.to(device),
@@ -119,6 +120,7 @@ def _flatten_scorecard(scorecard: ActionScorecard) -> dict[str, Any]:
         "action_margin_frac": scorecard.margin / max(scorecard.best_baseline_score, 1e-6),
         "n_samples": scorecard.model.n_samples,
         "n_valid": scorecard.model.n_valid,
+        "n_speed_valid": scorecard.model.n_speed_valid,
     }
     for name, metrics in scorecard.baselines.items():
         out[f"baseline_{name}_score"] = metrics.aggregate_score
@@ -136,6 +138,7 @@ def evaluate_action_policy(
     preds = []
     targets = []
     masks = []
+    speed_masks = []
     last_actions = []
     weights = []
 
@@ -156,6 +159,7 @@ def evaluate_action_policy(
                 preds.append(pred.float().cpu())
                 targets.append(batch.target_actions_scale_free.float().cpu())
                 masks.append(batch.target_actions_moving_mask.bool().cpu())
+                speed_masks.append(batch.target_actions_speed_mask.bool().cpu())
                 last_actions.append(batch.last_action_scale_free.float().cpu())
                 weights.append(batch.sample_weight.float().cpu())
     finally:
@@ -171,6 +175,7 @@ def evaluate_action_policy(
         moving_mask=torch.cat(masks, dim=0),
         last_action_scale_free=torch.cat(last_actions, dim=0),
         sample_weight=torch.cat(weights, dim=0),
+        speed_mask=torch.cat(speed_masks, dim=0),
     )
     return _flatten_scorecard(scorecard)
 
@@ -195,6 +200,7 @@ def _train_batch(
         pred.float(),
         batch.target_actions_scale_free.float(),
         batch.target_actions_moving_mask,
+        speed_mask=batch.target_actions_speed_mask,
         sample_weight=batch.sample_weight,
         direction_weight=cfg.direction_weight,
         speed_weight=cfg.speed_weight,

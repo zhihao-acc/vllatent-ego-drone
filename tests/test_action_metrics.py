@@ -104,3 +104,17 @@ class TestActionMetrics:
         metrics = compute_action_metrics(pred, target, mask)
         assert metrics.aggregate_score == pytest.approx(0.0, abs=1e-6)
         assert metrics.n_valid == 1
+        assert metrics.n_speed_valid == 1
+
+    def test_speed_mask_ignores_invalid_speed_mae_only(self) -> None:
+        target = _target(batch_size=1)
+        pred = target.clone()
+        pred[..., 3] = 8.0
+        mask = _mask(batch_size=1)
+        speed_mask = torch.zeros(1, HORIZON, dtype=torch.bool)
+
+        metrics = compute_action_metrics(pred, target, mask, speed_mask=speed_mask)
+
+        assert metrics.speed_ratio_mae == pytest.approx(0.0, abs=1e-6)
+        assert metrics.n_valid == HORIZON
+        assert metrics.n_speed_valid == 0

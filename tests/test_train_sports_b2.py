@@ -59,6 +59,7 @@ def _manual_batch(target: torch.Tensor, last_action: torch.Tensor) -> ActionPoli
         history_mask=torch.ones(batch_size, HISTORY, dtype=torch.bool),
         target_actions_scale_free=target,
         target_actions_moving_mask=torch.ones(batch_size, HORIZON, dtype=torch.bool),
+        target_actions_speed_mask=torch.ones(batch_size, HORIZON, dtype=torch.bool),
         last_action_scale_free=last_action,
         dt_seconds=torch.full((batch_size, HORIZON), 0.2),
         odom_reference_speed=torch.ones(batch_size),

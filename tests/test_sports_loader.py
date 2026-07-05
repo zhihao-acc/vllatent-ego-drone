@@ -186,6 +186,8 @@ class TestSportsTrainingDataset:
         assert sample.target_actions_scale_free.dtype == np.float32
         assert sample.target_actions_moving_mask.shape == (HORIZON,)
         assert sample.target_actions_moving_mask.dtype == MASK_DTYPE
+        assert sample.target_actions_speed_mask.shape == (HORIZON,)
+        assert sample.target_actions_speed_mask.dtype == MASK_DTYPE
         assert sample.last_action_scale_free.shape == (SCALE_FREE_ACTION_DIM,)
         assert sample.last_action_scale_free.dtype == np.float32
         assert isinstance(sample.odom_reference_speed, float)
@@ -328,9 +330,20 @@ class TestSportsTrainingDataset:
         assert np.all(np.isfinite(sample.target_actions_scale_free))
         assert np.all(np.isfinite(sample.last_action_scale_free))
         assert np.isfinite(sample.odom_reference_speed)
+        assert not np.any(np.abs(sample.target_actions_scale_free[sample.target_actions_speed_mask, 3]) > 8.0)
         moving = sample.target_actions_moving_mask
         unit_norms = np.linalg.norm(sample.target_actions_scale_free[moving, :3], axis=1)
         np.testing.assert_allclose(unit_norms, np.ones_like(unit_norms), atol=1e-6)
+
+    def test_tiny_past_reference_speed_masks_clipped_future_speed(self, tmp_path: Path) -> None:
+        n_frames = 20
+        deltas = np.tile(np.array([1e-7, 0.0, 0.0, 0.0], dtype=np.float32), (n_frames - 1, 1))
+        deltas[5:5 + HORIZON] = np.array([1.0, 0.0, 0.0, 0.0], dtype=np.float32)
+        _make_clip_npz(tmp_path / "clip01.npz", n_frames=n_frames, deltas_override=deltas)
+        sample = SportsTrainingDataset(tmp_path, augment=False)[5]
+        assert np.any(sample.target_actions_moving_mask)
+        assert not np.any(sample.target_actions_speed_mask)
+        assert np.all(np.abs(sample.target_actions_scale_free[:, 3]) <= 8.0)
 
     def test_future_delta_changes_do_not_change_b2_past_inputs(self, tmp_path: Path) -> None:
         """B2 previous-action inputs must be computed from observed past motion only."""

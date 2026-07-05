@@ -83,7 +83,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.4 — Action losses, metrics, baselines | done | 2026-07-05 | `action_policy_loss` plus direction/angular, path ADE/FDE, speed-ratio, aggregate score, deterministic baselines, and best-baseline margin |
 | B2.5 — B2 trainer + local training-policy verification | blocked | 2026-07-05 | Trainer implemented/tested, but local source-split gate failed: best balanced smoke margin +1.99% (< required +10%); no H20 command |
 | B2.6 — B2a diagnosis + B1-arch replan | done | 2026-07-05 | Direct-policy B2a is diagnostic only; next target is corrected scale-free supervision plus stronger B1/WAM checkpoint |
-| B2.7 — Repair supervision/loss contract | pending | — | Fix speed-ratio outliers/reference-speed masking and align training loss with normalized path metrics |
+| B2.7 — Repair supervision/loss contract | done | 2026-07-05 | Speed-ratio targets are clipped/masked, diagnostics added, loss path term now uses normalized path geometry; local cache has 0 unmasked speed outliers |
 | B2.8 — Past-only action/camera-history conditioning | pending | — | Add causal scale-free action/camera trajectory history inputs; future labels remain target-only |
 | B2.9 — Re-run repaired direct-policy diagnostic | pending | — | Validate corrected signal locally; direct policy remains baseline/probe, not final H20 artifact |
 | B2.10 — Control-relevant B1/WAM architecture | pending | — | Latent/world predictor + action head; accepted by action-margin improvement, not raw DINO cosine |
@@ -93,6 +93,41 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.7 supervision/loss repair
+
+**Status:** B2.7 is done. Next AUTO step is B2.8 past-only action/camera-history conditioning.
+
+**Target repair.** `ScaleFreeActionTargets` now includes `speed_valid_mask` in addition to
+`moving_mask`. `log_speed_ratio` labels are clipped to `[-8, 8]`; clipped speed labels remain usable
+for direction/path shape but are masked out of speed-ratio supervision. Added pure
+`scale_free_action_diagnostics()` for log-speed percentiles, moving/speed-valid fractions, and
+unmasked outlier counts.
+
+**Loader/collate/trainer plumbing.** `SportsSample` and `ActionPolicyBatch` now carry
+`target_actions_speed_mask`. The direct-policy trainer passes that mask into both loss and scoring;
+it is target supervision metadata only, not a model input.
+
+**Loss/metric alignment.** `action_policy_loss()` now uses normalized cumulative path geometry
+matching `compute_action_metrics()` instead of raw cumulative VO-relative vectors. Speed loss uses
+the speed-valid mask; direction/path losses still use the moving mask.
+
+**Local target diagnostic.** On the B2.5 source-balanced local split (`--max-clips-per-source 4`),
+there are `2948` moving target steps and `2800` valid speed-ratio steps. `148` speed steps were
+clipped/invalidated, and `unmasked_log_speed_outliers=0`. Valid speed-label percentiles were:
+min `-3.7819`, p50 `0.0054`, p95 `0.5587`, p99 `1.2903`, max `3.1825`.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_scale_free_targets.py tests/test_action_metrics.py tests/test_losses.py tests/test_sports_loader.py`
+  -> 90 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_collate.py tests/test_train_sports_b2.py tests/test_action_policy.py`
+  -> 25 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check ...`
+  -> all checks passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile ...`
+  -> pass.
 
 ---
 

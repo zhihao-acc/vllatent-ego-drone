@@ -83,6 +83,7 @@ class SportsSample:
     last_action: np.ndarray      # (4,) f32 — most recent known action (delta t-1→t), zeros at clip start
     target_actions_scale_free: np.ndarray       # (T, 4) f32 — B2 target-only future actions
     target_actions_moving_mask: np.ndarray      # (T,) bool — valid translation direction targets
+    target_actions_speed_mask: np.ndarray       # (T,) bool — valid unclipped speed-ratio targets
     last_action_scale_free: np.ndarray          # (4,) f32 — B2 previous observed action input
     odom_reference_speed: float                 # arbitrary-scale observed speed reference for diagnostics
     vo_confidence: np.ndarray    # (T,) f32 — per-step VO confidence
@@ -391,6 +392,7 @@ class SportsTrainingDataset:
             last_action=last_act,
             target_actions_scale_free=target_actions.actions,
             target_actions_moving_mask=target_actions.moving_mask,
+            target_actions_speed_mask=target_actions.speed_valid_mask,
             last_action_scale_free=last_action_scale_free,
             odom_reference_speed=float(odom_reference_speed),
             vo_confidence=vo_conf,

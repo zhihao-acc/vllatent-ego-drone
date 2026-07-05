@@ -113,6 +113,7 @@ class TestCollate:
         assert batch.history_mask.shape == (B, HISTORY)
         assert batch.target_actions_scale_free.shape == (B, HORIZON, SCALE_FREE_ACTION_DIM)
         assert batch.target_actions_moving_mask.shape == (B, HORIZON)
+        assert batch.target_actions_speed_mask.shape == (B, HORIZON)
         assert batch.last_action_scale_free.shape == (B, SCALE_FREE_ACTION_DIM)
         assert batch.dt_seconds.shape == (B, HORIZON)
         assert batch.odom_reference_speed.shape == (B,)
@@ -130,6 +131,7 @@ class TestCollate:
         assert batch.history_mask.dtype == torch.bool
         assert batch.target_actions_scale_free.dtype == torch.float32
         assert batch.target_actions_moving_mask.dtype == torch.bool
+        assert batch.target_actions_speed_mask.dtype == torch.bool
         assert batch.last_action_scale_free.dtype == torch.float32
         assert batch.dt_seconds.dtype == torch.float32
         assert batch.odom_reference_speed.dtype == torch.float32

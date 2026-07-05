@@ -28,6 +28,7 @@ SCALE_FREE_ACTION_FIELDS: Final[tuple[str, ...]] = (
     "log_speed_ratio",
 )
 SCALE_FREE_SPEED_EPS: Final[float] = 1e-6
+SCALE_FREE_LOG_SPEED_CLAMP: Final[float] = 8.0
 DEFAULT_FALLBACK_UNIT_XYZ: Final[tuple[float, float, float]] = (1.0, 0.0, 0.0)
 
 CONTROLLER_MAX_SPEED_MPS: Final[float] = 7.5
@@ -45,6 +46,7 @@ class ScaleFreeActionTargets:
 
     actions: np.ndarray       # (..., 4) f32, ordered by SCALE_FREE_ACTION_FIELDS
     moving_mask: np.ndarray   # (...) bool, True where translation direction is defined
+    speed_valid_mask: np.ndarray   # (...) bool, True where speed-ratio supervision is not clipped
 
     def __post_init__(self) -> None:
         if not isinstance(self.actions, np.ndarray):
@@ -65,6 +67,35 @@ class ScaleFreeActionTargets:
             raise ValueError(
                 f"moving_mask: expected shape {self.actions.shape[:-1]}, got {self.moving_mask.shape}"
             )
+        if not isinstance(self.speed_valid_mask, np.ndarray):
+            raise TypeError(
+                f"speed_valid_mask: expected np.ndarray, got {type(self.speed_valid_mask).__name__}"
+            )
+        if self.speed_valid_mask.dtype != np.dtype(np.bool_):
+            raise ValueError(f"speed_valid_mask: expected dtype bool, got {self.speed_valid_mask.dtype}")
+        if self.speed_valid_mask.shape != self.actions.shape[:-1]:
+            raise ValueError(
+                f"speed_valid_mask: expected shape {self.actions.shape[:-1]}, "
+                f"got {self.speed_valid_mask.shape}"
+            )
+
+
+@dataclass(frozen=True)
+class ScaleFreeActionDiagnostics:
+    """Small pure summary for B2 target-health checks."""
+
+    count: int
+    moving_count: int
+    speed_valid_count: int
+    moving_fraction: float
+    speed_valid_fraction: float
+    log_speed_min: float
+    log_speed_p50: float
+    log_speed_p95: float
+    log_speed_p99: float
+    log_speed_max: float
+    max_abs_log_speed: float
+    unmasked_log_speed_outliers: int
 
 
 def _as_deltas(deltas: np.ndarray) -> np.ndarray:
@@ -147,6 +178,7 @@ def scale_free_actions_from_deltas(
     reference_speed: float | None = None,
     fallback_unit_xyz: tuple[float, float, float] | np.ndarray = DEFAULT_FALLBACK_UNIT_XYZ,
     speed_epsilon: float = SCALE_FREE_SPEED_EPS,
+    log_speed_clip: float = SCALE_FREE_LOG_SPEED_CLAMP,
 ) -> ScaleFreeActionTargets:
     """Convert body-frame 4-DoF deltas to scale-free action labels.
 
@@ -158,6 +190,8 @@ def scale_free_actions_from_deltas(
     """
     if speed_epsilon <= 0.0:
         raise ValueError(f"speed_epsilon: expected > 0, got {speed_epsilon}")
+    if log_speed_clip <= 0.0:
+        raise ValueError(f"log_speed_clip: expected > 0, got {log_speed_clip}")
 
     arr, speeds = _translation_speeds(deltas, dt_seconds)
     fallback = _validate_fallback_unit(fallback_unit_xyz)
@@ -175,12 +209,18 @@ def scale_free_actions_from_deltas(
         unit[moving] = (xyz[moving] / moving_norms[:, None]).astype(DELTA_DTYPE)
 
     safe_speeds = np.maximum(speeds, speed_epsilon)
-    log_ratio = np.log(safe_speeds.astype(np.float64) / ref).astype(DELTA_DTYPE)
+    raw_log_ratio = np.log(safe_speeds.astype(np.float64) / ref)
+    speed_valid = moving & (np.abs(raw_log_ratio) <= log_speed_clip)
+    log_ratio = np.clip(raw_log_ratio, -log_speed_clip, log_speed_clip).astype(DELTA_DTYPE)
 
     actions = np.empty(arr.shape[:-1] + (SCALE_FREE_ACTION_DIM,), dtype=DELTA_DTYPE)
     actions[..., :3] = unit
     actions[..., 3] = log_ratio
-    return ScaleFreeActionTargets(actions=actions, moving_mask=np.asarray(moving, dtype=np.bool_))
+    return ScaleFreeActionTargets(
+        actions=actions,
+        moving_mask=np.asarray(moving, dtype=np.bool_),
+        speed_valid_mask=np.asarray(speed_valid, dtype=np.bool_),
+    )
 
 
 def future_deltas_to_scale_free_targets(
@@ -190,6 +230,7 @@ def future_deltas_to_scale_free_targets(
     reference_speed: float | None = None,
     fallback_unit_xyz: tuple[float, float, float] | np.ndarray = DEFAULT_FALLBACK_UNIT_XYZ,
     speed_epsilon: float = SCALE_FREE_SPEED_EPS,
+    log_speed_clip: float = SCALE_FREE_LOG_SPEED_CLAMP,
 ) -> ScaleFreeActionTargets:
     """Target-only wrapper for future action supervision.
 
@@ -203,6 +244,71 @@ def future_deltas_to_scale_free_targets(
         reference_speed=reference_speed,
         fallback_unit_xyz=fallback_unit_xyz,
         speed_epsilon=speed_epsilon,
+        log_speed_clip=log_speed_clip,
+    )
+
+
+def scale_free_action_diagnostics(
+    actions: np.ndarray,
+    moving_mask: np.ndarray,
+    speed_valid_mask: np.ndarray | None = None,
+    *,
+    log_speed_outlier_threshold: float = SCALE_FREE_LOG_SPEED_CLAMP,
+) -> ScaleFreeActionDiagnostics:
+    """Summarize target-label health without importing torch.
+
+    ``unmasked_log_speed_outliers`` uses ``speed_valid_mask`` when supplied, so
+    clipped or masked speed spikes are not counted as active training labels.
+    """
+    arr = np.asarray(actions, dtype=DELTA_DTYPE)
+    if arr.ndim < 1 or arr.shape[-1] != SCALE_FREE_ACTION_DIM:
+        raise ValueError(f"actions: expected shape (..., {SCALE_FREE_ACTION_DIM}), got {arr.shape}")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("actions: expected all finite values")
+    moving = np.asarray(moving_mask, dtype=np.bool_)
+    if moving.shape != arr.shape[:-1]:
+        raise ValueError(f"moving_mask: expected shape {arr.shape[:-1]}, got {moving.shape}")
+    if speed_valid_mask is None:
+        speed_valid = moving
+    else:
+        speed_valid = np.asarray(speed_valid_mask, dtype=np.bool_)
+        if speed_valid.shape != arr.shape[:-1]:
+            raise ValueError(f"speed_valid_mask: expected shape {arr.shape[:-1]}, got {speed_valid.shape}")
+    if log_speed_outlier_threshold <= 0.0:
+        raise ValueError(
+            f"log_speed_outlier_threshold: expected > 0, got {log_speed_outlier_threshold}"
+        )
+
+    logs = arr[..., 3].reshape(-1).astype(np.float64, copy=False)
+    active_logs = logs[speed_valid.reshape(-1)]
+    percentile_source = active_logs if active_logs.size else logs
+    if percentile_source.size:
+        p50, p95, p99 = np.percentile(percentile_source, [50, 95, 99])
+        log_min = float(np.min(percentile_source))
+        log_max = float(np.max(percentile_source))
+        max_abs = float(np.max(np.abs(percentile_source)))
+    else:
+        p50 = p95 = p99 = log_min = log_max = max_abs = 0.0
+    unmasked = np.abs(logs) > log_speed_outlier_threshold
+    unmasked &= speed_valid.reshape(-1)
+
+    count = int(np.prod(arr.shape[:-1], dtype=np.int64))
+    moving_count = int(moving.sum())
+    speed_valid_count = int(speed_valid.sum())
+    denom = max(count, 1)
+    return ScaleFreeActionDiagnostics(
+        count=count,
+        moving_count=moving_count,
+        speed_valid_count=speed_valid_count,
+        moving_fraction=float(moving_count / denom),
+        speed_valid_fraction=float(speed_valid_count / denom),
+        log_speed_min=log_min,
+        log_speed_p50=float(p50),
+        log_speed_p95=float(p95),
+        log_speed_p99=float(p99),
+        log_speed_max=log_max,
+        max_abs_log_speed=max_abs,
+        unmasked_log_speed_outliers=int(unmasked.sum()),
     )
 
 
@@ -242,10 +348,13 @@ __all__ = [
     "DEFAULT_FALLBACK_UNIT_XYZ",
     "SCALE_FREE_ACTION_DIM",
     "SCALE_FREE_ACTION_FIELDS",
+    "SCALE_FREE_LOG_SPEED_CLAMP",
     "SCALE_FREE_SPEED_EPS",
+    "ScaleFreeActionDiagnostics",
     "ScaleFreeActionTargets",
     "future_deltas_to_scale_free_targets",
     "metric_speed_command_from_log_ratio",
     "reference_speed_from_deltas",
+    "scale_free_action_diagnostics",
     "scale_free_actions_from_deltas",
 ]

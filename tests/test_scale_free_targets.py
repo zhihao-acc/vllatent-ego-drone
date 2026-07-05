@@ -13,11 +13,13 @@ from vllatent.scale_free_targets import (
     CONTROLLER_MAX_SPEED_MPS,
     SCALE_FREE_ACTION_DIM,
     SCALE_FREE_ACTION_FIELDS,
+    SCALE_FREE_LOG_SPEED_CLAMP,
     SCALE_FREE_SPEED_EPS,
     ScaleFreeActionTargets,
     future_deltas_to_scale_free_targets,
     metric_speed_command_from_log_ratio,
     reference_speed_from_deltas,
+    scale_free_action_diagnostics,
 )
 from vllatent.schemas import DELTA_DTYPE, HORIZON
 
@@ -52,6 +54,8 @@ def test_target_shape_dtype_and_unit_norm() -> None:
     assert targets.actions.dtype == DELTA_DTYPE
     assert targets.moving_mask.shape == (HORIZON,)
     assert targets.moving_mask.dtype == np.bool_
+    assert targets.speed_valid_mask.shape == (HORIZON,)
+    assert targets.speed_valid_mask.dtype == np.bool_
     assert np.all(np.isfinite(targets.actions))
 
     unit_norms = np.linalg.norm(targets.actions[targets.moving_mask, :3], axis=1)
@@ -62,7 +66,9 @@ def test_single_delta_returns_vector_action_and_scalar_mask() -> None:
     targets = future_deltas_to_scale_free_targets(np.array([1.0, 0.0, 0.0, 0.0], dtype=DELTA_DTYPE))
     assert targets.actions.shape == (SCALE_FREE_ACTION_DIM,)
     assert targets.moving_mask.shape == ()
+    assert targets.speed_valid_mask.shape == ()
     assert bool(targets.moving_mask)
+    assert bool(targets.speed_valid_mask)
     np.testing.assert_allclose(targets.actions, [1.0, 0.0, 0.0, 0.0], atol=1e-6)
 
 
@@ -111,6 +117,7 @@ def test_yaw_column_is_not_part_of_b2_1_contract() -> None:
 def test_zero_motion_is_finite_and_masked() -> None:
     targets = future_deltas_to_scale_free_targets(np.zeros((HORIZON, 4), dtype=DELTA_DTYPE), dt_seconds=0.2)
     assert not np.any(targets.moving_mask)
+    assert not np.any(targets.speed_valid_mask)
     assert np.all(np.isfinite(targets.actions))
     np.testing.assert_allclose(targets.actions[:, :3], np.tile([1.0, 0.0, 0.0], (HORIZON, 1)))
     np.testing.assert_allclose(targets.actions[:, 3], np.zeros(HORIZON), atol=1e-6)
@@ -126,6 +133,7 @@ def test_near_zero_motion_is_finite_and_masked_with_external_reference() -> None
     )
     targets = future_deltas_to_scale_free_targets(deltas, dt_seconds=1.0, reference_speed=5.0)
     assert targets.moving_mask.tolist() == [False, True]
+    assert targets.speed_valid_mask.tolist() == [False, True]
     assert np.all(np.isfinite(targets.actions))
     np.testing.assert_allclose(targets.actions[0, :3], [1.0, 0.0, 0.0], atol=1e-6)
     np.testing.assert_allclose(targets.actions[1, :3], [0.6, 0.8, 0.0], atol=1e-6)
@@ -134,9 +142,48 @@ def test_near_zero_motion_is_finite_and_masked_with_external_reference() -> None
 
 def test_future_target_record_has_no_model_input_fields() -> None:
     targets = future_deltas_to_scale_free_targets(_future_deltas())
-    assert {f.name for f in dataclasses.fields(targets)} == {"actions", "moving_mask"}
+    assert {f.name for f in dataclasses.fields(targets)} == {
+        "actions",
+        "moving_mask",
+        "speed_valid_mask",
+    }
     forbidden = {"input", "last", "past", "previous", "odom_reference_speed", "reference_speed"}
     assert forbidden.isdisjoint({f.name for f in dataclasses.fields(targets)})
+
+
+def test_tiny_reference_speed_clips_and_masks_speed_outliers() -> None:
+    targets = future_deltas_to_scale_free_targets(
+        np.array([[1.0, 0.0, 0.0, 0.0]], dtype=DELTA_DTYPE),
+        reference_speed=np.exp(-20.0),
+    )
+    assert bool(targets.moving_mask[0])
+    assert not bool(targets.speed_valid_mask[0])
+    assert targets.actions[0, 3] == pytest.approx(SCALE_FREE_LOG_SPEED_CLAMP)
+
+    diag = scale_free_action_diagnostics(
+        targets.actions,
+        targets.moving_mask,
+        targets.speed_valid_mask,
+    )
+    assert diag.unmasked_log_speed_outliers == 0
+    assert diag.speed_valid_count == 0
+
+
+def test_target_diagnostics_report_percentiles_and_unmasked_outliers() -> None:
+    actions = np.zeros((4, SCALE_FREE_ACTION_DIM), dtype=DELTA_DTYPE)
+    actions[:, 0] = 1.0
+    actions[:, 3] = np.array([-1.0, 0.0, 1.0, SCALE_FREE_LOG_SPEED_CLAMP], dtype=DELTA_DTYPE)
+    mask = np.ones(4, dtype=np.bool_)
+    speed_mask = np.array([True, True, True, False], dtype=np.bool_)
+
+    diag = scale_free_action_diagnostics(actions, mask, speed_mask)
+
+    assert diag.count == 4
+    assert diag.moving_count == 4
+    assert diag.speed_valid_count == 3
+    assert diag.log_speed_p50 == pytest.approx(0.0)
+    assert diag.max_abs_log_speed == pytest.approx(1.0)
+    assert diag.unmasked_log_speed_outliers == 0
 
 
 def test_target_generation_signature_keeps_metric_controller_scale_out_of_labels() -> None:

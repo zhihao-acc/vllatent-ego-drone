@@ -58,6 +58,7 @@ def action_policy_loss(
     predicted: torch.Tensor,
     target: torch.Tensor,
     moving_mask: torch.Tensor,
+    speed_mask: torch.Tensor | None = None,
     sample_weight: torch.Tensor | None = None,
     *,
     direction_weight: float = 1.0,
@@ -68,12 +69,14 @@ def action_policy_loss(
     import torch
     import torch.nn.functional as F
 
-    from vllatent.train.action_metrics import LOG_SPEED_CLAMP, action_step_vectors
+    from vllatent.train.action_metrics import LOG_SPEED_CLAMP, normalized_paths
 
     if predicted.shape != target.shape:
         raise ValueError(f"predicted/target shape mismatch: {predicted.shape} vs {target.shape}")
     if moving_mask.shape != predicted.shape[:2]:
         raise ValueError(f"moving_mask: expected {predicted.shape[:2]}, got {moving_mask.shape}")
+    if speed_mask is not None and speed_mask.shape != predicted.shape[:2]:
+        raise ValueError(f"speed_mask: expected {predicted.shape[:2]}, got {speed_mask.shape}")
 
     mask = moving_mask.to(device=predicted.device, dtype=torch.float32)
     weights = mask
@@ -84,6 +87,11 @@ def action_policy_loss(
     denom = weights.sum()
     if float(denom) <= 0.0:
         return predicted.sum() * 0.0
+    speed_weights = weights if speed_mask is None else weights * speed_mask.to(
+        device=predicted.device,
+        dtype=torch.float32,
+    )
+    speed_denom = speed_weights.sum()
 
     pred_dir = F.normalize(predicted[..., :3].float(), dim=-1, eps=1e-6)
     target_dir = F.normalize(target[..., :3].float(), dim=-1, eps=1e-6)
@@ -93,12 +101,15 @@ def action_policy_loss(
         target[..., 3].float().clamp(-LOG_SPEED_CLAMP, LOG_SPEED_CLAMP),
         reduction="none",
     )
-    pred_path = (action_step_vectors(predicted) * mask.unsqueeze(-1)).cumsum(dim=1)
-    target_path = (action_step_vectors(target) * mask.unsqueeze(-1)).cumsum(dim=1)
-    path = F.smooth_l1_loss(pred_path, target_path, reduction="none").mean(dim=-1)
+    pred_path = normalized_paths(predicted, target, moving_mask)
+    target_path = normalized_paths(target, target, moving_mask)
+    path_error = (pred_path - target_path).norm(dim=-1)
+    path = F.smooth_l1_loss(path_error, torch.zeros_like(path_error), reduction="none")
 
-    per_step = direction_weight * direction + speed_weight * speed + path_weight * path
-    return (per_step * weights).sum() / denom
+    direction_loss = (direction * weights).sum() / denom
+    path_loss = (path * weights).sum() / denom
+    speed_loss = predicted.sum() * 0.0 if float(speed_denom) <= 0.0 else (speed * speed_weights).sum() / speed_denom
+    return direction_weight * direction_loss + speed_weight * speed_loss + path_weight * path_loss
 
 
 def cosine_similarity_diagnostic(

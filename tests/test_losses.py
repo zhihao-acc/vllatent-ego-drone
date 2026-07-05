@@ -143,6 +143,45 @@ class TestActionPolicyLoss:
         weighted = action_policy_loss(pred, target, mask, sample_weight=torch.tensor([10.0, 1.0]))
         assert weighted < equal
 
+    def test_speed_mask_ignores_clipped_speed_term(self) -> None:
+        target = torch.zeros(1, T, DOF)
+        target[..., 0] = 1.0
+        pred = target.clone()
+        pred[..., 3] = 8.0
+        mask = torch.ones(1, T, dtype=torch.bool)
+        speed_mask = torch.zeros(1, T, dtype=torch.bool)
+
+        loss = action_policy_loss(
+            pred,
+            target,
+            mask,
+            speed_mask=speed_mask,
+            direction_weight=0.0,
+            speed_weight=1.0,
+            path_weight=0.0,
+        )
+
+        assert loss.item() == pytest.approx(0.0, abs=1e-7)
+
+    def test_path_loss_uses_normalized_geometry(self) -> None:
+        target = torch.zeros(1, T, DOF)
+        target[..., 0] = 1.0
+        target[..., 3] = 8.0
+        pred = target.clone()
+        pred[..., 1] = 0.02
+        mask = torch.ones(1, T, dtype=torch.bool)
+
+        loss = action_policy_loss(
+            pred,
+            target,
+            mask,
+            direction_weight=0.0,
+            speed_weight=0.0,
+            path_weight=1.0,
+        )
+
+        assert 0.0 < loss.item() < 0.01
+
 
 @pytest.mark.torch
 class TestCombinedLoss:

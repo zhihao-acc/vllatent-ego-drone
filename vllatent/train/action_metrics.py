@@ -29,6 +29,7 @@ class ActionMetricResult(NamedTuple):
     aggregate_score: float
     n_samples: int
     n_valid: int
+    n_speed_valid: int
 
 
 class ActionScorecard(NamedTuple):
@@ -93,6 +94,7 @@ def compute_action_metrics(
     target: torch.Tensor,
     moving_mask: torch.Tensor,
     sample_weight: torch.Tensor | None = None,
+    speed_mask: torch.Tensor | None = None,
 ) -> ActionMetricResult:
     """Compute scale-free action metrics for one batch.
 
@@ -108,6 +110,10 @@ def compute_action_metrics(
 
     batch_size, horizon = predicted.shape[:2]
     mask = _as_mask(moving_mask, (batch_size, horizon))
+    if speed_mask is not None:
+        speed_valid = _as_mask(speed_mask, (batch_size, horizon)) & mask
+    else:
+        speed_valid = mask
     weights_b = (
         torch.ones(batch_size, device=predicted.device, dtype=torch.float32)
         if sample_weight is None
@@ -126,7 +132,8 @@ def compute_action_metrics(
         step_weights = mask.float() * weights_b[:, None]
         direction_cosine = _weighted_mean(cos, step_weights)
         angular_error_deg = _weighted_mean(angle, step_weights)
-        speed_ratio_mae = _weighted_mean(speed_mae, step_weights)
+        speed_weights = speed_valid.float() * weights_b[:, None]
+        speed_ratio_mae = _weighted_mean(speed_mae, speed_weights)
 
         pred_path = normalized_paths(predicted, target, mask)
         target_path = normalized_paths(target, target, mask)
@@ -151,6 +158,7 @@ def compute_action_metrics(
         aggregate_score=float(aggregate),
         n_samples=int(batch_size),
         n_valid=int(mask.sum()),
+        n_speed_valid=int(speed_valid.sum()),
     )
 
 
@@ -249,15 +257,28 @@ def score_action_predictions(
     moving_mask: torch.Tensor,
     last_action_scale_free: torch.Tensor,
     sample_weight: torch.Tensor | None = None,
+    speed_mask: torch.Tensor | None = None,
     *,
     mean_action: torch.Tensor | None = None,
     previous_action_scale_free: torch.Tensor | None = None,
 ) -> ActionScorecard:
     """Score model predictions and compute margin over the best deterministic baseline."""
     horizon = target.shape[1]
-    model = compute_action_metrics(predicted, target, moving_mask, sample_weight=sample_weight)
+    model = compute_action_metrics(
+        predicted,
+        target,
+        moving_mask,
+        sample_weight=sample_weight,
+        speed_mask=speed_mask,
+    )
     baseline_metrics = {
-        name: compute_action_metrics(base, target, moving_mask, sample_weight=sample_weight)
+        name: compute_action_metrics(
+            base,
+            target,
+            moving_mask,
+            sample_weight=sample_weight,
+            speed_mask=speed_mask,
+        )
         for name, base in baseline_action_predictions(
             last_action_scale_free,
             horizon=horizon,
