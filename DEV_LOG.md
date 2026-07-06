@@ -89,7 +89,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.10 — Control-relevant B1/WAM architecture | done | 2026-07-05 | Added B1-style `WorldActionModel`: observed latents + past scale-free action/path history -> latent rollout -> scale-free action head; no future labels/latents in forward |
 | B2.11 — Local B1-arch training-policy verification | blocked | 2026-07-05 | WAM train/eval mode works and tiny overfit passes, but local source-smoke reaches only +5.56% vs repeat-last and does not beat repaired direct diagnostic +12.17%; no H20 |
 | B2.11a — Controlled WAM source-balanced diagnostic | done | 2026-07-06 | B2.9-style no-cand06 WAM run passed inertia (+10.96%, 9/10 sources) but still missed repaired direct diagnostic (+12.17%); B2.11 remains blocked and no H20 |
-| B2.11b — Stale WorldVLN cleanup pass | done | 2026-07-06 | Removed reviewed stale A5/WorldVLN files, broken cache inspect path, demo artifacts, and unused teacher/oracle pure seams; active scan + narrow tests + blob guard green; B2.11 still blocked/no H20 |
+| B2.11b — Stale WorldVLN cleanup pass | done | 2026-07-06 | Removed reviewed stale A5/WorldVLN files, broken cache inspect path, demo artifacts, unused teacher/oracle pure seams, and local ignored `data/` + empty `_archived/`; active scan + narrow tests + blob guard green; B2.11 still blocked/no H20 |
 | B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
 | B2.13 — H20 scale-free B1-arch WAM run | pending | — | USER-GATED; target artifact is stronger B1-architecture checkpoint |
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
@@ -102,6 +102,11 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 
 **Status:** B2.11b is done as cleanup only. B2.11 remains blocked because WAM still does not beat
 the repaired direct diagnostic; no B2.12/H20 command is authorized.
+
+**Follow-up local deletion.** At user request, deleted repo-root `data/` and archive leftovers after
+the tracked cleanup commit. There was no tracked `archive/` path; `data/` contained ignored
+AerialVLN JSON files and `_archived/` contained only empty directories. Post-delete checks confirmed
+no repo-root `data/`, `archive/`, or `_archived/` remains.
 
 **Removed.** Used a reviewed path list, not broad deletion. Removed tracked `_archived/` A5
 WorldVLN/render/cache code and tests; stale runnable wrappers `scripts/render_aerialvln.sh` and
