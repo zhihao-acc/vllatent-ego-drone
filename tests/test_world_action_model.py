@@ -67,7 +67,7 @@ class TestWorldActionModel:
         assert torch.allclose(out1, out2, atol=1e-7)
 
     def test_gradient_flow_through_predictor_and_action_head(self) -> None:
-        model = WorldActionModel(_cfg(), dim=16, action_hidden_dim=16)
+        model = WorldActionModel(_cfg(), dim=16, action_hidden_dim=16, action_head_final_init_std=1e-2)
         out = model(*_make_inputs(dim=16))
         out.square().mean().backward()
 
@@ -79,6 +79,13 @@ class TestWorldActionModel:
         )
         assert predictor_grad > 0.0
         assert action_head_grad > 0.0
+
+    def test_initial_world_action_model_repeats_last_action_baseline(self) -> None:
+        model = WorldActionModel(_cfg(dropout=0.5), dim=16, action_hidden_dim=16)
+        inputs = _make_inputs(dim=16)
+        out = model(*inputs)
+        expected = inputs[3].unsqueeze(1).expand(-1, HORIZON, -1)
+        assert torch.allclose(out, expected, atol=1e-7)
 
     def test_past_action_history_changes_world_rollout(self) -> None:
         model = WorldActionModel(_cfg(), dim=16, action_hidden_dim=16, latent_residual_init_std=1e-2)

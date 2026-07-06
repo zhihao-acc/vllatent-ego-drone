@@ -87,14 +87,70 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.8 — Past-only action/camera-history conditioning | done | 2026-07-05 | Added causal action-history/path tensors through loader/collate/trainer and optional direct-policy conditioning; future-delta leakage test covers history inputs |
 | B2.9 — Re-run repaired direct-policy diagnostic | done | 2026-07-05 | After user rejected cand06 as failed data and local cache removal, source-balanced repaired direct policy reached +12.17% vs repeat-last and 8/10 sources improved; B2.10 is the next AUTO step |
 | B2.10 — Control-relevant B1/WAM architecture | done | 2026-07-05 | Added B1-style `WorldActionModel`: observed latents + past scale-free action/path history -> latent rollout -> scale-free action head; no future labels/latents in forward |
-| B2.11 — Local B1-arch training-policy verification | blocked | 2026-07-05 | WAM train/eval mode works and tiny overfit passes, but local source-smoke reaches only +5.56% vs repeat-last and does not beat repaired direct diagnostic +12.17%; no H20 |
+| B2.11 — Local B1-arch training-policy verification | done | 2026-07-06 | Unblocked by B2.11c: frozen-direct-anchor WAM residual clears no-cand06 local gate at +13.10% vs inertia, beating repaired direct +12.17%; B2.12 remains USER-GATED |
 | B2.11a — Controlled WAM source-balanced diagnostic | done | 2026-07-06 | B2.9-style no-cand06 WAM run passed inertia (+10.96%, 9/10 sources) but still missed repaired direct diagnostic (+12.17%); B2.11 remains blocked and no H20 |
 | B2.11b — Stale WorldVLN cleanup pass | done | 2026-07-06 | Removed reviewed stale A5/WorldVLN files, broken cache inspect path, demo artifacts, unused teacher/oracle pure seams, and local ignored `data/` + empty `_archived/`; active scan + narrow tests + blob guard green; B2.11 still blocked/no H20 |
+| B2.11c — Frozen-anchor WAM residual fix | done | 2026-07-06 | Landed diagnosis-backed fix: WAM can load/freeze repaired direct checkpoint as an eval-mode residual anchor, uses attentive world pooling/head context, optional latent auxiliary labels, true past-only linear scoring; local anchored residual run beats direct |
 | B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
 | B2.13 — H20 scale-free B1-arch WAM run | pending | — | USER-GATED; target artifact is stronger B1-architecture checkpoint |
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-06 — B2.11c frozen-anchor WAM residual fix
+
+**Status:** B2.11c is done. B2.11 local gate is now unblocked locally; no H20/SSH/docker command was
+run. B2.12 remains USER-GATED.
+
+**Diagnosis landed.** The WAM was trainable but paid a baseline-relearning penalty: the latent
+rollout branch alone got close to direct but stayed behind it on the aggregate action score. The fix
+keeps the future-action sequence as the target only, preserves past-only action/camera-history
+conditioning, and lets WAM start from the repaired direct behavior while learning a residual
+world-action correction.
+
+**Code changes.** `WorldActionModel` now has attentive predicted-world-token pooling, direct
+near-head access to past action/path history and per-horizon `dt`, exact zero residual-action init
+by default, and an optional direct anchor. The trainer can load a repaired direct-policy checkpoint
+into that anchor, freeze it, and keep it in eval mode during WAM training so dropout cannot corrupt
+the baseline. `ActionPolicyBatch` carries `target_latents` as labels only for optional WAM latent
+auxiliary loss; the forward path still never consumes future latents/actions. The evaluator now
+passes a true past-only previous action into the linear baseline instead of silently degrading it to
+repeat-last.
+
+**Local gate evidence.** `cand06_*.npz` remains absent. Zero-LR anchored WAM exactly reproduced the
+repaired direct checkpoint on the B2.9 no-cand06 split:
+score `1.1762227`, margin `+12.1721%`.
+
+The actual residual WAM run:
+`runs/b2_wam_direct_anchor_residual_lr1e4_no_cand06_b211c_20260706`
+used the repaired direct checkpoint
+`runs/b2_repaired_source_balanced_no_cand06_20260705/ckpt_best.pt` as a frozen anchor and trained the
+WAM residual at LR `1e-4`. Best epoch 4:
+score `1.1637748`, margin `+13.1016%` vs repeat-last. This beats the repaired direct diagnostic
+score `1.1762230`, margin `+12.1721%` by `0.012448` aggregate score and `+0.929` margin percentage
+points.
+
+**Component readout.** Compared with repaired direct, anchored WAM improves normalized path and
+speed: path ADE `0.26753 -> 0.26510`, path FDE `0.46522 -> 0.46173`, speed-ratio MAE
+`0.30145 -> 0.29430`. Direction is essentially flat/slightly worse: direction cosine
+`0.77375 -> 0.77300`, angular error `25.56° -> 25.68°`.
+
+**Source readout.** Anchored WAM improves over inertia on `9/10` held-out sources and beats repaired
+direct on `6/10` common held-out sources. Misses vs direct are small on `cand05`, `cand36`, and
+`ski03`, larger on `cand43`; aggregate still clears direct because improvements on `cand07`,
+`cand09`, `cand29`, `cand31`, `cand35`, and `cand38` dominate.
+
+**Negative controls.** No-anchor WAM plus the new world readout improved the old WAM but still only
+reached `+11.55%`. Adding latent auxiliary loss alone reached `+11.44%`. The direct checkpoint
+anchor was the decisive training-policy fix.
+
+**Verification.** Passed:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q`
+-> `657 passed, 7 skipped`.
+
+**Next.** B2.12/H20 is eligible only through the USER gate. Do not run H20/SSH/docker automatically.
 
 ---
 

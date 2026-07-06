@@ -30,7 +30,7 @@ from vllatent.model.world_action_model import WorldActionModel
 from vllatent.schemas import EMBED_DIM
 from vllatent.train.action_metrics import ActionScorecard, score_action_predictions
 from vllatent.train.checkpoint import save_checkpoint, seed_everything, snapshot_config
-from vllatent.train.losses import action_policy_loss
+from vllatent.train.losses import action_policy_loss, latent_loss
 
 MODEL_KINDS = ("direct", "world_action")
 
@@ -60,6 +60,11 @@ class ActionTrainConfig:
     speed_weight: float = 1.0
     path_weight: float = 1.0
     latent_residual_init_std: float = 1e-3
+    action_head_final_init_std: float = 0.0
+    use_direct_anchor: bool = False
+    direct_anchor_ckpt: str = ""
+    freeze_direct_anchor: bool = True
+    latent_loss_weight: float = 0.0
 
     def __post_init__(self) -> None:
         if self.model_kind not in MODEL_KINDS:
@@ -78,10 +83,16 @@ class ActionTrainConfig:
             "speed_weight",
             "path_weight",
             "latent_residual_init_std",
+            "action_head_final_init_std",
+            "latent_loss_weight",
         ):
             value = getattr(self, name)
             if value < 0:
                 raise ValueError(f"{name} must be >= 0, got {value}")
+        if self.direct_anchor_ckpt and self.model_kind != "world_action":
+            raise ValueError("direct_anchor_ckpt is only valid for model_kind='world_action'")
+        if self.direct_anchor_ckpt and not self.use_direct_anchor:
+            raise ValueError("direct_anchor_ckpt requires use_direct_anchor=True")
 
 
 def _write_jsonl(path: Path, entry: dict[str, Any]) -> None:
@@ -102,6 +113,7 @@ def _to_device(batch: ActionPolicyBatch, device: str) -> ActionPolicyBatch:
         z_t=batch.z_t.to(device),
         history_latents=batch.history_latents.to(device),
         history_mask=batch.history_mask.to(device),
+        target_latents=batch.target_latents.to(device),
         target_actions_scale_free=batch.target_actions_scale_free.to(device),
         target_actions_moving_mask=batch.target_actions_moving_mask.to(device),
         target_actions_speed_mask=batch.target_actions_speed_mask.to(device),
@@ -145,13 +157,34 @@ def _make_model(cfg: ActionTrainConfig) -> torch.nn.Module:
             mlp_ratio=cfg.mlp_ratio,
             dropout=cfg.dropout,
         )
-        return WorldActionModel(
+        model = WorldActionModel(
             predictor_cfg,
             dim=EMBED_DIM,
             action_hidden_dim=cfg.hidden_dim,
             latent_residual_init_std=cfg.latent_residual_init_std,
+            action_head_final_init_std=cfg.action_head_final_init_std,
+            use_direct_anchor=cfg.use_direct_anchor,
         )
+        if cfg.direct_anchor_ckpt:
+            if model.direct_anchor is None:
+                raise ValueError("direct_anchor_ckpt requires a direct anchor")
+            ckpt_path = Path(cfg.direct_anchor_ckpt)
+            if not ckpt_path.exists():
+                raise FileNotFoundError(f"Direct anchor checkpoint not found: {ckpt_path}")
+            ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
+            state_dict = ckpt.get("model_state_dict", ckpt)
+            model.direct_anchor.load_state_dict(state_dict, strict=True)
+            if cfg.freeze_direct_anchor:
+                model.freeze_direct_anchor()
+        return model
     raise ValueError(f"Unsupported model_kind {cfg.model_kind!r}")
+
+
+def _make_optimizer(model: torch.nn.Module, cfg: ActionTrainConfig) -> torch.optim.Optimizer:
+    trainable = [param for param in model.parameters() if param.requires_grad]
+    if not trainable:
+        raise ValueError("No trainable parameters remain after freezing")
+    return torch.optim.AdamW(trainable, lr=cfg.lr, weight_decay=cfg.weight_decay)
 
 
 def _flatten_scorecard(scorecard: ActionScorecard) -> dict[str, Any]:
@@ -175,6 +208,23 @@ def _flatten_scorecard(scorecard: ActionScorecard) -> dict[str, Any]:
     return out
 
 
+def _previous_action_from_history(batch: ActionPolicyBatch) -> torch.Tensor:
+    """Return the previous observed action for the linear baseline.
+
+    ``last_action_scale_free`` corresponds to the final valid action-history slot.
+    The linear baseline needs the action before that.  At clip starts, where that
+    slot is unavailable, use ``last_action_scale_free`` so the baseline degrades
+    per-sample to repeat-last instead of silently doing so for the whole batch.
+    """
+    previous = batch.last_action_scale_free.float().clone()
+    if batch.action_history_scale_free.shape[1] < 2:
+        return previous
+    candidate = batch.action_history_scale_free[:, -2, :].float()
+    valid = batch.action_history_mask[:, -2].bool()
+    previous[valid] = candidate[valid]
+    return previous
+
+
 def evaluate_action_policy(
     model: torch.nn.Module,
     loader: Any,
@@ -188,6 +238,7 @@ def evaluate_action_policy(
     masks = []
     speed_masks = []
     last_actions = []
+    previous_actions = []
     weights = []
 
     was_training = model.training
@@ -212,6 +263,7 @@ def evaluate_action_policy(
                 masks.append(batch.target_actions_moving_mask.bool().cpu())
                 speed_masks.append(batch.target_actions_speed_mask.bool().cpu())
                 last_actions.append(batch.last_action_scale_free.float().cpu())
+                previous_actions.append(_previous_action_from_history(batch).cpu())
                 weights.append(batch.sample_weight.float().cpu())
     finally:
         if was_training:
@@ -227,6 +279,7 @@ def evaluate_action_policy(
         last_action_scale_free=torch.cat(last_actions, dim=0),
         sample_weight=torch.cat(weights, dim=0),
         speed_mask=torch.cat(speed_masks, dim=0),
+        previous_action_scale_free=torch.cat(previous_actions, dim=0),
     )
     return _flatten_scorecard(scorecard)
 
@@ -240,16 +293,30 @@ def _train_batch(
 ) -> float:
     batch = _to_device(batch, device)
     optimizer.zero_grad()
-    pred = model(
-        history_latents=batch.history_latents,
-        z_t=batch.z_t,
-        history_mask=batch.history_mask,
-        last_action_scale_free=batch.last_action_scale_free,
-        dt_seconds=batch.dt_seconds,
-        action_history_scale_free=batch.action_history_scale_free,
-        action_history_mask=batch.action_history_mask,
-        camera_history_path_scale_free=batch.camera_history_path_scale_free,
-    )
+    rollout = None
+    if cfg.latent_loss_weight > 0.0 and isinstance(model, WorldActionModel):
+        rollout = model.rollout(
+            history_latents=batch.history_latents,
+            z_t=batch.z_t,
+            history_mask=batch.history_mask,
+            last_action_scale_free=batch.last_action_scale_free,
+            dt_seconds=batch.dt_seconds,
+            action_history_scale_free=batch.action_history_scale_free,
+            action_history_mask=batch.action_history_mask,
+            camera_history_path_scale_free=batch.camera_history_path_scale_free,
+        )
+        pred = rollout.predicted_actions
+    else:
+        pred = model(
+            history_latents=batch.history_latents,
+            z_t=batch.z_t,
+            history_mask=batch.history_mask,
+            last_action_scale_free=batch.last_action_scale_free,
+            dt_seconds=batch.dt_seconds,
+            action_history_scale_free=batch.action_history_scale_free,
+            action_history_mask=batch.action_history_mask,
+            camera_history_path_scale_free=batch.camera_history_path_scale_free,
+        )
     loss = action_policy_loss(
         pred.float(),
         batch.target_actions_scale_free.float(),
@@ -260,6 +327,12 @@ def _train_batch(
         speed_weight=cfg.speed_weight,
         path_weight=cfg.path_weight,
     )
+    if rollout is not None:
+        loss = loss + cfg.latent_loss_weight * latent_loss(
+            rollout.predicted_latents.float(),
+            batch.target_latents.float(),
+            batch.frame_quality.float().clamp(min=0.1),
+        )
     if not torch.isfinite(loss.detach()).all():
         raise FloatingPointError(f"non-finite action loss: {loss.detach().item()}")
     loss.backward()
@@ -308,7 +381,7 @@ def train_overfit_tiny(args: argparse.Namespace, cfg: ActionTrainConfig) -> dict
     run_dir = Path(args.run_dir)
     config = _write_config(run_dir, cfg)
     model = _make_model(cfg).to(args.device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    optimizer = _make_optimizer(model, cfg)
 
     best_margin = float("-inf")
     best_metrics: dict[str, Any] = {}
@@ -391,7 +464,7 @@ def train_full(args: argparse.Namespace, cfg: ActionTrainConfig) -> dict[str, An
     config = _write_config(run_dir, cfg)
     train_ds.save_norm_stats(run_dir / "norm_stats.npz")
     model = _make_model(cfg).to(args.device)
-    optimizer = torch.optim.AdamW(model.parameters(), lr=cfg.lr, weight_decay=cfg.weight_decay)
+    optimizer = _make_optimizer(model, cfg)
 
     best_margin = float("-inf")
     best_metrics: dict[str, Any] = {}
@@ -476,6 +549,11 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         speed_weight=args.speed_weight,
         path_weight=args.path_weight,
         latent_residual_init_std=args.latent_residual_init_std,
+        action_head_final_init_std=args.action_head_final_init_std,
+        use_direct_anchor=args.use_direct_anchor and not args.no_direct_anchor,
+        direct_anchor_ckpt=args.direct_anchor_ckpt,
+        freeze_direct_anchor=not args.train_direct_anchor,
+        latent_loss_weight=args.latent_loss_weight,
     )
     seed_everything(cfg.seed)
     if args.overfit_tiny:
@@ -512,6 +590,12 @@ def main() -> None:
     parser.add_argument("--speed-weight", type=float, default=1.0)
     parser.add_argument("--path-weight", type=float, default=1.0)
     parser.add_argument("--latent-residual-init-std", type=float, default=1e-3)
+    parser.add_argument("--action-head-final-init-std", type=float, default=0.0)
+    parser.add_argument("--use-direct-anchor", action="store_true")
+    parser.add_argument("--no-direct-anchor", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--direct-anchor-ckpt", default="")
+    parser.add_argument("--train-direct-anchor", action="store_true")
+    parser.add_argument("--latent-loss-weight", type=float, default=0.0)
     parser.add_argument("--overfit-tiny", action="store_true")
     parser.add_argument("--overfit-samples", type=int, default=16)
     parser.add_argument("--max-steps", type=int, default=200)

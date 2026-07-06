@@ -63,3 +63,9 @@ class TestScaleFreeActionHead:
         out.square().mean().backward()
         assert x.grad is not None
         assert x.grad.abs().sum() > 0
+
+    def test_zero_final_init_outputs_zero_residual(self) -> None:
+        head = ScaleFreeActionHead(dim=32, hidden_dim=32, final_init_std=0.0)
+        x = torch.randn(2, HORIZON, 32)
+        out = head(x)
+        assert torch.allclose(out, torch.zeros_like(out), atol=1e-7)

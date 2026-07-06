@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING
 import torch
 import torch.nn as nn
 
+from vllatent.model.action_policy import ScaleFreeActionPolicy
 from vllatent.model.heads import ScaleFreeActionHead
 from vllatent.model.predictor import LatentPredictor
 from vllatent.scale_free_targets import SCALE_FREE_ACTION_DIM
@@ -48,15 +49,21 @@ class WorldActionModel(nn.Module):
         use_action_film: bool = True,
         prediction_mode: str = "residual",
         latent_residual_init_std: float = 1e-3,
+        action_head_final_init_std: float = 0.0,
+        use_direct_anchor: bool = False,
     ) -> None:
         super().__init__()
         if latent_residual_init_std < 0:
             raise ValueError(f"latent_residual_init_std must be >= 0, got {latent_residual_init_std}")
+        if action_head_final_init_std < 0:
+            raise ValueError(f"action_head_final_init_std must be >= 0, got {action_head_final_init_std}")
 
         self.dim = dim
         self.history = cfg.history
         self.horizon = cfg.horizon
         self.action_dim = SCALE_FREE_ACTION_DIM
+        self.use_direct_anchor = use_direct_anchor
+        self.direct_anchor_frozen = False
 
         self.history_action_proj = nn.Linear(SCALE_FREE_ACTION_DIM, dim)
         self.history_path_proj = nn.Linear(3, dim)
@@ -77,7 +84,138 @@ class WorldActionModel(nn.Module):
             nn.init.normal_(self.predictor.residual_out.weight, std=latent_residual_init_std)
             nn.init.zeros_(self.predictor.residual_out.bias)
 
-        self.action_head = ScaleFreeActionHead(dim=dim, hidden_dim=action_hidden_dim)
+        self.direct_anchor = (
+            ScaleFreeActionPolicy(
+                dim=dim,
+                hidden_dim=action_hidden_dim,
+                depth=max(1, min(2, cfg.depth)),
+                heads=cfg.heads,
+                mlp_ratio=max(1, cfg.mlp_ratio),
+                dropout=cfg.dropout,
+                history=cfg.history,
+                horizon=cfg.horizon,
+            )
+            if use_direct_anchor
+            else None
+        )
+        self.world_pool_norm = nn.LayerNorm(dim)
+        self.world_pool_score = nn.Linear(dim, 1)
+        nn.init.zeros_(self.world_pool_score.weight)
+        nn.init.zeros_(self.world_pool_score.bias)
+
+        self.head_last_action_proj = nn.Linear(SCALE_FREE_ACTION_DIM, dim)
+        self.head_history_action_proj = nn.Linear(SCALE_FREE_ACTION_DIM, dim)
+        self.head_history_path_proj = nn.Linear(3, dim)
+        self.head_dt_proj = nn.Linear(1, dim)
+        self.head_horizon_embed = nn.Parameter(torch.zeros(1, self.horizon, dim))
+        self.action_head = ScaleFreeActionHead(
+            dim=dim,
+            hidden_dim=action_hidden_dim,
+            final_init_std=action_head_final_init_std,
+        )
+
+    def _direct_anchor_actions(
+        self,
+        history_latents: torch.Tensor,
+        z_t: torch.Tensor,
+        history_mask: torch.Tensor,
+        last_action_scale_free: torch.Tensor,
+        dt_seconds: torch.Tensor,
+        action_history_scale_free: torch.Tensor | None,
+        action_history_mask: torch.Tensor | None,
+        camera_history_path_scale_free: torch.Tensor | None,
+    ) -> torch.Tensor:
+        if self.direct_anchor is None:
+            return last_action_scale_free.to(device=z_t.device, dtype=torch.float32).unsqueeze(1).expand(
+                -1,
+                self.horizon,
+                -1,
+            )
+        if self.direct_anchor_frozen:
+            with torch.no_grad():
+                return self.direct_anchor(
+                    history_latents=history_latents,
+                    z_t=z_t,
+                    history_mask=history_mask,
+                    last_action_scale_free=last_action_scale_free,
+                    dt_seconds=dt_seconds,
+                    action_history_scale_free=action_history_scale_free,
+                    action_history_mask=action_history_mask,
+                    camera_history_path_scale_free=camera_history_path_scale_free,
+                )
+        return self.direct_anchor(
+            history_latents=history_latents,
+            z_t=z_t,
+            history_mask=history_mask,
+            last_action_scale_free=last_action_scale_free,
+            dt_seconds=dt_seconds,
+            action_history_scale_free=action_history_scale_free,
+            action_history_mask=action_history_mask,
+            camera_history_path_scale_free=camera_history_path_scale_free,
+        )
+
+    def freeze_direct_anchor(self) -> None:
+        """Freeze a loaded direct policy so WAM learns only the world residual."""
+        if self.direct_anchor is None:
+            raise ValueError("Cannot freeze a missing direct anchor")
+        for param in self.direct_anchor.parameters():
+            param.requires_grad_(False)
+        self.direct_anchor_frozen = True
+        self.direct_anchor.eval()
+
+    def train(self, mode: bool = True) -> WorldActionModel:
+        super().train(mode)
+        if self.direct_anchor is not None and self.direct_anchor_frozen:
+            self.direct_anchor.eval()
+        return self
+
+    def _pool_world_tokens(self, predicted_latents: torch.Tensor) -> torch.Tensor:
+        scores = self.world_pool_score(self.world_pool_norm(predicted_latents.float())).squeeze(-1)
+        weights = torch.softmax(scores, dim=-1)
+        return (predicted_latents.float() * weights.unsqueeze(-1)).sum(dim=2)
+
+    def _head_context(
+        self,
+        pooled_world: torch.Tensor,
+        last_action_scale_free: torch.Tensor,
+        dt_seconds: torch.Tensor,
+        action_history_scale_free: torch.Tensor | None,
+        action_history_mask: torch.Tensor | None,
+        camera_history_path_scale_free: torch.Tensor | None,
+    ) -> torch.Tensor:
+        batch_size = pooled_world.shape[0]
+        device = pooled_world.device
+        dtype = pooled_world.dtype
+        last_action = last_action_scale_free.to(device=device, dtype=dtype)
+        dt = dt_seconds.to(device=device, dtype=dtype)
+
+        action_history = (
+            torch.zeros(batch_size, self.history, self.action_dim, device=device, dtype=dtype)
+            if action_history_scale_free is None
+            else action_history_scale_free.to(device=device, dtype=dtype)
+        )
+        camera_path = (
+            torch.zeros(batch_size, self.history, 3, device=device, dtype=dtype)
+            if camera_history_path_scale_free is None
+            else camera_history_path_scale_free.to(device=device, dtype=dtype)
+        )
+        history_valid = (
+            torch.ones(batch_size, self.history, device=device, dtype=torch.bool)
+            if action_history_mask is None
+            else action_history_mask.to(device=device, dtype=torch.bool)
+        )
+        history_features = self.head_history_action_proj(action_history) + self.head_history_path_proj(camera_path)
+        history_weights = history_valid.to(dtype=dtype)
+        history_denom = history_weights.sum(dim=1, keepdim=True).clamp_min(1.0)
+        history_context = (history_features * history_weights.unsqueeze(-1)).sum(dim=1) / history_denom
+
+        return (
+            pooled_world
+            + self.head_last_action_proj(last_action).unsqueeze(1)
+            + history_context.unsqueeze(1)
+            + self.head_dt_proj(dt.unsqueeze(-1))
+            + self.head_horizon_embed[:, : self.horizon]
+        )
 
     def _validate_inputs(
         self,
@@ -210,12 +348,26 @@ class WorldActionModel(nn.Module):
             dt_seconds=dt_seconds.to(device=z_t.device, dtype=torch.float32),
             history_mask=history_mask.to(device=z_t.device, dtype=torch.bool),
         )
-        pooled_world = predicted_latents.float().mean(dim=2)
-        residual_actions = self.action_head(pooled_world)
-        base_actions = last_action_scale_free.to(
-            device=residual_actions.device,
-            dtype=residual_actions.dtype,
-        ).unsqueeze(1).expand(-1, self.horizon, -1)
+        pooled_world = self._pool_world_tokens(predicted_latents)
+        head_input = self._head_context(
+            pooled_world=pooled_world,
+            last_action_scale_free=last_action_scale_free,
+            dt_seconds=dt_seconds,
+            action_history_scale_free=action_history_scale_free,
+            action_history_mask=action_history_mask,
+            camera_history_path_scale_free=camera_history_path_scale_free,
+        )
+        residual_actions = self.action_head(head_input)
+        base_actions = self._direct_anchor_actions(
+            history_latents=history_latents,
+            z_t=z_t,
+            history_mask=history_mask,
+            last_action_scale_free=last_action_scale_free,
+            dt_seconds=dt_seconds,
+            action_history_scale_free=action_history_scale_free,
+            action_history_mask=action_history_mask,
+            camera_history_path_scale_free=camera_history_path_scale_free,
+        ).to(device=residual_actions.device, dtype=residual_actions.dtype)
         predicted_actions = base_actions + residual_actions
         return WorldActionOutput(predicted_latents=predicted_latents, predicted_actions=predicted_actions)
 
@@ -250,6 +402,8 @@ class WorldActionModel(nn.Module):
         action_hidden_dim: int = 256,
         use_action_film: bool = True,
         prediction_mode: str = "residual",
+        action_head_final_init_std: float = 0.0,
+        use_direct_anchor: bool = False,
     ) -> WorldActionModel:
         return cls(
             cfg=cfg,
@@ -257,6 +411,8 @@ class WorldActionModel(nn.Module):
             action_hidden_dim=action_hidden_dim,
             use_action_film=use_action_film,
             prediction_mode=prediction_mode,
+            action_head_final_init_std=action_head_final_init_std,
+            use_direct_anchor=use_direct_anchor,
         )
 
 

@@ -1249,6 +1249,27 @@ Each B2 step follows the same loop:
 - **Test:** `rg -n "render_aerialvln|run_full_cache|full-run-sizing|vllatent\\.render|vllatent\\.cache|vllatent\\.teacher|CachedLatentDataset|vllatent\\.data\\.loader|python -m vllatent\\.data|ingest inspect|scripts/demo/|WorldVLN|worldvln|TeacherOutput|OracleTarget|teacher_pose6|TEACHER_DOF" README.md Makefile docs scripts vllatent tests configs --glob '!runs/**' --glob '!ingest_data/**'`
 - **Deps:** B2.11a diagnostic result or explicit user decision to pause diagnostics for cleanup.
 
+**B2.11c — Frozen-anchor WAM residual fix.**
+- Tier TORCH / AUTO
+- Added after B2.11a/B2.11b showed WAM was trainable but still behind the repaired direct
+  diagnostic. Implement the diagnosis-backed training policy: WAM may load the repaired direct
+  policy as a frozen eval-mode residual anchor, then train only the world-action residual branch.
+  This prevents the latent rollout path from spending local capacity relearning repeat-last/direct
+  behavior.
+- Keep the future action sequence and future target latents as labels only. Future latents may be
+  used only for an explicitly weighted auxiliary latent loss; default action acceptance remains the
+  action-margin metric, not raw future-DINO cosine.
+- Local accepted recipe:
+  `scripts/train_sports_b2.py --cache-dir ingest_data/latent_cache --run-dir runs/b2_wam_direct_anchor_residual_lr1e4_no_cand06_b211c_YYYYMMDD --model-kind world_action --device cuda --batch-size 32 --hidden-dim 128 --depth 2 --heads 4 --epochs 6 --lr 0.0001 --val-frac 0.25 --eval-by-source --max-clips-per-source 4 --early-stop-patience 4 --use-direct-anchor --direct-anchor-ckpt runs/b2_repaired_source_balanced_no_cand06_20260705/ckpt_best.pt`.
+- **DoD:** zero-LR anchored WAM reproduces the repaired direct checkpoint; trained residual WAM
+  beats repeat-last by at least 10%, beats the repaired direct score, improves a majority of
+  held-out sources vs inertia, saves checkpoint/config/metrics, and keeps no-future-input tests
+  green.
+- **Verified local result:** best epoch 4 score `1.1637748`, margin `+13.1016%`; repaired direct
+  score `1.1762230`, margin `+12.1721%`; `9/10` sources improve vs inertia and `6/10` beat direct.
+- **Test:** `$PY -m pytest -q`
+- **Deps:** B2.11a/B2.11b diagnosis/cleanup. Blocks B2.12.
+
 **B2.12 — B1-arch H20 USER gate.**
 - Tier DOC / **USER-GATED**
 - Summarize local WAM evidence in `DEV_LOG.md`: target diagnostics, outlier handling,
@@ -1318,13 +1339,15 @@ ACTIVE — B2 SCALE-FREE CONTROL-RELEVANT WAM:
                                                           └─> B2.11 (local B1-arch training gate)
                                                                 └─> B2.11a (controlled source-balanced WAM diagnostic)
                                                                       ├─> B2.11b (stale WorldVLN cleanup pass)
-                                                                      └─> B2.12 (USER gate: approve one H20 command, only if local gate passes)
-                                                                            └─> B2.13 (USER-GATED H20 B1-arch run)
-                                                                                  └─> B2.14 (USER gate: readout + Jetson decision)
+                                                                      └─> B2.11c (frozen-anchor WAM residual fix)
+                                                                            └─> B2.12 (USER gate: approve one H20 command)
+                                                                                  └─> B2.13 (USER-GATED H20 B1-arch run)
+                                                                                        └─> B2.14 (USER gate: readout + Jetson decision)
 ```
 
 **Critical path (B2):** B2.0 → B2.1 → B2.2 → B2.3/B2.4 → B2.5 diagnostic failure →
-B2.6 replan → B2.7 → B2.8 → B2.9 → B2.10 → B2.11 → B2.11a → B2.12 USER gate.
+B2.6 replan → B2.7 → B2.8 → B2.9 → B2.10 → B2.11 → B2.11a/B2.11b → B2.11c →
+B2.12 USER gate.
 No H20 run is allowed before the controlled B1-architecture local training-policy gate passes.
 
 **Highest-risk invariant:** future action labels are targets only. They must never be provided to
