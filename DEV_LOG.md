@@ -86,13 +86,48 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.7 — Repair supervision/loss contract | done | 2026-07-05 | Speed-ratio targets are clipped/masked, diagnostics added, loss path term now uses normalized path geometry; local cache has 0 unmasked speed outliers |
 | B2.8 — Past-only action/camera-history conditioning | done | 2026-07-05 | Added causal action-history/path tensors through loader/collate/trainer and optional direct-policy conditioning; future-delta leakage test covers history inputs |
 | B2.9 — Re-run repaired direct-policy diagnostic | done | 2026-07-05 | After user rejected cand06 as failed data and local cache removal, source-balanced repaired direct policy reached +12.17% vs repeat-last and 8/10 sources improved; B2.10 is the next AUTO step |
-| B2.10 — Control-relevant B1/WAM architecture | pending | — | Latent/world predictor + action head; accepted by action-margin improvement, not raw DINO cosine |
+| B2.10 — Control-relevant B1/WAM architecture | done | 2026-07-05 | Added B1-style `WorldActionModel`: observed latents + past scale-free action/path history -> latent rollout -> scale-free action head; no future labels/latents in forward |
 | B2.11 — Local B1-arch training-policy verification | pending | — | Must beat inertia and repaired direct-policy baseline locally before H20 |
 | B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
 | B2.13 — H20 scale-free B1-arch WAM run | pending | — | USER-GATED; target artifact is stronger B1-architecture checkpoint |
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.10 control-relevant B1/WAM architecture
+
+**Status:** B2.10 is done. Next AUTO step is B2.11 local B1-arch training-policy verification.
+This is architecture only; no local WAM training run and no H20 command were started.
+
+**Architecture.** Added `WorldActionModel`, a B1-style latent/world predictor wrapped for the B2
+scale-free action objective. The model conditions on cached DINO history/current latents,
+`history_mask`, `dt_seconds`, `last_action_scale_free`, and past-only
+`action_history_scale_free` / `camera_history_path_scale_free`. It runs a `LatentPredictor`
+rollout, mean-pools predicted world tokens, and decodes a residual future action sequence with the
+new `ScaleFreeActionHead`.
+
+**Contract.** `forward()` returns `(B,T,4)` actions in the locked
+`[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]` contract so B2.11 can score it against the
+same action metrics and direct-policy diagnostic. `rollout()` exposes predicted latents plus
+actions for diagnostics or an explicitly auxiliary latent loss later. Future action labels,
+future target latents, `odom_reference_speed`, and metric scale are not model inputs.
+
+**Masking and gradients.** Padded history latents and masked action-history rows are zero-gated
+before the latent predictor. Tests prove deterministic eval, shape contracts, gradient flow through
+both predictor and action head, past-history conditioning, masked-history invariance, and no
+future-label parameters in the public forward signature.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_world_action_model.py tests/test_action_policy.py tests/test_heads.py`
+  -> 30 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check vllatent/model/heads.py vllatent/model/world_action_model.py tests/test_heads.py tests/test_world_action_model.py`
+  -> all checks passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m py_compile vllatent/model/world_action_model.py vllatent/model/heads.py`
+  -> pass.
+- `git diff --check -- vllatent/model/heads.py vllatent/model/world_action_model.py tests/test_heads.py tests/test_world_action_model.py`
+  -> pass.
 
 ---
 
