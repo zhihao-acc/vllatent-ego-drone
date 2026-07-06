@@ -1207,6 +1207,41 @@ Each B2 step follows the same loop:
 - **Test:** `$PY -m pytest -q tests/test_train_sports_b2.py tests/test_world_action_model.py tests/test_action_metrics.py`
 - **Deps:** B2.10. Blocks B2.12.
 
+**B2.11a — Controlled WAM source-balanced diagnostic.**
+- Tier TORCH / AUTO
+- Added after the 2026-07-05 B2.11 blocker diagnosis. Before changing WAM architecture or
+  objectives, rerun WAM on the same no-`cand06`, source-balanced local recipe that let the
+  repaired direct diagnostic pass B2.9. This separates a real WAM failure from the weaker
+  24-clip smoke recipe (`depth=1`, `hidden=64`, one clip/source, 108 val samples).
+- Exact local recipe:
+  `scripts/train_sports_b2.py --cache-dir ingest_data/latent_cache --run-dir runs/b2_wam_source_balanced_no_cand06_b211a_YYYYMMDD --model-kind world_action --device cuda --batch-size 32 --hidden-dim 128 --depth 2 --heads 4 --epochs 6 --val-frac 0.25 --eval-by-source --max-clips-per-source 4 --early-stop-patience 4`.
+  If CUDA is unavailable, use `--device cpu` and record that deviation.
+- **DoD:** confirms `cand06_*.npz` is absent; reports aggregate WAM action margin, component
+  metrics, and per-source readout on the B2.9-style split; compares directly against the B2.9
+  repaired direct diagnostic (`+12.17%`, 8/10 sources improved). If WAM still misses, record
+  whether it is path/direction-positive but speed/aggregate-negative, source-specific, or a
+  training-policy/architecture blocker. No H20 command is authorized by this diagnostic alone.
+- **Test:** `$PY -m pytest -q tests/test_train_sports_b2.py tests/test_world_action_model.py tests/test_action_metrics.py`
+- **Deps:** B2.11 blocked diagnosis. Blocks B2.12 or the next local model/metric fix.
+
+**B2.11b — Stale WorldVLN cleanup pass.**
+- Tier DOC + PURE/TORCH cleanup / AUTO
+- Added at user request after the B2.11a diagnostic plan. Inventory tracked WorldVLN/AerialVLN
+  teacher artifacts that are dead under the sports-following pivot, then remove only a reviewed,
+  specific path list. Do not use broad `rm -rf`; preserve append-only historical logs unless
+  explicitly replanned. Cleanup must not touch `runs/`, cached latents, ignored data artifacts, or
+  sibling repos.
+- Initial candidates include `_archived/vllatent/teacher/worldvln.py`,
+  `_archived/tests/test_teacher_contract.py`, stale A5.14 cache/WorldVLN tests under
+  `_archived/`, and active docs/scripts that still claim the WorldVLN cache path is runnable.
+  Active compatibility seams (`OracleTarget`, `manifest` teacher fields, `CachedLatentDataset`)
+  require dependency review before removal because tests and historical cache readers still
+  reference them.
+- **DoD:** no active import/test path depends on removed files; plan/docs clearly distinguish
+  retained historical record from runnable sports code; narrow affected tests plus blob guard pass.
+- **Test:** `rg -n "WorldVLN|worldvln|teacher_pose6|OracleTarget|vjepa" vllatent tests scripts configs docs plans reports _archived`
+- **Deps:** B2.11a diagnostic result or explicit user decision to pause diagnostics for cleanup.
+
 **B2.12 — B1-arch H20 USER gate.**
 - Tier DOC / **USER-GATED**
 - Summarize local WAM evidence in `DEV_LOG.md`: target diagnostics, outlier handling,
@@ -1274,14 +1309,16 @@ ACTIVE — B2 SCALE-FREE CONTROL-RELEVANT WAM:
                                               └─> B2.9  (rerun repaired direct-policy diagnostic)
                                                     └─> B2.10 (B1/WAM latent predictor + action head)
                                                           └─> B2.11 (local B1-arch training gate)
-                                                                └─> B2.12 (USER gate: approve one H20 command)
-                                                                      └─> B2.13 (USER-GATED H20 B1-arch run)
-                                                                            └─> B2.14 (USER gate: readout + Jetson decision)
+                                                                └─> B2.11a (controlled source-balanced WAM diagnostic)
+                                                                      ├─> B2.11b (stale WorldVLN cleanup pass)
+                                                                      └─> B2.12 (USER gate: approve one H20 command, only if local gate passes)
+                                                                            └─> B2.13 (USER-GATED H20 B1-arch run)
+                                                                                  └─> B2.14 (USER gate: readout + Jetson decision)
 ```
 
 **Critical path (B2):** B2.0 → B2.1 → B2.2 → B2.3/B2.4 → B2.5 diagnostic failure →
-B2.6 replan → B2.7 → B2.8 → B2.9 → B2.10 → B2.11 → B2.12 USER gate. No H20 run is allowed
-before the B1-architecture local training-policy gate passes.
+B2.6 replan → B2.7 → B2.8 → B2.9 → B2.10 → B2.11 → B2.11a → B2.12 USER gate.
+No H20 run is allowed before the controlled B1-architecture local training-policy gate passes.
 
 **Highest-risk invariant:** future action labels are targets only. They must never be provided to
 the model as conditioning inputs. Action/camera-motion history inputs must be past-observed only.

@@ -35,6 +35,8 @@ Every iteration starts by reading:
   - `B2.9` rerun repaired direct-policy diagnostic,
   - `B2.10` implement control-relevant B1/WAM predictor + action head,
   - `B2.11` local B1-arch training-policy verification,
+  - `B2.11a` controlled no-cand06 source-balanced WAM diagnostic,
+  - `B2.11b` stale WorldVLN cleanup pass with a reviewed path list,
   - `B2.12` USER gate before any H20 command.
 
 ## Iteration Protocol
@@ -66,6 +68,10 @@ Every iteration starts by reading:
 - Do not add PI-Prober, NoMaD-style diffusion, language cross-attention, game
   data, or real metric waypoint training until the corrected B1/WAM local gate
   passes or fails with a recorded diagnosis.
+- After the B2.11 blocker, run B2.11a before model changes: same no-cand06,
+  source-balanced recipe as the repaired B2.9 direct diagnostic, but
+  `--model-kind world_action`. Treat any cleanup of stale WorldVLN artifacts as
+  a separate B2.11b step with an explicit reviewed path list.
 - Scene/source split remains mandatory. Do not split sub-clips from one source
   video across train/val.
 - Pure tier stays pure: no torch/transformers/timm/airsim in

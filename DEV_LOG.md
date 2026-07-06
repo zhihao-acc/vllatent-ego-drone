@@ -88,11 +88,62 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.9 — Re-run repaired direct-policy diagnostic | done | 2026-07-05 | After user rejected cand06 as failed data and local cache removal, source-balanced repaired direct policy reached +12.17% vs repeat-last and 8/10 sources improved; B2.10 is the next AUTO step |
 | B2.10 — Control-relevant B1/WAM architecture | done | 2026-07-05 | Added B1-style `WorldActionModel`: observed latents + past scale-free action/path history -> latent rollout -> scale-free action head; no future labels/latents in forward |
 | B2.11 — Local B1-arch training-policy verification | blocked | 2026-07-05 | WAM train/eval mode works and tiny overfit passes, but local source-smoke reaches only +5.56% vs repeat-last and does not beat repaired direct diagnostic +12.17%; no H20 |
+| B2.11a — Controlled WAM source-balanced diagnostic | done | 2026-07-06 | B2.9-style no-cand06 WAM run passed inertia (+10.96%, 9/10 sources) but still missed repaired direct diagnostic (+12.17%); B2.11 remains blocked and no H20 |
+| B2.11b — Stale WorldVLN cleanup pass | pending | — | User-requested cleanup after B2.11a; must use reviewed specific path list, not broad rm-rf |
 | B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
 | B2.13 — H20 scale-free B1-arch WAM run | pending | — | USER-GATED; target artifact is stronger B1-architecture checkpoint |
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-06 — B2.11a controlled WAM source-balanced diagnostic
+
+**Status:** B2.11a is done as a diagnostic; B2.11 remains blocked. Do not proceed to B2.12/H20
+from this state.
+
+**Replan.** Added `B2.11a` to `plans/phase-b-sports-training.md` and `.codex/ralph-rules.md` after
+the B2.11 blocker diagnosis. The diagnostic reruns WAM with the same no-cand06, source-balanced
+recipe that passed B2.9 for the repaired direct model, before any model/objective changes. Added a
+separate `B2.11b` cleanup step for stale WorldVLN artifacts at user request; cleanup must use a
+reviewed path list and must not be mixed into the WAM training result.
+
+**Verification setup.** Confirmed `find ingest_data/latent_cache -maxdepth 1 -name 'cand06_*.npz'`
+has no output. Narrow B2.11a tests passed:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_train_sports_b2.py tests/test_world_action_model.py tests/test_action_metrics.py`
+-> `25 passed`.
+
+**Controlled WAM result.** Local CUDA run:
+`scripts/train_sports_b2.py --cache-dir ingest_data/latent_cache --run-dir runs/b2_wam_source_balanced_no_cand06_b211a_20260706 --model-kind world_action --device cuda --batch-size 32 --hidden-dim 128 --depth 2 --heads 4 --epochs 6 --val-frac 0.25 --eval-by-source --max-clips-per-source 4 --early-stop-patience 4`.
+Best epoch was `2`: model score `1.1924` vs `repeat_last=1.3392`, margin `+0.1468`
+(`+10.96%`), `757` samples, `3028` valid target steps, `2880` speed-valid steps.
+Epoch margins were `+4.93%`, `+9.90%`, `+10.96%`, `+10.00%`, `+7.84%`, `+6.41%`.
+
+**Direct comparison.** The controlled WAM run passes the dumb-baseline line but still does not beat
+the repaired B2.9 direct diagnostic (`+12.17%`, score `1.1762`). Relative to direct, WAM is slightly
+better on direction/speed (`25.42°` vs `25.56°`; speed MAE `0.2834` vs `0.3015`) but worse on
+normalized path (`ADE 0.2791` vs `0.2675`; `FDE 0.4887` vs `0.4652`), leaving aggregate score
+`0.0162` worse.
+
+**Per-source readout.** WAM improved `9/10` held-out sources. Margins: `cand35 +19.70%`,
+`cand43 +17.75%`, `cand29 +12.89%`, `cand31 +10.97%`, `cand38 +10.22%`, `cand09 +4.81%`,
+`cand05 +3.69%`, `cand07 +1.81%`, `ski03 +0.40%`; miss was `cand36 -1.74%`.
+This is broader than B2.9 direct (`8/10` sources), but not better in weighted aggregate.
+
+**Baseline check.** The trainer still logs the linear baseline as repeat-last because it does not pass
+`previous_action_scale_free` into scoring. A no-code rescore with true past-only linear extrapolation
+shows linear is much worse on this split (`15.8906` aggregate), so the best baseline remains
+repeat-last/no-turn and the B2.11a conclusion is unchanged.
+
+**Interpretation.** WAM is not broken: with the B2.9-style recipe it clears inertia and improves a
+majority of sources. The remaining blocker is that the current action-only, mean-pooled WAM still
+does not improve on the repaired direct policy. This points to model/objective/aggregation tradeoff,
+not data curation alone. No H20 command is authorized.
+
+**Next.** B2.11b stale WorldVLN cleanup inventory/removal is next if continuing the user's requested
+cleanup path. Any subsequent model work should be a separate local step, likely exact residual
+anchoring, active linear-baseline plumbing, or a WAM objective/head diagnostic.
 
 ---
 
