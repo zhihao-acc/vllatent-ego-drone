@@ -1,9 +1,10 @@
 #!/usr/bin/env python
-"""Train the B2 direct scale-free action policy.
+"""Train B2 scale-free action models.
 
 This script is separate from ``train_sports.py`` so the B1 latent-world trainer
-remains reproducible.  B2 trains only ``ScaleFreeActionPolicy`` on cached DINO
-latents and scale-free future-action labels.
+remains reproducible.  It supports the B2 direct diagnostic policy and the
+B2.11 B1/WAM-style world-action model on the same scale-free future-action
+labels.
 """
 from __future__ import annotations
 
@@ -25,16 +26,20 @@ from vllatent.config import Config, PredictorConfig
 from vllatent.data.collate import ActionPolicyBatch, collate_action_policy_batch
 from vllatent.data.sports_loader import SportsTrainingDataset, clip_source, split_clips_by_source
 from vllatent.model.action_policy import ScaleFreeActionPolicy
+from vllatent.model.world_action_model import WorldActionModel
 from vllatent.schemas import EMBED_DIM
 from vllatent.train.action_metrics import ActionScorecard, score_action_predictions
 from vllatent.train.checkpoint import save_checkpoint, seed_everything, snapshot_config
 from vllatent.train.losses import action_policy_loss
 
+MODEL_KINDS = ("direct", "world_action")
+
 
 @dataclass(frozen=True)
 class ActionTrainConfig:
-    """B2 action-policy training knobs."""
+    """B2 action-model training knobs."""
 
+    model_kind: str = "direct"
     lr: float = 3e-4
     weight_decay: float = 0.01
     batch_size: int = 32
@@ -42,6 +47,7 @@ class ActionTrainConfig:
     hidden_dim: int = 256
     depth: int = 2
     heads: int = 4
+    mlp_ratio: int = 2
     dropout: float = 0.1
     val_frac: float = 0.2
     eval_every_epochs: int = 1
@@ -53,6 +59,29 @@ class ActionTrainConfig:
     direction_weight: float = 1.0
     speed_weight: float = 1.0
     path_weight: float = 1.0
+    latent_residual_init_std: float = 1e-3
+
+    def __post_init__(self) -> None:
+        if self.model_kind not in MODEL_KINDS:
+            raise ValueError(f"model_kind must be one of {MODEL_KINDS}, got {self.model_kind!r}")
+        for name in ("batch_size", "epochs", "hidden_dim", "depth", "heads", "mlp_ratio", "early_stop_patience"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or value < 1:
+                raise ValueError(f"{name} must be a positive int, got {value!r}")
+        for name in (
+            "lr",
+            "weight_decay",
+            "dropout",
+            "val_frac",
+            "grad_clip",
+            "direction_weight",
+            "speed_weight",
+            "path_weight",
+            "latent_residual_init_std",
+        ):
+            value = getattr(self, name)
+            if value < 0:
+                raise ValueError(f"{name} must be >= 0, got {value}")
 
 
 def _write_jsonl(path: Path, entry: dict[str, Any]) -> None:
@@ -99,14 +128,30 @@ def _make_loader(dataset: SportsTrainingDataset, cfg: ActionTrainConfig, *, shuf
     )
 
 
-def _make_model(cfg: ActionTrainConfig) -> ScaleFreeActionPolicy:
-    return ScaleFreeActionPolicy(
-        dim=EMBED_DIM,
-        hidden_dim=cfg.hidden_dim,
-        depth=cfg.depth,
-        heads=cfg.heads,
-        dropout=cfg.dropout,
-    )
+def _make_model(cfg: ActionTrainConfig) -> torch.nn.Module:
+    if cfg.model_kind == "direct":
+        return ScaleFreeActionPolicy(
+            dim=EMBED_DIM,
+            hidden_dim=cfg.hidden_dim,
+            depth=cfg.depth,
+            heads=cfg.heads,
+            mlp_ratio=cfg.mlp_ratio,
+            dropout=cfg.dropout,
+        )
+    if cfg.model_kind == "world_action":
+        predictor_cfg = PredictorConfig(
+            depth=cfg.depth,
+            heads=cfg.heads,
+            mlp_ratio=cfg.mlp_ratio,
+            dropout=cfg.dropout,
+        )
+        return WorldActionModel(
+            predictor_cfg,
+            dim=EMBED_DIM,
+            action_hidden_dim=cfg.hidden_dim,
+            latent_residual_init_std=cfg.latent_residual_init_std,
+        )
+    raise ValueError(f"Unsupported model_kind {cfg.model_kind!r}")
 
 
 def _flatten_scorecard(scorecard: ActionScorecard) -> dict[str, Any]:
@@ -131,7 +176,7 @@ def _flatten_scorecard(scorecard: ActionScorecard) -> dict[str, Any]:
 
 
 def evaluate_action_policy(
-    model: ScaleFreeActionPolicy,
+    model: torch.nn.Module,
     loader: Any,
     device: str,
     *,
@@ -187,7 +232,7 @@ def evaluate_action_policy(
 
 
 def _train_batch(
-    model: ScaleFreeActionPolicy,
+    model: torch.nn.Module,
     batch: ActionPolicyBatch,
     optimizer: torch.optim.Optimizer,
     cfg: ActionTrainConfig,
@@ -225,7 +270,14 @@ def _train_batch(
 
 def _write_config(run_dir: Path, cfg: ActionTrainConfig) -> Config:
     run_dir.mkdir(parents=True, exist_ok=True)
-    config = Config(predictor=PredictorConfig(depth=cfg.depth, heads=cfg.heads, dropout=cfg.dropout))
+    config = Config(
+        predictor=PredictorConfig(
+            depth=cfg.depth,
+            heads=cfg.heads,
+            mlp_ratio=cfg.mlp_ratio,
+            dropout=cfg.dropout,
+        )
+    )
     snapshot_config(config, run_dir)
     (run_dir / "train_b2_config.json").write_text(json.dumps(dataclasses.asdict(cfg), indent=2))
     return config
@@ -403,6 +455,7 @@ def train_full(args: argparse.Namespace, cfg: ActionTrainConfig) -> dict[str, An
 
 def train(args: argparse.Namespace) -> dict[str, Any]:
     cfg = ActionTrainConfig(
+        model_kind=args.model_kind,
         lr=args.lr,
         weight_decay=args.weight_decay,
         batch_size=args.batch_size,
@@ -410,6 +463,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         hidden_dim=args.hidden_dim,
         depth=args.depth,
         heads=args.heads,
+        mlp_ratio=args.mlp_ratio,
         dropout=args.dropout,
         val_frac=args.val_frac,
         eval_every_epochs=args.eval_every_epochs,
@@ -421,6 +475,7 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
         direction_weight=args.direction_weight,
         speed_weight=args.speed_weight,
         path_weight=args.path_weight,
+        latent_residual_init_std=args.latent_residual_init_std,
     )
     seed_everything(cfg.seed)
     if args.overfit_tiny:
@@ -429,9 +484,10 @@ def train(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Train B2 direct scale-free action policy")
+    parser = argparse.ArgumentParser(description="Train B2 scale-free action models")
     parser.add_argument("--cache-dir", required=True)
     parser.add_argument("--run-dir", default="runs/b2_action")
+    parser.add_argument("--model-kind", default="direct", choices=MODEL_KINDS)
     parser.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--amp-dtype", default="fp32", choices=("bf16", "fp16", "fp32"))
@@ -444,6 +500,7 @@ def main() -> None:
     parser.add_argument("--hidden-dim", type=int, default=256)
     parser.add_argument("--depth", type=int, default=2)
     parser.add_argument("--heads", type=int, default=4)
+    parser.add_argument("--mlp-ratio", type=int, default=2)
     parser.add_argument("--dropout", type=float, default=0.1)
     parser.add_argument("--val-frac", type=float, default=0.2)
     parser.add_argument("--eval-every-epochs", type=int, default=1)
@@ -454,6 +511,7 @@ def main() -> None:
     parser.add_argument("--direction-weight", type=float, default=1.0)
     parser.add_argument("--speed-weight", type=float, default=1.0)
     parser.add_argument("--path-weight", type=float, default=1.0)
+    parser.add_argument("--latent-residual-init-std", type=float, default=1e-3)
     parser.add_argument("--overfit-tiny", action="store_true")
     parser.add_argument("--overfit-samples", type=int, default=16)
     parser.add_argument("--max-steps", type=int, default=200)

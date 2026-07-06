@@ -11,12 +11,15 @@ torch = pytest.importorskip("torch")
 
 from scripts.train_sports_b2 import (  # noqa: E402
     ActionTrainConfig,
+    _make_model,
     _select_clip_stems,
     evaluate_action_policy,
     train_full,
     train_overfit_tiny,
 )
 from vllatent.data.collate import ActionPolicyBatch  # noqa: E402
+from vllatent.model.action_policy import ScaleFreeActionPolicy  # noqa: E402
+from vllatent.model.world_action_model import WorldActionModel  # noqa: E402
 from vllatent.scale_free_targets import SCALE_FREE_ACTION_DIM  # noqa: E402
 from vllatent.schemas import (  # noqa: E402
     EMBED_DIM,
@@ -170,3 +173,20 @@ def test_select_clip_stems_can_cap_per_source(tmp_path: Path) -> None:
 
     assert len(stems) == 6
     assert all(stem.endswith(("c000", "c001")) for stem in stems)
+
+
+def test_make_model_keeps_direct_policy_default() -> None:
+    cfg = ActionTrainConfig(hidden_dim=16, depth=1, heads=4, mlp_ratio=1)
+    model = _make_model(cfg)
+    assert isinstance(model, ScaleFreeActionPolicy)
+
+
+def test_make_model_can_build_world_action_model() -> None:
+    cfg = ActionTrainConfig(model_kind="world_action", hidden_dim=16, depth=1, heads=4, mlp_ratio=1)
+    model = _make_model(cfg)
+    assert isinstance(model, WorldActionModel)
+
+
+def test_action_train_config_rejects_unknown_model_kind() -> None:
+    with pytest.raises(ValueError, match="model_kind"):
+        ActionTrainConfig(model_kind="bogus")

@@ -87,12 +87,59 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.8 — Past-only action/camera-history conditioning | done | 2026-07-05 | Added causal action-history/path tensors through loader/collate/trainer and optional direct-policy conditioning; future-delta leakage test covers history inputs |
 | B2.9 — Re-run repaired direct-policy diagnostic | done | 2026-07-05 | After user rejected cand06 as failed data and local cache removal, source-balanced repaired direct policy reached +12.17% vs repeat-last and 8/10 sources improved; B2.10 is the next AUTO step |
 | B2.10 — Control-relevant B1/WAM architecture | done | 2026-07-05 | Added B1-style `WorldActionModel`: observed latents + past scale-free action/path history -> latent rollout -> scale-free action head; no future labels/latents in forward |
-| B2.11 — Local B1-arch training-policy verification | pending | — | Must beat inertia and repaired direct-policy baseline locally before H20 |
+| B2.11 — Local B1-arch training-policy verification | blocked | 2026-07-05 | WAM train/eval mode works and tiny overfit passes, but local source-smoke reaches only +5.56% vs repeat-last and does not beat repaired direct diagnostic +12.17%; no H20 |
 | B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
 | B2.13 — H20 scale-free B1-arch WAM run | pending | — | USER-GATED; target artifact is stronger B1-architecture checkpoint |
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.11 local WAM training-policy verification
+
+**Status:** B2.11 is blocked at the local gate. Do not proceed to B2.12/H20 from this state.
+
+**Trainer support.** `scripts/train_sports_b2.py` now supports `--model-kind direct|world_action`.
+The default remains `direct`, preserving the B2.9 diagnostic path. `world_action` builds the
+B2.10 `WorldActionModel` and reuses the same scale-free action loss, masks, source split, baseline
+metrics, config snapshots, checkpoints, and per-source metric logging.
+
+**Tiny overfit passed.** Local CUDA WAM overfit on 4 samples reached model score `0.4873` vs
+`repeat_last=0.5695`, margin `+0.0823` (`+14.44%`) after 3 steps. This verifies the WAM
+train/eval path and gradient plumbing.
+
+**Source-held-out smoke failed the B2.11 gate.** On a 24-clip source-held-out local smoke
+(`--model-kind world_action --max-clips-per-source 1 --max-clips 24`, depth `1`, hidden `64`,
+batch `4`, 2 epochs), the best WAM result was epoch `0`: model score `1.9441` vs
+`repeat_last=2.0585`, margin `+0.1144` (`+5.56%`), with `108` samples, `432` valid target steps,
+and `408` speed-valid steps. This is below the required `+10%` aggregate B2.11 line.
+
+**Direct comparison.** On the same 24-clip recipe, the direct model reached only `+0.87%`, so the
+WAM architecture does add control-relevant signal on this split. However it still fails the local
+gate and does not beat the repaired direct-policy diagnostic from B2.9 after cand06 removal
+(`+12.17%` on the stronger source-balanced recipe).
+
+**Per-source readout.** At the best WAM epoch, `4/6` held-out sources improved:
+`cand09 +2.26%`, `cand13 +6.43%`, `cand20 +9.15%`, `cand24 +21.06%`; misses were
+`cand21 -3.37%` and `cand26 -10.49%`. A smaller 12-clip smoke was weaker (`+0.35%`, 1/3 sources
+improved) and later epochs degraded, mainly through speed-ratio/path terms.
+
+**Interpretation.** The B1/WAM architecture is wired and trainable, but the current shallow WAM
+recipe does not clear the local action gate. The next step requires a replan or another local
+diagnostic/fix before B2.12; no H20 command is authorized.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_train_sports_b2.py tests/test_world_action_model.py tests/test_action_policy.py tests/test_action_metrics.py`
+  -> 38 passed.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check scripts/train_sports_b2.py tests/test_train_sports_b2.py vllatent/model/world_action_model.py`
+  -> all checks passed.
+- WAM tiny overfit run in `runs/b2_wam_overfit_tiny_20260705`
+  -> margin `+14.44%`.
+- WAM 24-clip source smoke in `runs/b2_wam_source_smoke_24clip_20260705`
+  -> best margin `+5.56%`, 4/6 sources improved, gate failed.
+- Direct 24-clip comparison in `runs/b2_direct_source_smoke_24clip_compare_20260705`
+  -> best margin `+0.87%`.
 
 ---
 
