@@ -85,7 +85,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.6 — B2a diagnosis + B1-arch replan | done | 2026-07-05 | Direct-policy B2a is diagnostic only; next target is corrected scale-free supervision plus stronger B1/WAM checkpoint |
 | B2.7 — Repair supervision/loss contract | done | 2026-07-05 | Speed-ratio targets are clipped/masked, diagnostics added, loss path term now uses normalized path geometry; local cache has 0 unmasked speed outliers |
 | B2.8 — Past-only action/camera-history conditioning | done | 2026-07-05 | Added causal action-history/path tensors through loader/collate/trainer and optional direct-policy conditioning; future-delta leakage test covers history inputs |
-| B2.9 — Re-run repaired direct-policy diagnostic | blocked | 2026-07-05 | Repaired direct policy improved source-balanced margin to +8.95% but missed +10% gate; only 5/10 sources improved, so B2.10 is not auto-authorized |
+| B2.9 — Re-run repaired direct-policy diagnostic | done | 2026-07-05 | After user rejected cand06 as failed data and local cache removal, source-balanced repaired direct policy reached +12.17% vs repeat-last and 8/10 sources improved; B2.10 is the next AUTO step |
 | B2.10 — Control-relevant B1/WAM architecture | pending | — | Latent/world predictor + action head; accepted by action-margin improvement, not raw DINO cosine |
 | B2.11 — Local B1-arch training-policy verification | pending | — | Must beat inertia and repaired direct-policy baseline locally before H20 |
 | B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
@@ -93,6 +93,38 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-05 — B2.9 pass after cand06 manual rejection
+
+**Status:** B2.9 is done after manual data curation. Next AUTO step is B2.10 control-relevant
+B1/WAM architecture. This does not authorize H20; B2.12 remains the first H20 USER gate.
+
+**Data curation.** The user manually reviewed `cand06` and marked it failed data because the clip
+contains too many soft edits plus acceleration/deceleration editing that the current filter cannot
+recognize. Deleted 11 local ignored cache artifacts matching `ingest_data/latent_cache/cand06_*.npz`;
+the local `.npz` cache count moved from `919` to `908`. No `.npz` files or `runs/` artifacts are
+tracked or committed.
+
+**Baseline rerun.** Reran the repaired B2.9 source-balanced smoke without cand06:
+`scripts/train_sports_b2.py --cache-dir ingest_data/latent_cache --run-dir runs/b2_repaired_source_balanced_no_cand06_20260705 --device cpu --batch-size 32 --hidden-dim 128 --depth 2 --heads 4 --epochs 6 --val-frac 0.25 --eval-by-source --max-clips-per-source 4 --early-stop-patience 4`.
+
+**Result.** Best epoch was `1`: model score `1.1762` vs best baseline `repeat_last=1.3392`,
+margin `+0.1630` (`+12.17%`), `n_samples=757`, `n_valid=3028`, `n_speed_valid=2880`. This passes
+the B2.9 aggregate `+10%` local diagnostic gate and improves on the pre-curation B2.9 result
+(`+8.95%`).
+
+**Per-source readout.** At the best epoch, `8/10` held-out sources improved. Remaining misses were
+`cand36 -3.21%` and `cand07 -2.07%`. Small positive sources included `ski03 +2.54%`,
+`cand09 +4.04%`, and `cand38 +5.40%`; strongest positive sources were `cand29 +10.14%`,
+`cand31 +11.80%`, `cand43 +16.79%`, `cand05 +17.29%`, and `cand35 +17.69%`.
+
+**Verified.**
+- `find ingest_data/latent_cache -maxdepth 1 -name 'cand06_*.npz' -print`
+  -> no output.
+- Repaired no-cand06 source-balanced smoke command above
+  -> best margin `+12.17%`, 8/10 sources improved, gate passed.
 
 ---
 
