@@ -1,8 +1,8 @@
 """A5.13b contract tests: frozen CLIP text tower with a MONKEYPATCHED backbone (no real weights).
 
 PURE gate (no marker): the ``_load_backbone`` seam returns numpy ``(M, Dn)`` tokens, so the contract
-needs neither torch nor transformers (mirrors the WorldVLN / V-JEPA-2 client tests). The heavy half —
-real CLIP weights — is the USER-GATED ``make text-smoke``.
+needs neither torch nor transformers. The heavy half — real CLIP weights — is the USER-GATED
+``make text-smoke``.
 
 Pins:
   1. the 512→768 zero-pad lift (first 512 dims = CLIP, rest 0; pass-through at 768; reject wider);

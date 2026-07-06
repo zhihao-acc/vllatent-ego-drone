@@ -1,6 +1,6 @@
-# Makefile — vllatent-ego-drone. Default lane is PURE (numpy/pyyaml; no torch, no sim).
-# The torch tier (vllatent.encode, vllatent.data) and sim tier (vllatent.render,
-# vllatent.cache) are import-guarded and exercised via `make test-torch` / inside fly0-m1.
+# Makefile — vllatent-ego-drone. Default lane is PURE (numpy/pyyaml; no torch).
+# The torch/sports tier (vllatent.encode, vllatent.data, vllatent.model, vllatent.train)
+# is import-guarded and exercised via `make test-torch`.
 PY ?= python
 SHELL := /bin/bash
 
@@ -15,7 +15,7 @@ help:
 	@echo "  make setup-torch  - the torch extra (dev box / H20: torch, transformers, timm, einops, opencv)"
 	@echo "  make lint         - ruff check ."
 	@echo "  make typecheck    - HARD mypy gate on the PURE tier"
-	@echo "  make typecheck-all- mypy on the full package (informational; torch/sim = missing imports)"
+	@echo "  make typecheck-all- mypy on the full package (informational; heavy deps may be missing)"
 	@echo "  make import-smoke - import the PURE tier (numpy/pyyaml only, no torch/sim)"
 	@echo "  make test         - pure unit tests (-m 'not torch and not sim')"
 	@echo "  make test-torch   - torch-tier tests (needs the torch extra)"

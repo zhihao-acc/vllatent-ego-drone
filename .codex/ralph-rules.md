@@ -36,7 +36,7 @@ Every iteration starts by reading:
   - `B2.10` implement control-relevant B1/WAM predictor + action head,
   - `B2.11` local B1-arch training-policy verification,
   - `B2.11a` controlled no-cand06 source-balanced WAM diagnostic,
-  - `B2.11b` stale WorldVLN cleanup pass with a reviewed path list,
+  - `B2.11b` stale WorldVLN cleanup pass with a reviewed path list (done 2026-07-06),
   - `B2.12` USER gate before any H20 command.
 
 ## Iteration Protocol
@@ -72,6 +72,9 @@ Every iteration starts by reading:
   source-balanced recipe as the repaired B2.9 direct diagnostic, but
   `--model-kind world_action`. Treat any cleanup of stale WorldVLN artifacts as
   a separate B2.11b step with an explicit reviewed path list.
+- B2.11b cleanup is complete and does not change the WAM gate: B2.11 remains
+  blocked until a separate local WAM fix/diagnostic passes or is explicitly
+  replanned.
 - Scene/source split remains mandatory. Do not split sub-clips from one source
   video across train/val.
 - Pure tier stays pure: no torch/transformers/timm/airsim in

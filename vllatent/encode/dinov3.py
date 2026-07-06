@@ -1,8 +1,7 @@
 """Frozen DINOv3 ViT-B/16 encoder wrapper (TORCH tier) — Phase-A step A5.10 (was step 7).
 
 RGB 224x224 -> last-layer patch tokens ``(196, 768)`` fp16, frozen (eval / no_grad / fp16).
-This is the **student's frozen, cached front-end encoder** (NOT the student — the student is the
-latent-prediction transformer distilled from WorldVLN; see the re-plan). Phases B+ train on the
+This is the **student's frozen, cached front-end encoder** (NOT the student). Phases B+ train on the
 cached fp16 latents this wrapper produces; the encoder itself never trains (no EMA / no VICReg —
 a frozen cached encoder is a fixed target and cannot collapse).
 

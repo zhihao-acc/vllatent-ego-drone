@@ -3,7 +3,6 @@
 Usage:
     python -m vllatent.ingest process --url URL --clip-id ID [--config PATH] [--device DEVICE]
     python -m vllatent.ingest batch --clips PATH [--config PATH] [--device DEVICE]
-    python -m vllatent.ingest inspect --cache DIR [--n N]
 """
 from __future__ import annotations
 
@@ -32,19 +31,11 @@ def _build_parser() -> argparse.ArgumentParser:
     bat.add_argument("--device", default="cuda", help="Torch device")
     bat.add_argument("--no-skip-existing", action="store_true")
 
-    ins = sub.add_parser("inspect", help="Inspect a latent cache")
-    ins.add_argument("--cache", required=True, help="Cache directory")
-    ins.add_argument("--n", type=int, default=5, help="Number of samples to show")
-
     return p
 
 
 def main(argv: list[str] | None = None) -> int:
     args = _build_parser().parse_args(argv)
-
-    if args.command == "inspect":
-        from vllatent.data.loader import inspect_cache
-        return inspect_cache(args.cache, n=args.n)
 
     from vllatent.config import Config
     from vllatent.ingest.pipeline import (

@@ -1,7 +1,7 @@
 # I/O Contract — vllatent-ego-drone (Phase A)
 
 > **⚠ PIVOT 2026-06-19 — SPORTS-FOLLOWING.** This document describes the Phase A AerialVLN I/O
-> contract. WorldVLN teacher references are **historical** — the sports pipeline uses MegaSaM VO
+> contract. Retired A5 teacher references are **historical** — the sports pipeline uses MegaSaM VO
 > for ego-motion and TrackVLA (Phase C) as the teacher. AirSim render references apply to the
 > historical cache path only; sports data uses ``vllatent.ingest.pipeline``. The tensor shapes
 > (196×D, 4-DoF waypoint, H=3/T=4) and the seam dataclasses remain valid.
@@ -32,13 +32,10 @@
 > `ẑ_{t+1..t+T}` → `PredictorOutput.predicted_latents` `(T,196,768)` fp16; waypoint (native) →
 > `Waypoint.delta_4dof (4,)` f32, AirSim-NED body. The loader-input tuple is `StepSample` (§2).
 >
-> **Teacher distillation seam (A5.9, post-pivot).** The student distills from a frozen WorldVLN
-> teacher (A5.8: 6-DoF `[roll,yaw,pitch,x,y,z]`, SE(3); inference stochastic by default ⇒ rollout
-> disagreement is free). `TeacherOutput.rollouts_pose6 (K,6)` holds the K stochastic rollouts;
-> `OracleTarget` is the per-step target paired 1:1 with `StepSample`: `{waypoint_4dof (4,) f32`
-> [6→4-projected: drop roll/pitch + abs→body-delta]`, teacher_pose6 (6,)` provenance`, rollpitch_resid`
-> [≈0 audit]`, disagreement` [K-rollout spread]`}`. The 6→4
-> projection + disagreement scalarization execute at cache-build (A5.14).
+> **Retired teacher distillation seam (A5.9).** The old teacher/cache path was invalidated by
+> the sports pivot. The active B2 target is scale-free future action supervision from sports
+> ego-motion; old teacher fields in pure schemas/manifests are compatibility records only, not a
+> runnable training path.
 
 ---
 
@@ -94,8 +91,8 @@
 
 ## 2. Loader output tuple (arch §6 item 5)
 
-Per step the cached-latent loader (`vllatent/data/loader.py`, step 10) emits the `StepSample`
-(`vllatent/schemas.py`, step 3):
+Per step the active sports loader (`vllatent/data/sports_loader.py`) emits the `StepSample`
+(`vllatent/schemas.py`, step 3) plus sports targets:
 
 ```
 (z_t, history_latents, history_mask, lang_tokens, lang_mask, action_id, z_next, delta_4dof, future_frame_rgb)

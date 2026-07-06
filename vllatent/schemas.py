@@ -2,9 +2,8 @@
 
 Frozen dataclasses for the tuple the cached-latent loader emits (arch-design §6
 item 5), the **student output seams** (predictor rollout / waypoint
-— H3, typed so an ablation is a config flag not code surgery), the **teacher
-distillation seam** (``TeacherOutput`` / ``OracleTarget`` — A5.9, the per-step target the
-student distills against), the parsed AerialVLN episode (output of
+— H3, typed so an ablation is a config flag not code surgery), the active sports target seam,
+the parsed AerialVLN episode (output of
 ``vllatent.audit.parse_episode``), and one cache-manifest entry (the typed view of
 ``vllatent.manifest``'s per-episode entry). numpy-typed; **stdlib + numpy only** (no torch /
 no airsim / no sibling) so CI imports this module. Each field documents its frame / dtype / order.
@@ -32,7 +31,6 @@ HISTORY = 3                 # H — history frames fed to the predictor (DINO-WM
 HORIZON = 4                 # T — prediction horizon (documented; not a StepSample field)
 N_ACTIONS = 8               # AerialVLN discrete action set, ids 0..7
 DOF = 4                     # continuous waypoint DoF: (dx, dy, dz, dyaw)
-TEACHER_DOF = 6             # teacher action head DoF: [roll,yaw,pitch,x,y,z] (A5.8; Phase C: TrackVLA)
 
 LATENT_DTYPE = np.float16   # cached DINOv3 latents on disk
 DELTA_DTYPE = np.float32    # continuous 4-DoF delta, AirSim-NED body frame
@@ -177,9 +175,8 @@ class Waypoint:
 class SportsTarget:
     """Per-step target for sports-following training (B1.6, Phase B pivot).
 
-    Slim replacement for :class:`OracleTarget` on sports FPV data — only the fields the
-    sports pipeline produces. ``waypoint_4dof`` from MegaSaM ego-motion. The sports loader
-    emits ``(StepSample, SportsTarget)``; AerialVLN legacy keeps ``(StepSample, OracleTarget)``.
+    The sports pipeline target is deliberately small: ``waypoint_4dof`` from MegaSaM ego-motion.
+    Scale-free action training derives its B2 targets separately from this motion signal.
     """
 
     waypoint_4dof: np.ndarray   # (4,) f32  — (dx,dy,dz,dyaw) from MegaSaM VO
@@ -188,67 +185,7 @@ class SportsTarget:
         _check_array("waypoint_4dof", self.waypoint_4dof, (DOF,), dtype=DELTA_DTYPE)
 
 
-# --- Teacher distillation seam (A5.9) — the (StepSample, OracleTarget) the student trains against ---
-
-@dataclass(frozen=True, eq=False)
-class TeacherOutput:
-    """Raw frozen-WorldVLN inference for one step: K stochastic rollouts of the 6-DoF action (A5.9).
-
-    A5.8 confirmed WorldVLN inference is STOCHASTIC by default (top_k/top_p sampling), so K rollouts
-    of the same input DIFFER — that spread is the rollout disagreement signal, FREE (no
-    MC-dropout). A5.11 (live-API re-probe) refined two facts: the released config locks the seed
-    across a session's segments, so **K rollouts = K sessions with distinct seeds** (the teacher
-    wrapper owns that); and the wire emits per-step **DELTAS** ``[dx,dy,dz,droll,dyaw,dpitch]``
-    (cm, deg) — the wrapper converts to THIS seam: order ``[roll,yaw,pitch,x,y,z]`` (the A5.8
-    training-stats order), model-native **(m, rad)**, per-step delta (NOT an absolute SE(3) pose —
-    the offline ``predict_pose.py`` integrates these; we keep the raw deltas). The 6->4 projection
-    to the student waypoint (incl. rad->deg yaw to match ``delta_4dof``) + the disagreement
-    scalarization happen at cache-build (A5.14); this seam pins the raw rollouts + the spread read.
-    """
-
-    rollouts_pose6: np.ndarray  # (K,6) float — K stochastic per-step deltas [roll,yaw,pitch,x,y,z] (m, rad)
-
-    def __post_init__(self) -> None:
-        _check_array("rollouts_pose6", self.rollouts_pose6, (None, TEACHER_DOF), kind="f")
-        if self.rollouts_pose6.shape[0] < 1:
-            raise ValueError(f"rollouts_pose6: expected K>=1 rollouts, got {self.rollouts_pose6.shape[0]}")
-
-    def rollout_spread(self) -> np.ndarray:
-        """Per-DoF standard deviation across the K rollouts, shape ``(6,)`` — the raw disagreement.
-
-        A5.14 scalarizes this (over the 4 student-relevant channels yaw,x,y,z) into
-        ``OracleTarget.disagreement``; Phase-C calibrates the gate threshold.
-        """
-        return np.std(self.rollouts_pose6, axis=0)
-
-
-@dataclass(frozen=True, eq=False)
-class OracleTarget:
-    """Per-step distillation TARGET (frozen seam, A5.9) the student trains against.
-
-    Pairs 1:1 with a :class:`StepSample` (the loader emits ``(StepSample, OracleTarget)``; A5.15).
-    ``waypoint_4dof`` is the 6->4-projected (drop roll/pitch + abs->body-delta)
-    student target; ``teacher_pose6`` + ``rollpitch_resid`` are kept as provenance + a
-    lossless-projection audit (roll/pitch are ≈0 on AerialVLN by construction — verify, don't assume).
-    """
-
-    waypoint_4dof: np.ndarray   # (4,) f32  — student target (dx,dy,dz,dyaw), AirSim-NED body
-    teacher_pose6: np.ndarray   # (6,) float — raw teacher pose [roll,yaw,pitch,x,y,z] (provenance)
-    rollpitch_resid: float      # |roll| + |pitch| of teacher_pose6 (>= 0; ≈0 audit on AerialVLN)
-    disagreement: float         # K-rollout spread scalar (>= 0)
-
-    def __post_init__(self) -> None:
-        _check_array("waypoint_4dof", self.waypoint_4dof, (DOF,), dtype=DELTA_DTYPE)
-        _check_array("teacher_pose6", self.teacher_pose6, (TEACHER_DOF,), kind="f")
-        for name in ("rollpitch_resid", "disagreement"):
-            v = getattr(self, name)
-            if isinstance(v, bool) or not isinstance(v, (int, float, np.integer, np.floating)):
-                raise TypeError(f"{name}: expected float, got {type(v).__name__}")
-            if not np.isfinite(float(v)) or float(v) < 0.0:
-                raise ValueError(f"{name}: expected a finite value >= 0, got {v}")
-
-
-Target = OracleTarget | SportsTarget
+Target = SportsTarget
 
 
 @dataclass(frozen=True, eq=False)
@@ -338,7 +275,6 @@ __all__ = [
     "HORIZON",
     "N_ACTIONS",
     "DOF",
-    "TEACHER_DOF",
     "LATENT_DTYPE",
     "DELTA_DTYPE",
     "RGB_DTYPE",
@@ -346,8 +282,6 @@ __all__ = [
     "StepSample",
     "PredictorOutput",
     "Waypoint",
-    "TeacherOutput",
-    "OracleTarget",
     "SportsTarget",
     "Target",
     "EpisodeRecord",

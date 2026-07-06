@@ -1231,15 +1231,22 @@ Each B2 step follows the same loop:
   specific path list. Do not use broad `rm -rf`; preserve append-only historical logs unless
   explicitly replanned. Cleanup must not touch `runs/`, cached latents, ignored data artifacts, or
   sibling repos.
-- Initial candidates include `_archived/vllatent/teacher/worldvln.py`,
-  `_archived/tests/test_teacher_contract.py`, stale A5.14 cache/WorldVLN tests under
-  `_archived/`, and active docs/scripts that still claim the WorldVLN cache path is runnable.
-  Active compatibility seams (`OracleTarget`, `manifest` teacher fields, `CachedLatentDataset`)
-  require dependency review before removal because tests and historical cache readers still
-  reference them.
+- Dependency review found `CachedLatentDataset` was not a healthy compatibility surface: its test
+  failed at import because `vllatent.data.base_loader` no longer exists, and only old inspect CLIs
+  referenced it. `TeacherOutput`/`OracleTarget` and manifest `worldvln_*` keys were unused after the
+  stale loader path was removed.
+- Executed cleanup slice removes the reviewed dead surfaces: tracked `_archived/`,
+  `scripts/render_aerialvln.sh`, `scripts/run_full_cache.sh`, and `docs/full-run-sizing.md`.
+  It also removes the broken A5 cache-loader inspect path
+  (`vllatent/data/loader.py`, `vllatent/data/__main__.py`, `tests/test_data_shapes.py`) and the
+  `vllatent.ingest inspect` subcommand that lazily imported it; stale Phase-A demo artifacts under
+  `scripts/demo/`; and unused pure teacher/oracle seams (`TeacherOutput`, `OracleTarget`,
+  `TEACHER_DOF`, manifest `worldvln_*` keys). README/Makefile/TOPOLOGY/io-contract no longer
+  advertise the old sim/cache path as runnable. Historical logs and superseded plans remain
+  append-only records.
 - **DoD:** no active import/test path depends on removed files; plan/docs clearly distinguish
   retained historical record from runnable sports code; narrow affected tests plus blob guard pass.
-- **Test:** `rg -n "WorldVLN|worldvln|teacher_pose6|OracleTarget|vjepa" vllatent tests scripts configs docs plans reports _archived`
+- **Test:** `rg -n "render_aerialvln|run_full_cache|full-run-sizing|vllatent\\.render|vllatent\\.cache|vllatent\\.teacher|CachedLatentDataset|vllatent\\.data\\.loader|python -m vllatent\\.data|ingest inspect|scripts/demo/|WorldVLN|worldvln|TeacherOutput|OracleTarget|teacher_pose6|TEACHER_DOF" README.md Makefile docs scripts vllatent tests configs --glob '!runs/**' --glob '!ingest_data/**'`
 - **Deps:** B2.11a diagnostic result or explicit user decision to pause diagnostics for cleanup.
 
 **B2.12 — B1-arch H20 USER gate.**

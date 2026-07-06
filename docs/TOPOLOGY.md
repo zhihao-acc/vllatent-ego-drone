@@ -8,9 +8,9 @@ the **tiers** (CLAUDE.md "Tier split") onto **hardware/processes**.
 | Box | Spec | Role |
 |---|---|---|
 | Dev box | RTX 5060 Ti 16 GB, Ubuntu 24.04 | pure-tier dev + small-slice encode; CI mirror |
-| AutoDL H20 | NVLink ~96 GB (saved navdreamer/Wan2.1 mirror, torch 2.8/CUDA 12.x) | **training** (Phase B+) + full encode→cache job. **SSH HANDS-OFF** |
+| AutoDL H20 | NVLink ~96 GB (saved navdreamer/Wan2.1 mirror, torch 2.8/CUDA 12.x) | **training** (Phase B+). **SSH HANDS-OFF** |
 | Lab | 5× RTX 4090 (24 GB) | optional; K=5 ensemble teacher (Phase C) |
-| `fly0-m1` docker | ROS Noetic, `--gpus all --net=host`, AerialVLN scenes at `/opt/aerialvln/{MSBuild2018,AirSimNH,Blocks}` | **render** (Phase A) + closed-loop (Phase D). UE4 launched MANUALLY |
+| `fly0-m1` docker | ROS Noetic, `--gpus all --net=host`, AerialVLN scenes at `/opt/aerialvln/{MSBuild2018,AirSimNH,Blocks}` | historical Phase-A render host; not part of the active B2 sports loop |
 | Jetson Orin NX 16 GB | drone companion computer | **deploy** target — the binding size constraint |
 
 ## Tier → where it runs
@@ -18,11 +18,11 @@ the **tiers** (CLAUDE.md "Tier split") onto **hardware/processes**.
 | Tier | Modules | Runs on | Deps |
 |---|---|---|---|
 | **PURE** | `schemas, actions, frames, config, manifest, audit` | CI / any box | numpy, pyyaml |
-| **TORCH** | `encode/, data/` | dev box / H20 | torch 2.8, transformers≥4.56, timm≥1.0.20 |
-| **SIM** | `render/, cache` | `fly0-m1` docker only | airsim, msgpack-rpc; `/opt/aerialvln` scenes |
+| **TORCH** | `encode/, data/, ingest/, model/, train/` | dev box / H20 | torch 2.8, transformers>=4.56, timm>=1.0.20 |
+| **SIM** | retired in active code | `fly0-m1` docker only, if a historical Phase-A render must be reproduced | airsim, msgpack-rpc; `/opt/aerialvln` scenes |
 
 CI gates ONLY the pure tier (torch-free). The torch tier is covered by `make test-torch`
-on tiny fixtures; the sim tier runs only in the container.
+on tiny fixtures. No active repo module imports AirSim.
 
 ## Manual operations (agent gives a command block; the USER runs it)
 
@@ -37,17 +37,17 @@ on tiny fixtures; the sim tier runs only in the container.
 - GitHub: mirror chain `ghfast.top`, `gh.llkk.cc`, `mirror.ghproxy.com`.
 - HuggingFace: `export HF_ENDPOINT=https://hf-mirror.com` (DINOv3 / V-JEPA-2 / datasets).
 
-## Data flow (Phase A)
+## Data flow (Phase B)
 
 ```
-AerialVLN JSON (actions + reference_path + language)   [data/, gitignored]
-        │  teleport-to-pose replay in fly0-m1 (sim tier)
+Sports FPV videos / frame clips        [ingest_data/, gitignored]
+        │  content filter + MegaSaM VO + DINOv3 encode
         ▼
-   rendered RGB (BGR→RGB)            ──► frozen DINOv3 ViT-B/16 (torch tier)
-        │                                        │
-        └────────────────────────────────────────┘
-                          ▼
-          cached (196,768) fp16 latents + manifest   [data/latent_cache/, gitignored]
-                          ▼
-          CachedLatentDataset (torch tier) → StepSample tuples  → Phase B training (sim-free)
+   latent .npz clips with scale-free action targets
+        │
+        ▼
+          cached (196,768) fp16 observed/future latents   [ingest_data/latent_cache/, gitignored]
+        │
+        ▼
+          SportsTrainingDataset → direct policy / WAM diagnostics
 ```

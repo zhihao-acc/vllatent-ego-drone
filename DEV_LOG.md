@@ -89,12 +89,44 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.10 — Control-relevant B1/WAM architecture | done | 2026-07-05 | Added B1-style `WorldActionModel`: observed latents + past scale-free action/path history -> latent rollout -> scale-free action head; no future labels/latents in forward |
 | B2.11 — Local B1-arch training-policy verification | blocked | 2026-07-05 | WAM train/eval mode works and tiny overfit passes, but local source-smoke reaches only +5.56% vs repeat-last and does not beat repaired direct diagnostic +12.17%; no H20 |
 | B2.11a — Controlled WAM source-balanced diagnostic | done | 2026-07-06 | B2.9-style no-cand06 WAM run passed inertia (+10.96%, 9/10 sources) but still missed repaired direct diagnostic (+12.17%); B2.11 remains blocked and no H20 |
-| B2.11b — Stale WorldVLN cleanup pass | pending | — | User-requested cleanup after B2.11a; must use reviewed specific path list, not broad rm-rf |
+| B2.11b — Stale WorldVLN cleanup pass | done | 2026-07-06 | Removed reviewed stale A5/WorldVLN files, broken cache inspect path, demo artifacts, and unused teacher/oracle pure seams; active scan + narrow tests + blob guard green; B2.11 still blocked/no H20 |
 | B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
 | B2.13 — H20 scale-free B1-arch WAM run | pending | — | USER-GATED; target artifact is stronger B1-architecture checkpoint |
 | B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-06 — B2.11b stale WorldVLN cleanup
+
+**Status:** B2.11b is done as cleanup only. B2.11 remains blocked because WAM still does not beat
+the repaired direct diagnostic; no B2.12/H20 command is authorized.
+
+**Removed.** Used a reviewed path list, not broad deletion. Removed tracked `_archived/` A5
+WorldVLN/render/cache code and tests; stale runnable wrappers `scripts/render_aerialvln.sh` and
+`scripts/run_full_cache.sh`; stale sizing doc `docs/full-run-sizing.md`; stale Phase-A demo
+artifacts under `scripts/demo/`; the broken A5 cache loader/inspect path
+(`vllatent/data/loader.py`, `vllatent/data/__main__.py`, `tests/test_data_shapes.py`); and the
+`vllatent.ingest inspect` subcommand that lazily imported that missing-base-loader path.
+
+**Slimmed pure seams.** Removed unused `TeacherOutput`, `OracleTarget`, and `TEACHER_DOF` from
+`vllatent/schemas.py`, and stopped emitting/validating old teacher provenance fields in
+`vllatent/manifest.py`. `Target` now aliases `SportsTarget`. README/Makefile/TOPOLOGY/io-contract
+now present the active B2 sports path instead of the old sim/cache path. Append-only logs and
+superseded plans remain historical records.
+
+**Verification.** Passed:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_smoke.py tests/test_schemas.py tests/test_text_contract.py tests/test_train_sports_b2.py tests/test_world_action_model.py tests/test_action_metrics.py`
+-> `100 passed`.
+Import check passed for `vllatent.schemas`, `vllatent.manifest`, `vllatent.data`, `vllatent.ingest`,
+`vllatent.encode.dinov3`, and `vllatent.encode.text`. `python -m vllatent.ingest --help` now exposes
+only `process` and `batch`. Active stale-reference scan found no hits for removed runnable names or
+WorldVLN teacher/oracle symbols. `bash scripts/check_no_blobs.sh` passed. `git diff --check` passed.
+
+**Next.** Continue with a separately planned local B2.11 WAM fix/diagnostic. The strongest evidence
+still points to WAM underperforming direct on normalized path/aggregate despite passing inertia; do
+not proceed to H20 until a local WAM gate or explicit replan passes.
 
 ---
 

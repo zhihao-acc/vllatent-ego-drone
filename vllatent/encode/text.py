@@ -18,8 +18,8 @@ information-preserving, no training, and trivially swappable. ``_lift_to_embed_d
 **torch / transformers imports are LAZY** (inside :func:`_load_backbone`) so a torch-free box (the pure CI
 lane) imports this module without crashing. The pure tier never imports it. Tested two ways (A5.13b): a
 monkeypatched-backbone **contract** test (``tests/test_text_contract.py``, PURE — the seam returns numpy,
-so no torch/transformers needed, mirroring the WorldVLN/V-JEPA-2 client tests) and a real-weight smoke
-``make text-smoke`` (USER-GATED; downloads CLIP weights; no token).
+so no torch/transformers needed) and a real-weight smoke ``make text-smoke`` (USER-GATED; downloads CLIP
+weights; no token).
 
 See plans/phase-a5-replan-postpivot.md (A5.13b — text tower for the lang_tokens cache).
 """

@@ -1,15 +1,14 @@
 # vllatent-ego-drone
 
-A **compact latent world-action model for aerial vision-language navigation**. The contribution is
-**trust-aware commitment**: a frozen perception backbone + a small action/language-conditioned latent
-predictor + a trust layer that decides how far ahead to commit.
+A compact latent world-action model for FPV sports following. The active Phase B path uses cached
+DINOv3 latents plus past scale-free action/path history to predict future scale-free actions.
 
 ```
-RGB 224² → [DINOv3 ViT-B/16, frozen, cached] → latent predictor (~120M) → 4-DoF waypoint + trust horizon
+observed DINO latents + past scale-free history -> direct policy / WAM -> future scale-free actions
 ```
 
-Action is **discrete-in** (AerialVLN 8-way) / **continuous-4-DoF-out** (Δx, Δy, Δz, Δψ). The frozen,
-cached encoder makes training **sim-free** after a one-time render→encode→cache preprocess.
+The current target is `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio]`. Future actions are
+labels only; model conditioning is limited to observed latents and past observed action/path history.
 
 > Architecture is **LOCKED** — see the vault `latent-pred-pipeline/arch-design-2026-06-08-latent-pred`.
 > Do not relitigate it; build around it. See `CLAUDE.md` for full agent context.
@@ -17,14 +16,13 @@ cached encoder makes training **sim-free** after a one-time render→encode→ca
 ## Layout
 
 ```
-vllatent/   schemas actions frames config manifest audit   # PURE tier (numpy/pyyaml; CI-gated)
-            encode/ data/                                   # TORCH tier (lazy torch; make test-torch)
-            render/ cache                                   # SIM tier (lazy airsim; fly0-m1 only)
-plans/      phase-a-data-and-io-contract.md                 # the executable Phase-A plan
-docs/       TOPOLOGY.md  io-contract.md(step2)  full-run-sizing.md(step12)
+vllatent/   schemas actions frames config manifest audit    # PURE tier (numpy/pyyaml; CI-gated)
+            encode/ data/ ingest/ model/ train/             # TORCH + sports-training tiers
+plans/      phase-b-sports-training.md                      # active Phase-B plan
+docs/       TOPOLOGY.md  io-contract.md
 configs/    default.yaml  data_audit.yaml
 fixtures/   tiny episodes + synthetic latents (committed, tiny)
-scripts/    check_no_blobs.sh  ralph.sh  + user-gated command-block stubs
+scripts/    check_no_blobs.sh  ralph.sh  training/ingest helpers
 ```
 
 ## Quickstart (pure tier — dev box / CI)
@@ -35,13 +33,13 @@ make import-smoke    # pure tier imports with numpy/pyyaml only
 make lint && make typecheck && make test
 ```
 
-The torch tier (`pip install -e ".[torch]"` → `make test-torch`) runs on the dev box / H20; the sim tier
-runs only inside the `fly0-m1` docker. See `docs/TOPOLOGY.md`.
+The torch tier (`pip install -e ".[torch]"` -> `make test-torch`) runs on the dev box / H20.
+The old AirSim render-cache path is historical; Phase B trains on sports latent caches.
 
 ## Workflow
 
 Iterated under a **ralph loop** (`make ralph` prints the launch command). Each step is tracked in
-`DEV_LOG.md` against `plans/phase-a-data-and-io-contract.md`. Phase A = plumbing + data; the
-render/encode/cache job is sized but **not bulk-run** until explicit sign-off.
+`DEV_LOG.md` against the active plan. Phase B is the sports-following pivot: local diagnostics must
+pass before any H20 training command is prepared.
 
-License of the AerialVLN dataset used in Phase A: **CC BY-NC-SA 4.0** (non-commercial).
+Historical Phase-A AerialVLN artifacts are retained only where they still support pure contracts.

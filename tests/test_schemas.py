@@ -22,15 +22,12 @@ from vllatent.schemas import (
     LATENT_DTYPE,
     N_ACTIONS,
     PATCH_TOKENS,
-    TEACHER_DOF,
     CacheManifestEntry,
     EpisodeRecord,
-    OracleTarget,
     PredictorOutput,
     SportsTarget,
     StepSample,
     Target,
-    TeacherOutput,
     Waypoint,
 )
 
@@ -164,70 +161,6 @@ def test_waypoint_valid_and_rejects_bad() -> None:
         Waypoint(delta_4dof=np.zeros((3,), DELTA_DTYPE))    # wrong DoF
 
 
-# --- Teacher distillation seam (A5.9) ---
-
-def test_teacher_output_valid_and_rollout_spread() -> None:
-    rolls = np.stack([
-        np.array([0.0, 0.1, 0.0, 1.0, 2.0, 3.0]),  # [roll,yaw,pitch,x,y,z]
-        np.array([0.0, 0.3, 0.0, 1.0, 2.0, 5.0]),  # yaw + z differ across the 2 rollouts
-    ])
-    to = TeacherOutput(rollouts_pose6=rolls)
-    spread = to.rollout_spread()
-    assert spread.shape == (TEACHER_DOF,)
-    assert spread[0] == 0.0 and spread[2] == 0.0   # roll, pitch identical -> 0 spread
-    assert spread[1] > 0.0 and spread[5] > 0.0     # yaw, z vary -> nonzero disagreement
-
-
-@pytest.mark.parametrize(
-    "arr",
-    [
-        np.zeros((0, TEACHER_DOF)),                 # K=0 rollouts
-        np.zeros((3, 4)),                           # wrong DoF width (must be 6)
-        np.zeros((TEACHER_DOF,)),                   # wrong ndim (must be (K,6))
-        np.zeros((3, TEACHER_DOF), dtype=int),      # not float-kind
-    ],
-)
-def test_teacher_output_rejects_bad(arr: np.ndarray) -> None:
-    with pytest.raises((ValueError, TypeError)):
-        TeacherOutput(rollouts_pose6=arr)
-
-
-def _oracle(**over: object) -> OracleTarget:
-    kw: dict[str, object] = dict(
-        waypoint_4dof=np.zeros((DOF,), DELTA_DTYPE),
-        teacher_pose6=np.zeros((TEACHER_DOF,)),
-        rollpitch_resid=0.0,
-        disagreement=0.1,
-    )
-    kw.update(over)
-    return OracleTarget(**kw)  # type: ignore[arg-type]
-
-
-def test_oracle_target_valid_and_immutable() -> None:
-    ot = _oracle()
-    assert ot.waypoint_4dof.shape == (DOF,) and ot.waypoint_4dof.dtype == DELTA_DTYPE
-    assert ot.teacher_pose6.shape == (TEACHER_DOF,)
-    with pytest.raises(dataclasses.FrozenInstanceError):
-        ot.disagreement = 9.0  # type: ignore[misc]
-
-
-@pytest.mark.parametrize(
-    "bad",
-    [
-        dict(waypoint_4dof=np.zeros((DOF,), np.float16)),         # wrong dtype (must be f32)
-        dict(waypoint_4dof=np.zeros((3,), DELTA_DTYPE)),          # wrong student DoF
-        dict(teacher_pose6=np.zeros((4,))),                      # wrong teacher width (must be 6)
-        dict(teacher_pose6=np.zeros((TEACHER_DOF,), dtype=int)),  # not float-kind
-        dict(disagreement=-0.1),                                # spread must be >= 0
-        dict(rollpitch_resid=float("inf")),                     # must be finite
-        dict(disagreement=True),                                # bool is not a valid float
-    ],
-)
-def test_oracle_target_rejects_bad(bad: dict[str, object]) -> None:
-    with pytest.raises((ValueError, TypeError)):
-        _oracle(**bad)
-
-
 # --- SportsTarget (B1.6) ---
 
 def _sports_target(**over: object) -> SportsTarget:
@@ -258,10 +191,8 @@ def test_sports_target_rejects_bad(bad: dict[str, object]) -> None:
         _sports_target(**bad)
 
 
-def test_target_type_alias_accepts_both() -> None:
-    oracle: Target = _oracle()
+def test_target_type_alias_is_sports_target() -> None:
     sports: Target = _sports_target()
-    assert isinstance(oracle, OracleTarget)
     assert isinstance(sports, SportsTarget)
 
 
@@ -334,30 +265,11 @@ def test_build_manifest_from_config_is_valid_and_dedups_shapes() -> None:
     assert m["convention"]["color_order"] == cfg.cache.color_order
 
 
-def test_build_manifest_teacher_provenance_is_stubbed() -> None:
-    m = build_manifest(Config())
-    t = m["teacher"]
-    assert set(t) == {
-        "worldvln_model_id",
-        "worldvln_revision",
-        "disagreement_source",
-        "render_config_hash",
-    }
-    assert t["worldvln_model_id"] == "" and t["worldvln_revision"] == "" and t["render_config_hash"] == ""
-    assert t["disagreement_source"] == ""
-
-
 def test_build_manifest_with_typed_entries_roundtrips() -> None:
     entry = CacheManifestEntry("ep0", 2, 42, "ep0/latents.npy", trajectory_id="traj0").to_dict()
     m = build_manifest(Config(), entries=[entry])
     assert validate_manifest(m) == []
     assert m["entries"][0]["episode_id"] == "ep0"
-
-
-def test_validate_manifest_rejects_missing_teacher_section() -> None:
-    m = empty_manifest()
-    del m["teacher"]
-    assert any("missing key: teacher" in e for e in validate_manifest(m))
 
 
 def test_validate_manifest_entry_keys_enforced_from_type() -> None:
@@ -384,12 +296,6 @@ def test_validate_manifest_rejects_missing_dataset_key() -> None:
     m = empty_manifest()
     del m["dataset"]["license"]
     assert any("dataset missing keys" in e for e in validate_manifest(m))
-
-
-def test_validate_manifest_rejects_missing_teacher_key() -> None:
-    m = empty_manifest()
-    del m["teacher"]["worldvln_model_id"]
-    assert any("teacher missing keys" in e for e in validate_manifest(m))
 
 
 # --- StepSample optional ingest metadata ---

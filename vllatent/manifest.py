@@ -4,8 +4,8 @@ Cached latents are **render-once**: RGB is rendered from the AirSim sim at each
 ground-truth pose, encoded by the frozen DINOv3 ViT-B/16, and written to disk as
 fp16 patch tokens. A cache without a manifest is unauditable, so EVERY cache build
 writes/updates one. The manifest pins exactly the things that make a cached latent
-reproducible — the encoder identity, the dataset slice, the two data foot-guns
-(quaternion order + colour order), and (post-pivot) the teacher/oracle provenance.
+reproducible — the encoder identity, the dataset slice, and the two data foot-guns
+(quaternion order + colour order).
 
 This module is PURE tier (numpy/pyyaml/stdlib): it builds the manifest from the
 typed ``vllatent.config.Config`` — the single source of truth — so the encoder id,
@@ -36,20 +36,12 @@ _REQUIRED: dict[str, type] = {
     "encoder": dict,      # {model_id, text_model_id, revision, dtype, patch_tokens, dim}
     "dataset": dict,      # {name, variant, split, license}
     "convention": dict,   # {quaternion_order, color_order, frame}
-    "teacher": dict,      # {worldvln_model_id, worldvln_revision, disagreement_source, render_config_hash}
     "entries": list,      # list of per-episode entries
 }
 
 _REQUIRED_ENCODER = {"model_id", "text_model_id", "revision", "dtype", "patch_tokens", "dim"}
 _REQUIRED_DATASET = {"name", "variant", "split", "license"}
 _REQUIRED_CONVENTION = {"quaternion_order", "color_order", "frame"}
-# Teacher/oracle provenance for the distillation pivot (stubbed at build, populated in A5.14).
-_REQUIRED_TEACHER = {
-    "worldvln_model_id",
-    "worldvln_revision",
-    "disagreement_source",
-    "render_config_hash",
-}
 
 
 def build_manifest(
@@ -62,13 +54,9 @@ def build_manifest(
     """Build a cache manifest from the typed ``Config`` (the single source of truth).
 
     The fixed encoder shapes come from ``vllatent.schemas`` (``PATCH_TOKENS`` / ``EMBED_DIM``)
-    — NOT re-hardcoded here. The teacher-provenance fields are STUBBED now (empty strings) and
-    populated at cache-build time (A5.14); only ``disagreement_source`` is known from
-    ``Config`` today (finalized in A5.9). ``split`` / ``variant`` are per-build labels.
-
-    Sports-pivot note: this builder is the AerialVLN path (teacher section with WorldVLN fields).
-    Sports data uses ``build_manifest_wild_video()`` which skips the teacher section. The two
-    builders converge in B-2/Phase C when the teacher changes to TrackVLA.
+    — NOT re-hardcoded here. ``split`` / ``variant`` are per-build labels. The retired A5
+    teacher/cache fields are no longer emitted by default; historical manifests with extra keys
+    still parse because validation ignores unknown fields.
     """
     enc, cache, data = config.encoder, config.cache, config.data
     return {
@@ -92,15 +80,6 @@ def build_manifest(
             "quaternion_order": cache.quaternion_order,  # canonical order latents rendered under
             "color_order": cache.color_order,            # BGR->RGB applied before the encoder
             "frame": cache.frame,
-        },
-        "teacher": {
-            # Distillation/oracle provenance. The Config-known fields are recorded NOW for a complete
-            # audit trail (which models a cache was built against); the genuinely build-time fields
-            # (worldvln revision pinned at load, render hash) STAY stubbed until the cache build (A5.14).
-            "worldvln_model_id": "",        # build-time (pinned when the teacher server loads)
-            "worldvln_revision": "",        # build-time
-            "disagreement_source": "",      # build-time
-            "render_config_hash": "",       # build-time (render settings hash)
         },
         "entries": list(entries) if entries is not None else [],
     }
@@ -154,13 +133,6 @@ def validate_manifest(data: dict[str, Any]) -> list[str]:
             errors.append(f"convention.color_order must be RGB|BGR, got {conv.get('color_order')!r}")
         if conv.get("quaternion_order") not in (None, "xyzw", "wxyz"):
             errors.append(f"convention.quaternion_order must be xyzw|wxyz, got {conv.get('quaternion_order')!r}")
-
-    if not is_wild:
-        teacher = data.get("teacher")
-        if isinstance(teacher, dict):
-            missing = _REQUIRED_TEACHER - set(teacher)
-            if missing:
-                errors.append(f"teacher missing keys: {sorted(missing)}")
 
     if is_wild:
         ms = data.get("motion_source")
