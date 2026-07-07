@@ -119,7 +119,7 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 |---|---|---|---|
 | B3.0 | done | USER approval received 2026-07-07 | Write/approve B3 plan and align active guidance |
 | B3.1 | done | AUTO, verified 2026-07-07 | Cleanup obsolete B1/B2 runnable paths |
-| B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill and data screens |
+| B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill, bad-source deletion, and data screens |
 | B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
 | B3.4 | blocked | AUTO/local, measured 2026-07-07 | Stage-0 probes plus K1/K2; G0 failed |
 | B3.5 | pending | AUTO | Depth-6 per-step conditioned world model |
@@ -208,6 +208,14 @@ dry-run tests only.
 - Post-exclusion T=8 screen: `820` clips, `33` sources, `15,698` windows,
   `8,077` person-valid windows (`51.5%`), `duplicate_frame_runs=0`,
   `time_remap_flags=14,724`, `accel_outlier_frames=1,698`.
+- Bad-label source deletion 2026-07-07: after visual label audit, user directed
+  deletion of `cand11`, `cand28`, and previously identified `cand04`, `cand18`,
+  `cand20`, `cand30`. Local cache already had no `cand04`, `cand18`, `cand20`,
+  or `cand30`; deleted remaining `cand11` (`18` clips) and `cand28` (`1` clip).
+  Frames/reports remain intact.
+- Post-bad-source-delete T=8 screen: `801` clips, `31` sources, `15,359`
+  windows, `7,880` person-valid windows (`51.3%`), `duplicate_frame_runs=0`,
+  `time_remap_flags=14,501`, `accel_outlier_frames=1,656`, `731` flagged clips.
 - Deps: B3.1. Blocks B3.4/B3.5.
 
 ### B3.3 - 6-D Plan Tokens And T Configurability
@@ -267,6 +275,10 @@ Run K1 causality and K2 tiny conditioned person-state predictor versus persisten
   `0.999`, train center L2 `0.155`; K1/K2 remained pass. This points to label
   calibration/source drift/criterion mismatch rather than the previous moment
   feature bottleneck.
+- Bad-source-delete refire on the reduced 801-clip cache still failed G0:
+  presence AUROC `0.690`, center L2 `0.212`, center L1 `0.132`, log-height MAE
+  `0.408`; train AUROC `0.923`, train center L2 `0.163`; K1 passed with
+  plan-only R2 `0.0459`; K2 passed with `45.19%` improvement.
 - Decision: do not proceed to B3.5 until G0 is fixed, recalibrated with a stronger
   person probe, or explicitly replanned/waived.
 - Deps: B3.2/B3.3. Blocks B3.5/B3.6.

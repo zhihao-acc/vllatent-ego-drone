@@ -96,9 +96,9 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | superseded | 2026-07-07 | Superseded by B3 gates; Orin/Jetson later only after useful B3 checkpoint |
 | B3.0 — Write/approve Phase B-3 plan | done | 2026-07-07 | `plans/phase-b3-human-conditioned-world-model.md` created; active guidance aligned; B2.12/H20 inactive |
 | B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
-| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person sources and failed rows excluded from local cache; post-exclusion T=8 screen has 820 clips / 33 sources / 15,698 windows / 8,077 person-valid |
+| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; latest T=8 screen has 801 clips / 31 sources / 15,359 windows / 7,880 person-valid |
 | B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
-| B3.4 — Stage-0 probes plus K1/K2 | blocked | 2026-07-07 | Token G0 and encoder-crop bbox fix landed/refired; K1/K2 pass, but G0 still fails (best token refire AUROC 0.681, center L2 0.196) |
+| B3.4 — Stage-0 probes plus K1/K2 | blocked | 2026-07-07 | Token G0 and encoder-crop bbox fix landed/refired; bad-label sources deleted; K1/K2 pass, but G0 still fails (latest AUROC 0.690, center L2 0.212) |
 | B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
 | B3.6 — Stage-1 local depth-6 gate | pending | — | AUTO/local; stop on OOM/blocker; report G1a-G1d and K6 |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
@@ -111,6 +111,18 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
 ## 2026-07-07 — B3.4 G0 rework/refire: token probe + encoder-crop labels
 
 **Status:** B3.4 remains blocked on G0. Do not proceed to B3.5.
+
+**Bad-label source deletion.** User reviewed the overlay audit and directed deletion of bad sources
+`cand11`, `cand28`, and previously identified `cand04`, `cand18`, `cand20`, `cand30`. Local cache
+state: `cand04`, `cand18`, `cand20`, and `cand30` were already absent; deleted remaining
+`cand11` (`18` clips) and `cand28` (`1` clip) from `ingest_data/latent_cache`. Frames/reports remain
+intact. The reduced cache has `801` clips and `31` sources.
+
+**Post-delete screen.** Re-ran:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/screen_person_cache.py --cache-dir ingest_data/latent_cache --history 3 --horizon 8 --out reports/person_screen_T8_after_bad_source_delete.json`
+
+Result: `15,359` T=8 windows, `7,880` person-valid windows (`51.3%`), `duplicate_frame_runs=0`,
+`time_remap_flags=14,501`, `accel_outlier_frames=1,656`, and `731` flagged clips.
 
 **Fixed.** Person-track boxes now use DINO encoder-crop coordinates at the tracking boundary:
 subject selection and stored `person_bbox` are based on the same center-square crop used by
@@ -139,11 +151,20 @@ Result: still failed G0, passed K1/K2.
 - G0: presence AUROC `0.657566`, center L2 `0.218810`, log-height MAE `0.430726`.
 - G0 train diagnostics: train AUROC `0.998656`, train center L2 `0.154583`, train log-height MAE `0.119919`.
 
+**Bad-source-delete refire.** Command:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/run_stage0_gates.py --cache-dir ingest_data/latent_cache --horizon 8 --stage0-probe token --out reports/stage0_gates_T8_token_after_bad_source_delete.json`
+
+Result: still failed G0, passed K1/K2.
+- G0: presence AUROC `0.689972`, center L2 `0.211583`, center L1 `0.131623`, log-height MAE `0.407955`.
+- G0 train diagnostics: train AUROC `0.922804`, train center L2 `0.163281`, train log-height MAE `0.178135`.
+- K1: plan-only R2 `0.045877`, zero MSE `0.456318`, plan-only MSE `0.435384`.
+- K2: persistence MSE `0.394491`, conditioned MSE `0.216232`, improvement `0.451871`.
+
 **Interpretation.** The original lossy moment-probe issue and raw-frame bbox coordinate bug are fixed.
-The remaining G0 failure is not cleared by a stronger token probe. Center decoding remains above the
-`<~0.1` threshold even on train, while held-out source presence AUROC remains far below `0.95`.
-Next work should audit label quality/calibration by source and either fix labels/probe target
-definition or explicitly replan/waive G0 before B3.5.
+The bad-label source deletion removed obvious semantic failures but did not clear G0. Center decoding
+remains above the `<~0.1` threshold and held-out source presence AUROC remains far below `0.95`.
+Next work should continue label-quality cleanup/probe-target calibration or explicitly replan/waive
+G0 before B3.5.
 
 ---
 
