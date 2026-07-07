@@ -26,6 +26,13 @@ class TrainingBatch(NamedTuple):
     history_latents: torch.Tensor  # (B, H, P, D) fp16
     history_mask: torch.Tensor     # (B, H) bool
     target_latents: torch.Tensor   # (B, T, P, D) fp16
+    history_person_bbox: torch.Tensor     # (B, H, 4) f32
+    history_person_visible: torch.Tensor  # (B, H) bool
+    history_person_conf: torch.Tensor     # (B, H) f32
+    target_person_bbox: torch.Tensor      # (B, T, 4) f32
+    target_person_visible: torch.Tensor   # (B, T) bool
+    target_person_conf: torch.Tensor      # (B, T) f32
+    person_state_target: torch.Tensor     # (B, T, 4) f32
     target_deltas: torch.Tensor    # (B, T, 4) f32
     last_action: torch.Tensor      # (B, 4) f32 — most recent known action (FiLM conditioning)
     vo_confidence: torch.Tensor    # (B, T) f32
@@ -63,6 +70,13 @@ def collate_sports_batch(samples: list[SportsSample]) -> TrainingBatch:
     history_latents = torch.from_numpy(np.stack([s.history_latents for s in samples]))
     history_mask = torch.from_numpy(np.stack([s.history_mask for s in samples]))
     target_latents = torch.from_numpy(np.stack([s.target_latents for s in samples]))
+    history_person_bbox = torch.from_numpy(np.stack([s.history_person_bbox for s in samples]))
+    history_person_visible = torch.from_numpy(np.stack([s.history_person_visible for s in samples]))
+    history_person_conf = torch.from_numpy(np.stack([s.history_person_conf for s in samples]))
+    target_person_bbox = torch.from_numpy(np.stack([s.target_person_bbox for s in samples]))
+    target_person_visible = torch.from_numpy(np.stack([s.target_person_visible for s in samples]))
+    target_person_conf = torch.from_numpy(np.stack([s.target_person_conf for s in samples]))
+    person_state_target = torch.from_numpy(np.stack([s.person_state_target for s in samples]))
     target_deltas = torch.from_numpy(np.stack([s.target_deltas for s in samples]))
     last_action = torch.from_numpy(np.stack([s.last_action for s in samples]))
     vo_conf = torch.from_numpy(np.stack([s.vo_confidence for s in samples]))
@@ -77,6 +91,13 @@ def collate_sports_batch(samples: list[SportsSample]) -> TrainingBatch:
         history_latents=history_latents,
         history_mask=history_mask,
         target_latents=target_latents,
+        history_person_bbox=history_person_bbox,
+        history_person_visible=history_person_visible,
+        history_person_conf=history_person_conf,
+        target_person_bbox=target_person_bbox,
+        target_person_visible=target_person_visible,
+        target_person_conf=target_person_conf,
+        person_state_target=person_state_target,
         target_deltas=target_deltas,
         last_action=last_action,
         vo_confidence=vo_conf,

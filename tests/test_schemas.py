@@ -355,3 +355,17 @@ def test_validate_manifest_wild_video_entry_keys() -> None:
     )
     errors = validate_manifest(m)
     assert any("n_frames" in e for e in errors)
+
+
+def test_validate_manifest_wild_video_person_tracker_provenance() -> None:
+    from vllatent.manifest import build_manifest_wild_video
+    m = build_manifest_wild_video(
+        encoder_model_id="test",
+        person_tracker={
+            "detector": "yolov8s-worldv2.pt",
+            "tracker": "bytetrack",
+            "classes": ["person", "skier"],
+        },
+    )
+    assert m["person_tracker"]["tracker"] == "bytetrack"
+    assert validate_manifest(m) == []

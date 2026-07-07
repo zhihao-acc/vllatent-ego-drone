@@ -27,10 +27,14 @@ def _make_clip_npz(path: Path, n_frames: int = 20, fps: float = 5.0) -> None:
     vo_confidence = np.clip(rng.random(n_frames).astype(np.float32), 0.1, 1.0)
     frame_quality = np.clip(rng.random(n_frames).astype(np.float32), 0.2, 1.0)
     timestamps = np.arange(n_frames, dtype=np.float64) / fps
+    person_bbox = np.tile(np.array([[0.5, 0.4, 0.2, 0.25]], dtype=np.float32), (n_frames, 1))
+    person_visible = np.ones(n_frames, dtype=bool)
+    person_conf = np.full(n_frames, 0.75, dtype=np.float32)
     path.parent.mkdir(parents=True, exist_ok=True)
     np.savez(str(path), latents=latents, deltas=deltas,
              vo_confidence=vo_confidence, frame_quality=frame_quality,
-             timestamps=timestamps)
+             timestamps=timestamps, person_bbox=person_bbox,
+             person_visible=person_visible, person_conf=person_conf)
 
 
 @pytest.mark.torch
@@ -47,6 +51,13 @@ class TestCollate:
         assert batch.history_latents.shape == (B, HISTORY, PATCH_TOKENS, EMBED_DIM)
         assert batch.history_mask.shape == (B, HISTORY)
         assert batch.target_latents.shape == (B, HORIZON, PATCH_TOKENS, EMBED_DIM)
+        assert batch.history_person_bbox.shape == (B, HISTORY, 4)
+        assert batch.history_person_visible.shape == (B, HISTORY)
+        assert batch.history_person_conf.shape == (B, HISTORY)
+        assert batch.target_person_bbox.shape == (B, HORIZON, 4)
+        assert batch.target_person_visible.shape == (B, HORIZON)
+        assert batch.target_person_conf.shape == (B, HORIZON)
+        assert batch.person_state_target.shape == (B, HORIZON, 4)
         assert batch.target_deltas.shape == (B, HORIZON, DOF)
         assert batch.last_action.shape == (B, DOF)
         assert batch.vo_confidence.shape == (B, HORIZON)
@@ -64,6 +75,13 @@ class TestCollate:
         assert batch.z_t.dtype == torch.float16
         assert batch.history_latents.dtype == torch.float16
         assert batch.history_mask.dtype == torch.bool
+        assert batch.history_person_bbox.dtype == torch.float32
+        assert batch.history_person_visible.dtype == torch.bool
+        assert batch.history_person_conf.dtype == torch.float32
+        assert batch.target_person_bbox.dtype == torch.float32
+        assert batch.target_person_visible.dtype == torch.bool
+        assert batch.target_person_conf.dtype == torch.float32
+        assert batch.person_state_target.dtype == torch.float32
         assert batch.target_deltas.dtype == torch.float32
         assert batch.last_action.dtype == torch.float32
         assert batch.vo_confidence.dtype == torch.float32

@@ -30,6 +30,7 @@ def _make_clip_npz(
     spike_frame: int | None = None,
     domain: str | None = None,
     deltas_override: np.ndarray | None = None,
+    include_person: bool = False,
 ) -> None:
     """Write a synthetic sports .npz clip."""
     rng = np.random.default_rng(0)
@@ -46,6 +47,13 @@ def _make_clip_npz(
     timestamps = np.arange(n_frames, dtype=np.float64) / fps
     path.parent.mkdir(parents=True, exist_ok=True)
     extra = {"domain": np.array(domain)} if domain is not None else {}
+    if include_person:
+        extra["person_bbox"] = np.tile(
+            np.array([[0.5, 0.4, 0.2, 0.25]], dtype=np.float32),
+            (n_frames, 1),
+        )
+        extra["person_visible"] = np.ones(n_frames, dtype=bool)
+        extra["person_conf"] = np.full(n_frames, 0.75, dtype=np.float32)
     np.savez(
         str(path),
         latents=latents,
@@ -178,6 +186,20 @@ class TestSportsTrainingDataset:
         assert sample.history_mask.dtype == MASK_DTYPE
         assert sample.target_latents.shape == (HORIZON, PATCH_TOKENS, EMBED_DIM)
         assert sample.target_latents.dtype == LATENT_DTYPE
+        assert sample.history_person_bbox.shape == (HISTORY, 4)
+        assert sample.history_person_bbox.dtype == np.float32
+        assert sample.history_person_visible.shape == (HISTORY,)
+        assert sample.history_person_visible.dtype == MASK_DTYPE
+        assert sample.history_person_conf.shape == (HISTORY,)
+        assert sample.history_person_conf.dtype == np.float32
+        assert sample.target_person_bbox.shape == (HORIZON, 4)
+        assert sample.target_person_bbox.dtype == np.float32
+        assert sample.target_person_visible.shape == (HORIZON,)
+        assert sample.target_person_visible.dtype == MASK_DTYPE
+        assert sample.target_person_conf.shape == (HORIZON,)
+        assert sample.target_person_conf.dtype == np.float32
+        assert sample.person_state_target.shape == (HORIZON, 4)
+        assert sample.person_state_target.dtype == np.float32
         assert sample.target_deltas.shape == (HORIZON, DOF)
         assert sample.target_deltas.dtype == np.float32
         assert sample.last_action.shape == (DOF,)
@@ -200,6 +222,21 @@ class TestSportsTrainingDataset:
         assert sample.vo_confidence.shape == (HORIZON,)
         assert sample.dt_seconds.shape == (HORIZON,)
         assert isinstance(sample.frame_quality, float)
+
+    def test_old_cache_person_fallback_is_invisible(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "clip01.npz", n_frames=20)
+        sample = SportsTrainingDataset(tmp_path)[0]
+        assert not np.any(sample.history_person_visible)
+        assert not np.any(sample.target_person_visible)
+        np.testing.assert_allclose(sample.person_state_target, 0.0)
+
+    def test_person_labels_read_from_cache(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "clip01.npz", n_frames=20, include_person=True)
+        sample = SportsTrainingDataset(tmp_path)[3]
+        assert np.all(sample.history_person_visible)
+        assert np.all(sample.target_person_visible)
+        np.testing.assert_allclose(sample.target_person_bbox[0], [0.5, 0.4, 0.2, 0.25], atol=1e-6)
+        assert sample.person_state_target[0, 2] == pytest.approx(np.log(0.25))
 
     def test_block_causal_mask_at_start(self, tmp_path: Path) -> None:
         _make_clip_npz(tmp_path / "clip01.npz", n_frames=20)

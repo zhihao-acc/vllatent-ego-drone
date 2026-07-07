@@ -96,7 +96,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | superseded | 2026-07-07 | Superseded by B3 gates; Orin/Jetson later only after useful B3 checkpoint |
 | B3.0 — Write/approve Phase B-3 plan | done | 2026-07-07 | `plans/phase-b3-human-conditioned-world-model.md` created; active guidance aligned; B2.12/H20 inactive |
 | B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
-| B3.2 — Person-track cache backfill and data screens | pending | — | Code AUTO; full 908-clip backfill USER-gated |
+| B3.2 — Person-track cache backfill and data screens | in_progress | 2026-07-07 | Code done and verified; waiting at USER gate for real dry-run/full person-track cache backfill and T=8 screen report |
 | B3.3 — 6-D plan-token contract and T configurability | pending | — | AUTO; `PLAN_TOKEN_DIM=6`, yaw, valid mask, T=8 through loader/collate/model |
 | B3.4 — Stage-0 probes plus K1/K2 | pending | — | AUTO/local; G0 probes, K1 causality, K2 tiny predictor gate |
 | B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
@@ -105,6 +105,63 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-07 — B3.2 person-track cache code done; waiting at backfill USER gate
+
+**Status:** B3.2 code is done and verified. The step is now waiting at the USER gate for real-cache
+dry-run/full person-track backfill and a T=8 screen report. Do not proceed to B3.3 until the user
+pastes the backfill/screen outputs or explicitly skips this data gate.
+
+**Implemented.** Added `vllatent/ingest/person_tracking.py` with:
+YOLO-World/ByteTrack lazy tracking hook, longest/central/largest subject selection,
+old-cache invisible-person fallback, `person_state_target` conversion, duplicate-frame/time-remap/
+accel/person-presence screens, and a cache-dir screen aggregator with clip/window/source counts.
+
+**Cache and loader contract.** `_build_clip_npz()` now writes optional B3 person keys:
+`person_bbox (N,4)`, `person_visible (N,)`, and `person_conf (N,)`. Existing caches without those
+keys still load with invisible-person defaults. `SportsSample` and `TrainingBatch` now expose
+history/future person boxes, visibility, confidence, and `person_state_target (cx,cy,log_h,visibility)`.
+
+**Scripts.** Added `scripts/backfill_person_tracks.py` for dry-run/full backfills with JSONL logs,
+and `scripts/screen_person_cache.py` for JSON screen reports after backfill.
+
+**Verification.** Passed:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_person_tracking.py tests/test_ingest_pipeline.py tests/test_sports_loader.py tests/test_collate.py tests/test_schemas.py`
+-> `138 passed`.
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/ruff check ...` on all changed B3.2 files -> OK.
+`bash scripts/check_no_blobs.sh` -> OK. `git diff --check` passed.
+
+**USER-gated commands.**
+
+```bash
+PY=/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python
+
+$PY scripts/backfill_person_tracks.py \
+  --cache-dir ingest_data/latent_cache \
+  --frames-root ingest_data/frames \
+  --device cuda \
+  --dry-run \
+  --limit 20 \
+  --log-jsonl reports/person_backfill_dryrun.jsonl
+
+$PY scripts/backfill_person_tracks.py \
+  --cache-dir ingest_data/latent_cache \
+  --frames-root ingest_data/frames \
+  --device cuda \
+  --log-jsonl reports/person_backfill_full.jsonl
+
+$PY scripts/screen_person_cache.py \
+  --cache-dir ingest_data/latent_cache \
+  --history 3 \
+  --horizon 8 \
+  --out reports/person_screen_T8.json
+```
+
+Paste back: dry-run status counts; full backfill status counts; screen report `totals`; top flagged
+clips from `reports/person_screen_T8.json`; and whether any source has systematically missing
+person tracks.
 
 ---
 

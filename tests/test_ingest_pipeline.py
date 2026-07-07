@@ -33,7 +33,20 @@ class TestBuildClipNpz:
         result = _build_clip_npz(**self._arrays(5))
         assert result["latents"].shape == (5, PATCH_TOKENS, EMBED_DIM)
         assert result["deltas"].shape == (4, 4)
+        assert result["person_bbox"].shape == (5, 4)
+        assert result["person_visible"].shape == (5,)
+        assert result["person_conf"].shape == (5,)
         assert "quality_mask" not in result
+
+    def test_accepts_person_tracks(self) -> None:
+        a = self._arrays(5)
+        a["person_bbox"] = np.tile(np.array([[0.5, 0.5, 0.2, 0.3]], dtype=np.float32), (5, 1))
+        a["person_visible"] = np.ones(5, dtype=bool)
+        a["person_conf"] = np.full(5, 0.8, dtype=np.float32)
+        result = _build_clip_npz(**a)
+        np.testing.assert_allclose(result["person_bbox"][0], [0.5, 0.5, 0.2, 0.3])
+        assert result["person_visible"].dtype == np.bool_
+        assert result["person_conf"][0] == pytest.approx(0.8)
 
     def test_bad_latent_shape(self) -> None:
         a = self._arrays(5)
@@ -51,6 +64,14 @@ class TestBuildClipNpz:
         a = self._arrays(5)
         a["frame_quality"] = np.ones(3, dtype=np.float32)
         with pytest.raises(ValueError, match="frame_quality"):
+            _build_clip_npz(**a)
+
+    def test_bad_person_shape(self) -> None:
+        a = self._arrays(5)
+        a["person_bbox"] = np.zeros((4, 4), dtype=np.float32)
+        a["person_visible"] = np.zeros(5, dtype=bool)
+        a["person_conf"] = np.zeros(5, dtype=np.float32)
+        with pytest.raises(ValueError, match="person_bbox"):
             _build_clip_npz(**a)
 
 
@@ -108,6 +129,7 @@ class TestUndistortWiring:
         sig = inspect.signature(process_clip)
         assert "camera_K" in sig.parameters
         assert "camera_D" in sig.parameters
+        assert "track_persons" in sig.parameters
 
 
 class TestUpdateManifestFromResults:

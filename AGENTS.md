@@ -48,8 +48,9 @@ Repo state is authoritative for code; vault notes are authoritative for why.
 - Add optional cache keys `person_bbox (N,4)`, `person_visible (N,)`, and
   `person_conf (N,)` with detector/tracker provenance. Old caches must still
   load with invisible-person defaults.
-- B3.1 cleanup is done. The next AUTO step is B3.2: person-track cache backfill
-  implementation and data screens. Full cache backfill remains user-gated.
+- B3.2 code is done. The loop is stopped at the B3.2 USER gate for real-cache
+  person-track dry-run/full backfill and T=8 screen report. Do not proceed to
+  B3.3 until the user pastes those outputs or explicitly skips the data gate.
 - Do not continue to B2.12/H20. H20 becomes eligible only at B3.7 after B3.6
   local gates justify one serious depth-6 run.
 - Do not add diffusion, language, game data, SAM2, PI-Prober, metric waypoint

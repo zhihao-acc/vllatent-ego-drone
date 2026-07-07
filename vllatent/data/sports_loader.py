@@ -33,6 +33,11 @@ from pathlib import Path
 
 import numpy as np
 
+from vllatent.ingest.person_tracking import (
+    PERSON_BBOX_DIM,
+    person_state_from_bbox,
+    person_tracks_from_cache,
+)
 from vllatent.scale_free_targets import (
     SCALE_FREE_LOG_SPEED_CLAMP,
     SCALE_FREE_SPEED_EPS,
@@ -80,6 +85,13 @@ class SportsSample:
     history_latents: np.ndarray  # (H, P, D) fp16 — GT latents for previous H frames
     history_mask: np.ndarray     # (H,) bool — True=real, False=padding
     target_latents: np.ndarray   # (T, P, D) fp16 — GT future latents (L_latent targets)
+    history_person_bbox: np.ndarray    # (H, 4) f32 — observed person boxes, normalized cxcywh
+    history_person_visible: np.ndarray # (H,) bool — observed person visibility
+    history_person_conf: np.ndarray    # (H,) f32 — observed person detector confidence
+    target_person_bbox: np.ndarray     # (T, 4) f32 — future person boxes, labels only
+    target_person_visible: np.ndarray  # (T,) bool — future person visibility, labels only
+    target_person_conf: np.ndarray     # (T,) f32 — future person confidence, labels only
+    person_state_target: np.ndarray    # (T, 4) f32 — cx,cy,log_h,visibility, labels only
     target_deltas: np.ndarray    # (T, 4) f32 — preprocessed future deltas (L_wp targets)
     last_action: np.ndarray      # (4,) f32 — most recent known action (delta t-1→t), zeros at clip start
     target_actions_scale_free: np.ndarray       # (T, 4) f32 — B2 target-only future actions
@@ -292,6 +304,7 @@ class SportsTrainingDataset:
         self._clip_observed_velocities: list[np.ndarray] = []
         self._clip_dt: list[np.ndarray] = []
         self._clip_domains: list[str] = []
+        self._clip_person_tracks = []
 
         for p in npz_paths:
             clip = _load_clip(p)
@@ -310,6 +323,7 @@ class SportsTrainingDataset:
             self._clip_observed_velocities.append(observed_velocities)
             self._clip_dt.append(dt)
             self._clip_domains.append(_clip_domain(clip))
+            self._clip_person_tracks.append(person_tracks_from_cache(clip))
 
         if not self._clips:
             raise ValueError("No clips with enough frames (need >= H+T+1)")
@@ -376,6 +390,36 @@ class SportsTrainingDataset:
             pad = np.zeros((HORIZON - actual_t, PATCH_TOKENS, EMBED_DIM), dtype=LATENT_DTYPE)
             target_lat = np.concatenate([target_lat, pad], axis=0)
 
+        person_tracks = self._clip_person_tracks[clip_idx]
+        hist_person_bbox = np.zeros((HISTORY, PERSON_BBOX_DIM), dtype=np.float32)
+        hist_person_visible = np.zeros(HISTORY, dtype=MASK_DTYPE)
+        hist_person_conf = np.zeros(HISTORY, dtype=np.float32)
+        for h in range(HISTORY):
+            src_idx = t - HISTORY + 1 + h
+            if src_idx >= 0:
+                hist_person_bbox[h] = person_tracks.person_bbox[src_idx]
+                hist_person_visible[h] = person_tracks.person_visible[src_idx]
+                hist_person_conf[h] = person_tracks.person_conf[src_idx]
+
+        target_person_bbox = person_tracks.person_bbox[t + 1: t + 1 + HORIZON]
+        target_person_visible = person_tracks.person_visible[t + 1: t + 1 + HORIZON]
+        target_person_conf = person_tracks.person_conf[t + 1: t + 1 + HORIZON]
+        if target_person_bbox.shape[0] < HORIZON:
+            pad_n = HORIZON - target_person_bbox.shape[0]
+            target_person_bbox = np.concatenate(
+                [target_person_bbox, np.zeros((pad_n, PERSON_BBOX_DIM), dtype=np.float32)],
+                axis=0,
+            )
+            target_person_visible = np.concatenate(
+                [target_person_visible, np.zeros(pad_n, dtype=MASK_DTYPE)],
+                axis=0,
+            )
+            target_person_conf = np.concatenate(
+                [target_person_conf, np.zeros(pad_n, dtype=np.float32)],
+                axis=0,
+            )
+        person_state_target = person_state_from_bbox(target_person_bbox, target_person_visible)
+
         target_v = np.zeros((HORIZON, DOF), dtype=np.float32)
         target_velocity_like = np.zeros((HORIZON, DOF), dtype=np.float32)
         dt_sec = np.full(HORIZON, 0.2, dtype=np.float32)
@@ -427,6 +471,13 @@ class SportsTrainingDataset:
             history_latents=history,
             history_mask=mask,
             target_latents=target_lat,
+            history_person_bbox=hist_person_bbox,
+            history_person_visible=hist_person_visible,
+            history_person_conf=hist_person_conf,
+            target_person_bbox=target_person_bbox.astype(np.float32, copy=False),
+            target_person_visible=target_person_visible.astype(MASK_DTYPE, copy=False),
+            target_person_conf=target_person_conf.astype(np.float32, copy=False),
+            person_state_target=person_state_target,
             target_deltas=target_v,
             last_action=last_act,
             target_actions_scale_free=target_actions.actions,

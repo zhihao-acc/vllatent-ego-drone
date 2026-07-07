@@ -204,10 +204,11 @@ def build_manifest_wild_video(
     motion_model: str = "megasam_base",
     scale_mode: str = "normalized",
     source_fps: float = 5.0,
+    person_tracker: dict[str, Any] | None = None,
     entries: list[dict[str, Any]] | None = None,
 ) -> dict[str, Any]:
     """Build a cache manifest for wild-video ingestion (source_type=wild_video)."""
-    return {
+    manifest = {
         "cache_version": CACHE_VERSION,
         "encoder": {
             "model_id": encoder_model_id,
@@ -235,6 +236,9 @@ def build_manifest_wild_video(
         },
         "entries": list(entries) if entries is not None else [],
     }
+    if person_tracker is not None:
+        manifest["person_tracker"] = dict(person_tracker)
+    return manifest
 
 
 __all__ = [

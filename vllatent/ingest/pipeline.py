@@ -53,8 +53,13 @@ def _build_clip_npz(
     vo_confidence: np.ndarray,
     frame_quality: np.ndarray,
     timestamps: np.ndarray,
+    person_bbox: np.ndarray | None = None,
+    person_visible: np.ndarray | None = None,
+    person_conf: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """Validate and return the arrays dict for a single segment's .npz."""
+    from vllatent.ingest.person_tracking import empty_person_tracks, validate_person_track_arrays
+
     n = latents.shape[0]
     if latents.shape != (n, PATCH_TOKENS, EMBED_DIM):
         raise ValueError(f"latents: expected (N, {PATCH_TOKENS}, {EMBED_DIM}), got {latents.shape}")
@@ -67,12 +72,27 @@ def _build_clip_npz(
     if timestamps.shape != (n,):
         raise ValueError(f"timestamps: expected ({n},), got {timestamps.shape}")
 
+    if person_bbox is None or person_visible is None or person_conf is None:
+        tracks = empty_person_tracks(n)
+        person_bbox = tracks.person_bbox
+        person_visible = tracks.person_visible
+        person_conf = tracks.person_conf
+    validate_person_track_arrays(
+        n_frames=n,
+        person_bbox=person_bbox,
+        person_visible=person_visible,
+        person_conf=person_conf,
+    )
+
     return {
         "latents": latents.astype(LATENT_DTYPE),
         "deltas": deltas.astype(DELTA_DTYPE),
         "vo_confidence": vo_confidence.astype(np.float32),
         "frame_quality": frame_quality.astype(np.float32),
         "timestamps": timestamps.astype(np.float64),
+        "person_bbox": person_bbox.astype(np.float32),
+        "person_visible": person_visible.astype(np.bool_),
+        "person_conf": person_conf.astype(np.float32),
     }
 
 
@@ -116,12 +136,14 @@ def _process_segment(
     cfg: IngestConfig,
     cache_dir: Path,
     skip_megasam: bool,
+    track_persons: bool,
     device: str,
 ) -> ClipPipelineResult:
     """Process a single quality-accepted segment through MegaSaM → DINOv3 → cache."""
     from vllatent.encode.batch import encode_frames
     from vllatent.ingest.ego_motion import normalize_scale, se3_sequence_to_deltas
     from vllatent.ingest.megasam import parse_megasam_output, run_megasam
+    from vllatent.ingest.person_tracking import empty_person_tracks, track_persons_from_paths
 
     errors: list[str] = []
     skipped: list[str] = []
@@ -161,6 +183,11 @@ def _process_segment(
     qualities = segment_qualities[:n]
     vo_conf = megasam_result.confidences[:n].astype(np.float32)
     timestamps = np.arange(n, dtype=np.float64) / cfg.target_fps
+    if track_persons:
+        _log(f"  {segment_id}: tracking person subject with YOLO-World/ByteTrack")
+        person_tracks = track_persons_from_paths(segment_frame_paths[:n], device=device)
+    else:
+        person_tracks = empty_person_tracks(n)
 
     # --- Cache assembly ---
     arrays = _build_clip_npz(
@@ -169,6 +196,9 @@ def _process_segment(
         vo_confidence=vo_conf,
         frame_quality=qualities,
         timestamps=timestamps,
+        person_bbox=person_tracks.person_bbox,
+        person_visible=person_tracks.person_visible,
+        person_conf=person_tracks.person_conf,
     )
 
     latent_rel = f"{segment_id}.npz"
@@ -195,6 +225,7 @@ def process_clip(
     device: str = "cuda",
     camera_K: np.ndarray | None = None,
     camera_D: np.ndarray | None = None,
+    track_persons: bool = False,
 ) -> list[ClipPipelineResult]:
     """Process a single clip end-to-end.
 
@@ -319,6 +350,7 @@ def process_clip(
                 cfg=cfg,
                 cache_dir=cache_dir,
                 skip_megasam=skip_megasam,
+                track_persons=track_persons,
                 device=device,
             )
             results.append(result)
@@ -338,6 +370,7 @@ def process_batch(
     *,
     skip_existing: bool = True,
     device: str = "cuda",
+    track_persons: bool = False,
 ) -> list[ClipPipelineResult]:
     """Process all clips in a YAML clip list."""
     from vllatent.ingest.acquire import load_clips_yaml
@@ -357,7 +390,13 @@ def process_batch(
             _log(f"skipping {clip_id}: already cached")
             continue
 
-        clip_results = process_clip(url=url, clip_id=clip_id, cfg=cfg, device=device)
+        clip_results = process_clip(
+            url=url,
+            clip_id=clip_id,
+            cfg=cfg,
+            device=device,
+            track_persons=track_persons,
+        )
         results.extend(clip_results)
 
         for r in clip_results:
@@ -373,6 +412,7 @@ def update_manifest_from_results(
     results: list[ClipPipelineResult],
     cfg: IngestConfig,
     encoder_model_id: str = "vit_base_patch16_dinov3.lvd1689m",
+    person_tracker: dict[str, Any] | None = None,
 ) -> Path:
     """Build or update the manifest from pipeline results."""
     from vllatent.manifest import build_manifest_wild_video, validate_manifest, write_manifest
@@ -402,6 +442,7 @@ def update_manifest_from_results(
         motion_model=cfg.megasam_model or "megasam_base",
         scale_mode="normalized",
         source_fps=cfg.target_fps,
+        person_tracker=person_tracker,
         entries=existing_entries,
     )
 
