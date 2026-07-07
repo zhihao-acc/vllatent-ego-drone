@@ -19,6 +19,8 @@ PERSON_BBOX_SPACE_KEY = "person_bbox_space"
 PERSON_BBOX_SPACE_ENCODER_CROP = "encoder_crop"
 PERSON_BBOX_SPACE_RAW_FRAME = "raw_frame"
 PERSON_BBOX_DIM = 4
+PERSON_MIN_BBOX_AREA = 0.0025
+PERSON_EDGE_MARGIN = 1e-6
 PERSON_TRACK_CLASSES = ("person", "skier", "snowboarder")
 PERSON_TRACKER_ID = "yolov8s-worldv2.pt+bytetrack"
 PERSON_TRACK_CONFIDENCE = 0.15
@@ -92,6 +94,60 @@ def validate_person_track_arrays(
         raise ValueError("person_conf contains non-finite values")
 
 
+def valid_encoder_crop_bbox_mask(
+    person_bbox: np.ndarray,
+    *,
+    min_area: float = PERSON_MIN_BBOX_AREA,
+) -> np.ndarray:
+    """Return boxes with non-degenerate area fully inside normalized crop coords."""
+    bbox = np.asarray(person_bbox, dtype=np.float32)
+    if bbox.ndim != 2 or bbox.shape[1] != PERSON_BBOX_DIM:
+        raise ValueError(f"person_bbox: expected (N,{PERSON_BBOX_DIM}), got {bbox.shape}")
+    cx = bbox[:, 0]
+    cy = bbox[:, 1]
+    bw = bbox[:, 2]
+    bh = bbox[:, 3]
+    x1 = cx - 0.5 * bw
+    x2 = cx + 0.5 * bw
+    y1 = cy - 0.5 * bh
+    y2 = cy + 0.5 * bh
+    area = bw * bh
+    return (
+        np.all(np.isfinite(bbox), axis=1)
+        & (bw > 0.0)
+        & (bh > 0.0)
+        & (area >= float(min_area))
+        & (x1 >= 0.0)
+        & (y1 >= 0.0)
+        & (x2 <= 1.0)
+        & (y2 <= 1.0)
+    )
+
+
+def sanitize_person_track_arrays(
+    *,
+    person_bbox: np.ndarray,
+    person_visible: np.ndarray,
+    person_conf: np.ndarray,
+    min_area: float = PERSON_MIN_BBOX_AREA,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Mask out visible labels whose crop-space boxes are zero-area or tiny."""
+    bbox = np.asarray(person_bbox, dtype=np.float32).copy()
+    visible = np.asarray(person_visible).astype(np.bool_, copy=True)
+    conf = np.asarray(person_conf, dtype=np.float32).copy()
+    validate_person_track_arrays(
+        n_frames=int(bbox.shape[0]),
+        person_bbox=bbox,
+        person_visible=visible,
+        person_conf=conf,
+    )
+    valid = valid_encoder_crop_bbox_mask(bbox, min_area=min_area)
+    visible &= valid
+    bbox[~visible] = 0.0
+    conf[~visible] = 0.0
+    return bbox, visible, conf
+
+
 def person_tracks_from_cache(clip: dict[str, np.ndarray]) -> PersonTrackResult:
     """Read person-track labels from a loaded .npz dict, with old-cache fallback."""
     n_frames = int(clip["latents"].shape[0])
@@ -111,11 +167,20 @@ def person_tracks_from_cache(clip: dict[str, np.ndarray]) -> PersonTrackResult:
         person_visible=visible,
         person_conf=conf,
     )
+    raw_visible = int(np.sum(visible))
+    bbox, visible, conf = sanitize_person_track_arrays(
+        person_bbox=bbox,
+        person_visible=visible,
+        person_conf=conf,
+    )
     return PersonTrackResult(
         person_bbox=bbox,
         person_visible=visible,
         person_conf=conf,
-        provenance={"source": "cache"},
+        provenance={
+            "source": "cache",
+            "sanitized_invisible_frames": raw_visible - int(np.sum(visible)),
+        },
     )
 
 
@@ -189,10 +254,14 @@ def select_subject_track(
 
     def _score(items: list[TrackedDetection]) -> tuple[int, float, float]:
         boxes = np.stack([xyxy_to_encoder_crop_cxcywh(d.xyxy, image_hw) for d in items])
+        valid = valid_encoder_crop_bbox_mask(boxes)
+        if not np.any(valid):
+            return (0, float("-inf"), 0.0)
+        boxes = boxes[valid]
         centers = boxes[:, :2]
         centrality = -float(np.mean(np.sum((centers - 0.5) ** 2, axis=1)))
         area = float(np.mean(boxes[:, 2] * boxes[:, 3]))
-        return (len(items), centrality, area)
+        return (int(np.sum(valid)), centrality, area)
 
     selected_id, selected = max(by_track.items(), key=lambda kv: _score(kv[1]))
     _ = selected_id
@@ -201,7 +270,10 @@ def select_subject_track(
     visible = np.zeros(n_frames, dtype=np.bool_)
     conf = np.zeros(n_frames, dtype=np.float32)
     for det in selected:
-        bbox[det.frame_idx] = xyxy_to_encoder_crop_cxcywh(det.xyxy, image_hw)
+        det_bbox = xyxy_to_encoder_crop_cxcywh(det.xyxy, image_hw)
+        if not bool(valid_encoder_crop_bbox_mask(det_bbox[None, :])[0]):
+            continue
+        bbox[det.frame_idx] = det_bbox
         visible[det.frame_idx] = True
         conf[det.frame_idx] = np.float32(det.confidence)
 
@@ -405,6 +477,72 @@ def screen_clip_arrays(
     )
 
 
+def person_label_quality_stats(
+    person_bbox: np.ndarray,
+    person_visible: np.ndarray,
+    *,
+    min_area: float = PERSON_MIN_BBOX_AREA,
+    edge_margin: float = PERSON_EDGE_MARGIN,
+) -> dict[str, Any]:
+    """Summarize visible-label geometry before any read-time sanitization."""
+    bbox = np.asarray(person_bbox, dtype=np.float32)
+    visible = np.asarray(person_visible).astype(np.bool_)
+    if bbox.ndim != 2 or bbox.shape[1] != PERSON_BBOX_DIM:
+        raise ValueError(f"person_bbox: expected (N,{PERSON_BBOX_DIM}), got {bbox.shape}")
+    if visible.shape != (bbox.shape[0],):
+        raise ValueError(f"person_visible: expected ({bbox.shape[0]},), got {visible.shape}")
+
+    cx = bbox[:, 0]
+    cy = bbox[:, 1]
+    bw = bbox[:, 2]
+    bh = bbox[:, 3]
+    x1 = cx - 0.5 * bw
+    x2 = cx + 0.5 * bw
+    y1 = cy - 0.5 * bh
+    y2 = cy + 0.5 * bh
+    area = bw * bh
+    visible_area = area[visible]
+    degenerate = visible & ((bw <= 0.0) | (bh <= 0.0) | ~np.all(np.isfinite(bbox), axis=1))
+    tiny = visible & (area < float(min_area))
+    edge = visible & (
+        (x1 <= float(edge_margin))
+        | (y1 <= float(edge_margin))
+        | (x2 >= 1.0 - float(edge_margin))
+        | (y2 >= 1.0 - float(edge_margin))
+    )
+    valid = visible & valid_encoder_crop_bbox_mask(bbox, min_area=min_area)
+
+    idx = np.flatnonzero(visible)
+    jumps = np.zeros(0, dtype=np.float32)
+    if idx.size >= 2:
+        consecutive = np.diff(idx) == 1
+        if np.any(consecutive):
+            centers = bbox[idx][:, :2]
+            jumps = np.linalg.norm(np.diff(centers, axis=0)[consecutive], axis=1).astype(np.float32)
+
+    def _percentile(values: np.ndarray, q: float) -> float:
+        if values.size == 0:
+            return 0.0
+        return float(np.percentile(values.astype(np.float64), q))
+
+    return {
+        "visible_frames_raw": int(np.sum(visible)),
+        "visible_frames_sanitized": int(np.sum(valid)),
+        "invalid_visible_frames": int(np.sum(visible & ~valid)),
+        "degenerate_visible_frames": int(np.sum(degenerate)),
+        "tiny_visible_frames": int(np.sum(tiny)),
+        "edge_visible_frames": int(np.sum(edge)),
+        "flicker_transitions": int(np.sum(visible[1:] != visible[:-1])) if visible.size >= 2 else 0,
+        "center_jump_p95": _percentile(jumps, 95.0),
+        "center_jump_p99": _percentile(jumps, 99.0),
+        "area_min": float(np.min(visible_area)) if visible_area.size else 0.0,
+        "area_p05": _percentile(visible_area, 5.0),
+        "area_p50": _percentile(visible_area, 50.0),
+        "area_p95": _percentile(visible_area, 95.0),
+        "area_max": float(np.max(visible_area)) if visible_area.size else 0.0,
+    }
+
+
 def _load_npz_arrays(path: Path) -> dict[str, np.ndarray]:
     with np.load(str(path)) as data:
         return {k: data[k] for k in data.files}
@@ -434,10 +572,20 @@ def screen_cache_dir(
         "time_remap_flags": 0,
         "accel_outlier_frames": 0,
         "flagged_clips": 0,
+        "person_invalid_visible_frames": 0,
+        "person_degenerate_visible_frames": 0,
+        "person_tiny_visible_frames": 0,
+        "person_edge_visible_frames": 0,
+        "person_flicker_transitions": 0,
     }
 
     for path in paths:
         arrays = _load_npz_arrays(path)
+        qc = (
+            person_label_quality_stats(arrays[PERSON_BBOX_KEY], arrays[PERSON_VISIBLE_KEY])
+            if PERSON_BBOX_KEY in arrays and PERSON_VISIBLE_KEY in arrays
+            else {}
+        )
         tracks = person_tracks_from_cache(arrays)
         report = screen_clip_arrays(
             latents=arrays["latents"],
@@ -451,6 +599,14 @@ def screen_cache_dir(
         source_entry["clips"] += 1
         source_entry["windows"] += report.n_windows
         source_entry["person_valid_windows"] += report.person_valid_windows
+        for src_key, qc_key in (
+            ("person_invalid_visible_frames", "invalid_visible_frames"),
+            ("person_degenerate_visible_frames", "degenerate_visible_frames"),
+            ("person_tiny_visible_frames", "tiny_visible_frames"),
+            ("person_edge_visible_frames", "edge_visible_frames"),
+            ("person_flicker_transitions", "flicker_transitions"),
+        ):
+            source_entry[src_key] = source_entry.get(src_key, 0) + int(qc.get(qc_key, 0))
 
         flags: list[str] = []
         if report.duplicate_frame_runs:
@@ -461,6 +617,10 @@ def screen_cache_dir(
             flags.append("accel_outliers")
         if report.n_windows and report.person_valid_windows == 0:
             flags.append("person_absent_windows")
+        if int(qc.get("invalid_visible_frames", 0)):
+            flags.append("person_invalid_labels")
+        if int(qc.get("edge_visible_frames", 0)):
+            flags.append("person_edge_labels")
 
         clip_record = {
             "clip_id": path.stem,
@@ -474,6 +634,8 @@ def screen_cache_dir(
             "accel_outlier_frames": report.accel_outlier_frames,
             "flags": flags,
         }
+        if qc:
+            clip_record["person_label_qc"] = qc
         clips.append(clip_record)
 
         totals["clips"] += 1
@@ -484,6 +646,11 @@ def screen_cache_dir(
         totals["time_remap_flags"] += report.time_remap_flags
         totals["accel_outlier_frames"] += report.accel_outlier_frames
         totals["flagged_clips"] += int(bool(flags))
+        totals["person_invalid_visible_frames"] += int(qc.get("invalid_visible_frames", 0))
+        totals["person_degenerate_visible_frames"] += int(qc.get("degenerate_visible_frames", 0))
+        totals["person_tiny_visible_frames"] += int(qc.get("tiny_visible_frames", 0))
+        totals["person_edge_visible_frames"] += int(qc.get("edge_visible_frames", 0))
+        totals["person_flicker_transitions"] += int(qc.get("flicker_transitions", 0))
 
     totals["sources"] = len(sources)
     return {
@@ -496,6 +663,8 @@ def screen_cache_dir(
 __all__ = [
     "PERSON_BBOX_DIM",
     "PERSON_BBOX_KEY",
+    "PERSON_EDGE_MARGIN",
+    "PERSON_MIN_BBOX_AREA",
     "PERSON_BBOX_SPACE_ENCODER_CROP",
     "PERSON_BBOX_SPACE_KEY",
     "PERSON_BBOX_SPACE_RAW_FRAME",
@@ -510,6 +679,7 @@ __all__ = [
     "duplicate_frame_runs_from_latents",
     "empty_person_tracks",
     "person_state_from_bbox",
+    "person_label_quality_stats",
     "person_tracks_from_cache",
     "raw_frame_cxcywh_to_encoder_crop",
     "screen_clip_arrays",
@@ -517,6 +687,8 @@ __all__ = [
     "select_subject_track",
     "time_remap_flags_from_deltas",
     "track_persons_from_paths",
+    "sanitize_person_track_arrays",
     "validate_person_track_arrays",
+    "valid_encoder_crop_bbox_mask",
     "xyxy_to_encoder_crop_cxcywh",
 ]

@@ -49,6 +49,16 @@ class TestBuildClipNpz:
         assert result["person_visible"].dtype == np.bool_
         assert result["person_conf"][0] == pytest.approx(0.8)
 
+    def test_sanitizes_tiny_visible_person_tracks(self) -> None:
+        a = self._arrays(5)
+        a["person_bbox"] = np.tile(np.array([[0.5, 0.5, 0.01, 0.01]], dtype=np.float32), (5, 1))
+        a["person_visible"] = np.ones(5, dtype=bool)
+        a["person_conf"] = np.full(5, 0.8, dtype=np.float32)
+        result = _build_clip_npz(**a)
+        assert not np.any(result["person_visible"])
+        np.testing.assert_allclose(result["person_bbox"], np.zeros((5, 4), dtype=np.float32))
+        np.testing.assert_allclose(result["person_conf"], np.zeros(5, dtype=np.float32))
+
     def test_bad_latent_shape(self) -> None:
         a = self._arrays(5)
         a["latents"] = np.zeros((5, 10, 10), dtype=LATENT_DTYPE)

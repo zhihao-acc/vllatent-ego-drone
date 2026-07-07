@@ -15,6 +15,8 @@ import numpy as np
 
 from vllatent.ingest.person_tracking import (
     PERSON_BBOX_KEY,
+    PERSON_BBOX_SPACE_ENCODER_CROP,
+    PERSON_BBOX_SPACE_KEY,
     PERSON_CONF_KEY,
     PERSON_TRACK_CLASSES,
     PERSON_TRACKER_ID,
@@ -86,6 +88,7 @@ def backfill_one(
 
     tracks = track_persons_from_paths(frames, device=device)
     arrays[PERSON_BBOX_KEY] = tracks.person_bbox
+    arrays[PERSON_BBOX_SPACE_KEY] = np.array(PERSON_BBOX_SPACE_ENCODER_CROP)
     arrays[PERSON_VISIBLE_KEY] = tracks.person_visible
     arrays[PERSON_CONF_KEY] = tracks.person_conf
     _write_npz(cache_path, arrays)

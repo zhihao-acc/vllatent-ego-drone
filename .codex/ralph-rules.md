@@ -33,7 +33,7 @@ Every iteration starts by reading:
   - `B3.2` person-track cache backfill and data screens (done 2026-07-07),
   - `B3.3` 6-D plan-token contract and T configurability (done 2026-07-07),
   - `B3.4` Stage-0 probes plus K1/K2 (blocked 2026-07-07: token G0 failed after
-    encoder-crop bbox fix and bad-source deletion; K1/K2 passed),
+    encoder-crop bbox fix, bad-source deletion, and invalid-label masking; K1/K2 passed),
   - `B3.5` depth-6 per-step 6-D conditioned world model,
   - `B3.6` Stage-1 local gates G1a-G1d,
   - `B3.7` USER-GATED H20 depth-6 run,
@@ -73,9 +73,10 @@ Every iteration starts by reading:
 - H20/SSH/docker/long jobs remain user-gated. Codex prepares one command only at
   B3.7 if B3.6 passes.
 - Current stop: B3.4 G0 failed on the local T=8 cache even after encoder-crop bbox
-  conversion, a token-level torch probe, and user-approved bad-source deletion
-  down to 801 clips / 31 sources. Do not start B3.5 until label/probe target
-  quality is fixed, G0 is recalibrated, or the gate is explicitly waived.
+  conversion, a token-level torch probe, user-approved bad-source deletion down to
+  801 clips / 31 sources, and invalid zero/tiny label masking. Latest G0 after
+  masking: AUROC `0.688`, center L2 `0.209`; K1/K2 pass. Do not start B3.5 until
+  label/probe target quality is fixed, G0 is recalibrated, or the gate is explicitly waived.
 
 ## B3 Verification Checklist
 

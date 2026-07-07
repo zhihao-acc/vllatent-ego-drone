@@ -96,9 +96,9 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | superseded | 2026-07-07 | Superseded by B3 gates; Orin/Jetson later only after useful B3 checkpoint |
 | B3.0 — Write/approve Phase B-3 plan | done | 2026-07-07 | `plans/phase-b3-human-conditioned-world-model.md` created; active guidance aligned; B2.12/H20 inactive |
 | B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
-| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; latest T=8 screen has 801 clips / 31 sources / 15,359 windows / 7,880 person-valid |
+| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; invalid/tiny visible boxes are sanitized; latest T=8 screen has 801 clips / 31 sources / 15,359 windows / 6,638 person-valid |
 | B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
-| B3.4 — Stage-0 probes plus K1/K2 | blocked | 2026-07-07 | Token G0 and encoder-crop bbox fix landed/refired; bad-label sources deleted; K1/K2 pass, but G0 still fails (latest AUROC 0.690, center L2 0.212) |
+| B3.4 — Stage-0 probes plus K1/K2 | blocked | 2026-07-07 | Token G0 and encoder-crop bbox fix landed/refired; bad-label sources deleted; invalid/tiny labels masked; K1/K2 pass, but G0 still fails (latest AUROC 0.688, center L2 0.209) |
 | B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
 | B3.6 — Stage-1 local depth-6 gate | pending | — | AUTO/local; stop on OOM/blocker; report G1a-G1d and K6 |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
@@ -123,6 +123,23 @@ intact. The reduced cache has `801` clips and `31` sources.
 
 Result: `15,359` T=8 windows, `7,880` person-valid windows (`51.3%`), `duplicate_frame_runs=0`,
 `time_remap_flags=14,501`, `accel_outlier_frames=1,656`, and `731` flagged clips.
+
+**Label-geometry hygiene.** Fixed the forward cache contract after the visual audit:
+tracker selection and cache reads now mask zero-area/tiny encoder-crop boxes invisible
+(`area < 0.0025`), cache-builder writes sanitize manually supplied person labels,
+the raw-frame-to-crop converter updates `person_visible`/`person_conf` while converting,
+and `scripts/backfill_person_tracks.py` now writes `person_bbox_space="encoder_crop"`.
+The screen report now includes person-label QC counters for invalid/tiny/edge labels,
+flicker, and center-jump/area summaries.
+
+**Post-sanitize screen.** Re-ran:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/screen_person_cache.py --cache-dir ingest_data/latent_cache --history 3 --horizon 8 --out reports/person_screen_T8_after_label_sanitize.json`
+
+Result: `801` clips, `31` sources, `15,359` T=8 windows, `6,638` person-valid windows,
+`11,396` sanitized person-visible frames, `1,857` invalid/tiny visible labels masked,
+`528` degenerate visible labels, `2,781` edge-touching visible labels, `2,599`
+flicker transitions, `duplicate_frame_runs=0`, `time_remap_flags=14,501`, and
+`accel_outlier_frames=1,656`.
 
 **Fixed.** Person-track boxes now use DINO encoder-crop coordinates at the tracking boundary:
 subject selection and stored `person_bbox` are based on the same center-square crop used by
@@ -160,11 +177,20 @@ Result: still failed G0, passed K1/K2.
 - K1: plan-only R2 `0.045877`, zero MSE `0.456318`, plan-only MSE `0.435384`.
 - K2: persistence MSE `0.394491`, conditioned MSE `0.216232`, improvement `0.451871`.
 
+**Label-sanitize refire.** Command:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/run_stage0_gates.py --cache-dir ingest_data/latent_cache --horizon 8 --stage0-probe token --out reports/stage0_gates_T8_token_after_label_sanitize.json`
+
+Result: still failed G0, passed K1/K2.
+- G0: presence AUROC `0.688446`, center L2 `0.209130`, center L1 `0.131569`, log-height MAE `0.349497`.
+- G0 train diagnostics: train AUROC `0.950079`, train center L2 `0.142318`, train log-height MAE `0.125913`.
+- K1: plan-only R2 `0.027045`, zero MSE `0.412433`, plan-only MSE `0.401278`.
+- K2: persistence MSE `0.353608`, conditioned MSE `0.222588`, improvement `0.370523`.
+
 **Interpretation.** The original lossy moment-probe issue and raw-frame bbox coordinate bug are fixed.
-The bad-label source deletion removed obvious semantic failures but did not clear G0. Center decoding
-remains above the `<~0.1` threshold and held-out source presence AUROC remains far below `0.95`.
-Next work should continue label-quality cleanup/probe-target calibration or explicitly replan/waive
-G0 before B3.5.
+The bad-label source deletion and geometric label masking removed obvious label failures but did not
+clear held-out-source G0. Center decoding remains above the `<~0.1` threshold and held-out source
+presence AUROC remains far below `0.95`. Next work should continue semantic label-source cleanup,
+probe-target calibration, or explicitly replan/waive G0 before B3.5.
 
 ---
 

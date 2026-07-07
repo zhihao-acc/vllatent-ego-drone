@@ -216,6 +216,17 @@ dry-run tests only.
 - Post-bad-source-delete T=8 screen: `801` clips, `31` sources, `15,359`
   windows, `7,880` person-valid windows (`51.3%`), `duplicate_frame_runs=0`,
   `time_remap_flags=14,501`, `accel_outlier_frames=1,656`, `731` flagged clips.
+- Label-geometry hygiene 2026-07-07: tracker selection, cache reads, cache-builder
+  writes, and raw-frame conversion now mask zero-area/tiny encoder-crop boxes
+  invisible (`area < 0.0025`). Backfill writes `person_bbox_space="encoder_crop"`.
+  Screen reports include invalid/tiny/edge label, flicker, center-jump, and area
+  QC counters.
+- Post-sanitize T=8 screen: `801` clips, `31` sources, `15,359` windows,
+  `6,638` person-valid windows, `11,396` sanitized person-visible frames,
+  `1,857` invalid/tiny visible labels masked, `528` degenerate visible labels,
+  `2,781` edge-touching visible labels, `2,599` flicker transitions,
+  `duplicate_frame_runs=0`, `time_remap_flags=14,501`,
+  `accel_outlier_frames=1,656`.
 - Deps: B3.1. Blocks B3.4/B3.5.
 
 ### B3.3 - 6-D Plan Tokens And T Configurability
@@ -279,6 +290,10 @@ Run K1 causality and K2 tiny conditioned person-state predictor versus persisten
   presence AUROC `0.690`, center L2 `0.212`, center L1 `0.132`, log-height MAE
   `0.408`; train AUROC `0.923`, train center L2 `0.163`; K1 passed with
   plan-only R2 `0.0459`; K2 passed with `45.19%` improvement.
+- Label-sanitize refire still failed G0: presence AUROC `0.688`, center L2
+  `0.209`, center L1 `0.132`, log-height MAE `0.349`; train AUROC `0.950`,
+  train center L2 `0.142`; K1 passed with plan-only R2 `0.0270`; K2 passed
+  with `37.05%` improvement.
 - Decision: do not proceed to B3.5 until G0 is fixed, recalibrated with a stronger
   person probe, or explicitly replanned/waived.
 - Deps: B3.2/B3.3. Blocks B3.5/B3.6.

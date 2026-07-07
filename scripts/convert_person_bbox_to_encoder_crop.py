@@ -13,8 +13,10 @@ from vllatent.ingest.person_tracking import (
     PERSON_BBOX_SPACE_ENCODER_CROP,
     PERSON_BBOX_SPACE_KEY,
     PERSON_BBOX_SPACE_RAW_FRAME,
+    PERSON_CONF_KEY,
     PERSON_VISIBLE_KEY,
     raw_frame_cxcywh_to_encoder_crop,
+    sanitize_person_track_arrays,
 )
 
 
@@ -63,12 +65,21 @@ def convert_one(path: Path, frames_dir: Path, *, dry_run: bool = False) -> dict[
         return record
 
     visible = np.asarray(arrays[PERSON_VISIBLE_KEY]).astype(np.bool_)
+    raw_visible = int(np.sum(visible))
+    conf = np.asarray(arrays.get(PERSON_CONF_KEY, np.zeros_like(visible, dtype=np.float32)), dtype=np.float32)
     converted = raw_frame_cxcywh_to_encoder_crop(np.asarray(arrays[PERSON_BBOX_KEY], dtype=np.float32), image_hw)
-    converted[~visible] = 0.0
+    converted, visible, conf = sanitize_person_track_arrays(
+        person_bbox=converted,
+        person_visible=visible,
+        person_conf=conf,
+    )
     if dry_run:
         record["status"] = "would_convert"
     else:
         arrays[PERSON_BBOX_KEY] = converted.astype(np.float32)
+        arrays[PERSON_VISIBLE_KEY] = visible
+        if PERSON_CONF_KEY in arrays:
+            arrays[PERSON_CONF_KEY] = conf
         arrays[PERSON_BBOX_SPACE_KEY] = np.array(PERSON_BBOX_SPACE_ENCODER_CROP)
         arrays["person_bbox_previous_space"] = np.array(record["previous_space"])
         arrays["person_bbox_image_hw"] = np.array(image_hw, dtype=np.int32)
@@ -76,6 +87,7 @@ def convert_one(path: Path, frames_dir: Path, *, dry_run: bool = False) -> dict[
         record["status"] = "converted"
     record["image_hw"] = list(image_hw)
     record["visible_frames"] = int(visible.sum())
+    record["sanitized_invisible_frames"] = raw_visible - int(visible.sum())
     return record
 
 

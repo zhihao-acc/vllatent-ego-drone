@@ -58,7 +58,11 @@ def _build_clip_npz(
     person_conf: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """Validate and return the arrays dict for a single segment's .npz."""
-    from vllatent.ingest.person_tracking import empty_person_tracks, validate_person_track_arrays
+    from vllatent.ingest.person_tracking import (
+        empty_person_tracks,
+        sanitize_person_track_arrays,
+        validate_person_track_arrays,
+    )
 
     n = latents.shape[0]
     if latents.shape != (n, PATCH_TOKENS, EMBED_DIM):
@@ -79,6 +83,11 @@ def _build_clip_npz(
         person_conf = tracks.person_conf
     validate_person_track_arrays(
         n_frames=n,
+        person_bbox=person_bbox,
+        person_visible=person_visible,
+        person_conf=person_conf,
+    )
+    person_bbox, person_visible, person_conf = sanitize_person_track_arrays(
         person_bbox=person_bbox,
         person_visible=person_visible,
         person_conf=person_conf,

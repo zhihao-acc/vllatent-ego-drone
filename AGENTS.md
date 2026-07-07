@@ -52,9 +52,11 @@ Repo state is authoritative for code; vault notes are authoritative for why.
   to DINO encoder-crop coordinates and the local cache was converted; G0 now uses
   a token-level torch probe with train/per-source diagnostics. User-approved
   bad-label sources `cand11`/`cand28` were deleted from the active cache after
-  earlier low/no-person source exclusions, leaving 801 clips / 31 sources. K1 and
-  K2 pass, but G0 still misses threshold. Do not proceed to B3.5 until label/probe
-  target quality is fixed, G0 is recalibrated, or the gate is explicitly replanned/waived.
+  earlier low/no-person source exclusions, leaving 801 clips / 31 sources. Invalid
+  zero/tiny crop boxes are masked invisible on cache read/write. K1 and K2 pass,
+  but G0 still misses threshold after masking (`AUROC=0.688`, center L2 `0.209`).
+  Do not proceed to B3.5 until label/probe target quality is fixed, G0 is
+  recalibrated, or the gate is explicitly replanned/waived.
 - Do not continue to B2.12/H20. H20 becomes eligible only at B3.7 after B3.6
   local gates justify one serious depth-6 run.
 - Do not add diffusion, language, game data, SAM2, PI-Prober, metric waypoint
