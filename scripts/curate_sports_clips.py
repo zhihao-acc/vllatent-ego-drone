@@ -2,7 +2,7 @@
 """Curate real sports-FPV YouTube candidates (B1.22c).
 
 Searches a thoughtful keyword set with yt-dlp, fetches metadata, applies the resolution/fps/
-aspect/duration gates + 3-level dedup (vs each other AND the already-curated set), and writes
+aspect/duration gates + 3-level dedup (vs each other, curated clips, and prior candidates), and writes
 ``configs/sports_clips_candidates.yaml`` for human review → promotion into ``sports_clips.yaml``.
 
 The decision logic lives in ``vllatent.ingest.curate`` (PURE, unit-tested); this script is the
@@ -140,10 +140,26 @@ def load_existing(path: Path) -> tuple[set[str], list[str]]:
     return ids, titles
 
 
+def load_existing_many(paths: list[Path]) -> tuple[set[str], list[str]]:
+    """Union existing ids + titles across curated and candidate YAML files."""
+    ids: set[str] = set()
+    titles: list[str] = []
+    for path in paths:
+        path_ids, path_titles = load_existing(path)
+        ids.update(path_ids)
+        titles.extend(path_titles)
+    return ids, titles
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description="Curate ski-FPV YouTube candidates")
     p.add_argument("--out", default="configs/sports_clips_candidates.yaml")
-    p.add_argument("--existing", default="configs/sports_clips.yaml")
+    p.add_argument(
+        "--existing",
+        nargs="*",
+        default=["configs/sports_clips.yaml", "configs/sports_clips_candidates.yaml"],
+        help="YAML files whose clip URLs/titles must be excluded",
+    )
     p.add_argument("--proxy", default=os.environ.get("YTDLP_PROXY", "http://127.0.0.1:7890"))
     p.add_argument("--max-per-query", type=int, default=15)
     p.add_argument("--max-fetch", type=int, default=90, help="cap full-metadata fetches (time bound)")
@@ -159,8 +175,10 @@ def main() -> None:
 
     gate = CurationGate()
     keywords = args.keywords or DEFAULT_KEYWORDS
-    existing_ids, existing_titles = load_existing(Path(args.existing))
-    print(f"[curate] {len(keywords)} queries, {len(existing_ids)} already-curated ids to exclude")
+    existing_paths = [Path(p) for p in args.existing]
+    existing_ids, existing_titles = load_existing_many(existing_paths)
+    existing_labels = ", ".join(str(p) for p in existing_paths)
+    print(f"[curate] {len(keywords)} queries, {len(existing_ids)} existing ids to exclude from {existing_labels}")
 
     raw: list[dict] = []
     for kw in keywords:

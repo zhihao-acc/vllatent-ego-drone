@@ -160,6 +160,9 @@ human-visible frame counts and passes `track_persons=True` by default into
 **Next USER gate.** Run ski-first curation and ingest with the new pipeline; paste
 the accepted candidate count, ingest summary, and post-expansion screen. Do not
 start B3.5 until that pasteback is reviewed.
+The curation script now dedupes by default against both `configs/sports_clips.yaml`
+and `configs/sports_clips_candidates.yaml` (`60` existing video IDs/titles), so the
+B3.4a search does not repeat the prior 15 curated clips or the prior 45 candidates.
 
 Paste block:
 `cd /home/zh/CODE/vllatent-ego-drone`
