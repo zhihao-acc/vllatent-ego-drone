@@ -3,9 +3,10 @@
 
 Orchestrates:
   1. Download clips from configs/sports_clips.yaml via yt-dlp (SponsorBlock pre-strip)
-  2. Run content filter (motion + YOLO-World) — reject non-FPV clips
-  3. Run full pipeline on accepted clips (quality → MegaSaM → DINOv3 → cache)
-  4. Update manifest
+  2. Run content filter (motion + YOLO object-negative + YOLO human-positive)
+  3. Cut accepted human-visible FPV ranges into fixed clips
+  4. Run full pipeline on accepted clips (quality → person gate → MegaSaM → DINOv3 → cache)
+  5. Update manifest
 
 Usage:
     python scripts/ingest_youtube_pilot.py [--limit N] [--device cuda] [--skip-download]
@@ -39,6 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--device", default="cuda", help="Torch device for CLIP/DINOv3")
     parser.add_argument("--skip-download", action="store_true", help="Skip yt-dlp download")
     parser.add_argument("--skip-megasam", action="store_true", help="Skip MegaSaM VO")
+    parser.add_argument("--no-track-persons", action="store_true", help="Disable B3 person-track segment gate")
     parser.add_argument("--filter-only", action="store_true", help="Download + filter only, no pipeline")
     args = parser.parse_args(argv)
 
@@ -69,6 +71,7 @@ def main(argv: list[str] | None = None) -> int:
     _log(f"Processing {len(clips)} clips from {args.clips}")
     _log(f"  raw_dir={raw_dir}, frames_dir={frames_dir}, cache_dir={cache_dir}")
     _log(f"  device={args.device}, skip_download={args.skip_download}")
+    _log(f"  track_persons={not args.no_track_persons}")
 
     results_summary: list[dict] = []
 
@@ -136,7 +139,7 @@ def main(argv: list[str] | None = None) -> int:
             results_summary.append({"clip_id": clip_id, "status": "too_few_frames", "n_frames": n_frames})
             continue
 
-        _log("  running content filter (every frame)...")
+        _log("  running content filter (motion + object-negative + human-positive, every frame)...")
         try:
             from vllatent.ingest.content_filter import (
                 VideoVerdict,
@@ -151,8 +154,19 @@ def main(argv: list[str] | None = None) -> int:
             save_filter_result(clip_frames_dir, filter_result)
 
             fpv_count = sum(1 for s in filter_result.shots if s.is_fpv)
+            n_object_frames = (
+                int(filter_result.rejected_objects.sum())
+                if filter_result.rejected_objects is not None
+                else 0
+            )
+            n_human_frames = (
+                int(filter_result.human_visible.sum())
+                if filter_result.human_visible is not None
+                else 0
+            )
             _log(f"  verdict: {filter_result.verdict.value}, FPV shots: {fpv_count}/{len(filter_result.shots)}")
             _log(f"  FPV frames: {filter_result.n_fpv_frames}/{filter_result.n_frames}")
+            _log(f"  YOLO frames: {n_object_frames} object-rejected, {n_human_frames} human-visible")
 
             if filter_result.verdict == VideoVerdict.REJECT:
                 _log("  REJECTED — skipping")
@@ -161,6 +175,8 @@ def main(argv: list[str] | None = None) -> int:
                     "status": "content_rejected",
                     "fpv_shots": fpv_count,
                     "total_shots": len(filter_result.shots),
+                    "object_rejected_frames": n_object_frames,
+                    "human_visible_frames": n_human_frames,
                 })
                 continue
 
@@ -200,6 +216,11 @@ def main(argv: list[str] | None = None) -> int:
                 "status": "filter_accepted",
                 "fpv_ranges": len(fpv_ranges),
                 "n_sub_clips": len(sub_clips),
+                "human_visible_frames": (
+                    int(filter_result.human_visible.sum())
+                    if filter_result is not None and filter_result.human_visible is not None
+                    else 0
+                ),
             })
             continue
 
@@ -226,6 +247,7 @@ def main(argv: list[str] | None = None) -> int:
                     skip_download=True,
                     skip_megasam=args.skip_megasam,
                     device=args.device,
+                    track_persons=not args.no_track_persons,
                 )
 
                 for seg_result in segment_results:

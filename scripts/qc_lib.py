@@ -15,7 +15,6 @@ from __future__ import annotations
 import base64
 import io
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 
@@ -23,6 +22,7 @@ import numpy as np
 COLOR_FPV = "#2e7d32"        # green  — kept (FPV)
 COLOR_OBJECT = "#c62828"     # red    — rejected: YOLO object (drone/camera/overlay)
 COLOR_STATIC = "#ef6c00"     # orange — rejected: too little motion
+COLOR_NO_HUMAN = "#6a1b9a"   # purple — rejected: no YOLO human-positive signal
 COLOR_SHORT = "#f9a825"      # amber  — rejected: FPV-ish but in a too-short run
 COLOR_OTHER = "#757575"      # gray   — rejected: other / non-FPV shot
 
@@ -30,6 +30,7 @@ REASON_LABELS = {
     "fpv": "FPV (kept)",
     "object": "object",
     "static": "static",
+    "human": "no human",
     "short": "short-run",
     "other": "non-FPV",
 }
@@ -37,6 +38,7 @@ REASON_COLORS = {
     "fpv": COLOR_FPV,
     "object": COLOR_OBJECT,
     "static": COLOR_STATIC,
+    "human": COLOR_NO_HUMAN,
     "short": COLOR_SHORT,
     "other": COLOR_OTHER,
 }
@@ -53,14 +55,16 @@ def classify_frame_reasons(
     fpv_mask: np.ndarray,
     motion_scores: np.ndarray | None,
     rejected_objects: np.ndarray | None,
+    human_visible: np.ndarray | None = None,
     *,
     motion_threshold: float = _MOTION_THRESHOLD,
 ) -> list[str]:
     """Label every frame with WHY the content filter kept/dropped it.
 
     Categories: ``fpv`` (kept), ``object`` (YOLO rejected), ``static`` (below
-    motion threshold), ``short`` (had motion + no object but lived in a run too
-    short to survive), ``other`` (dropped for any remaining reason).
+    motion threshold), ``human`` (no YOLO human-positive signal), ``short`` (had
+    motion + no object + human but lived in a run too short to survive), ``other``
+    (dropped for any remaining reason).
     """
     n = len(fpv_mask)
     reasons: list[str] = []
@@ -72,8 +76,10 @@ def classify_frame_reasons(
             reasons.append("object")
         elif motion_scores is not None and float(motion_scores[i]) < motion_threshold:
             reasons.append("static")
+        elif human_visible is not None and not bool(human_visible[i]):
+            reasons.append("human")
         elif motion_scores is not None and rejected_objects is not None:
-            # had motion and no object yet still dropped => short-run pruning
+            # had motion, no object, and human evidence yet still dropped => short-run pruning
             reasons.append("short")
         else:
             reasons.append("other")
@@ -278,7 +284,7 @@ def html_page(title: str, body: str) -> str:
 def legend_html(reasons_present: list[str]) -> str:
     """Render a small color legend for the decision categories present."""
     parts = ["<div class='legend'>"]
-    for r in ["fpv", "object", "static", "short", "other"]:
+    for r in ["fpv", "object", "static", "human", "short", "other"]:
         if r in reasons_present:
             parts.append(
                 f"<span><i style='background:{REASON_COLORS[r]}'></i>{REASON_LABELS[r]}</span>"

@@ -142,6 +142,65 @@ class TestYoloObjectDetection:
         assert found == drone_parts, f"Missing drone parts: {drone_parts - found}"
 
 
+class TestYoloHumanDetection:
+    """YOLO-World open-vocabulary object detection for positive human evidence."""
+
+    def test_detect_humans_returns_per_frame_bool(self) -> None:
+        """detect_humans returns (N,) bool array."""
+        from vllatent.ingest.content_filter import detect_humans
+
+        frames = _make_frames(5)
+        with patch("vllatent.ingest.content_filter._get_yolo_human_detector") as mock_det:
+            mock_fn = MagicMock(return_value=np.array([False, True, True, False, False]))
+            mock_det.return_value = mock_fn
+            visible = detect_humans(frames, device="cpu")
+
+        assert isinstance(visible, np.ndarray)
+        assert visible.shape == (5,)
+        assert visible.dtype == np.bool_
+        assert visible[1] is np.True_
+
+    def test_detect_humans_empty_raises(self) -> None:
+        from vllatent.ingest.content_filter import detect_humans
+        with pytest.raises(ValueError, match="frames"):
+            detect_humans([], device="cpu")
+
+    def test_detect_humans_from_paths(self, tmp_path: Path) -> None:
+        """detect_humans_from_paths works on file paths."""
+        from vllatent.ingest.content_filter import detect_humans_from_paths
+
+        frame_dir = tmp_path / "frames"
+        frame_dir.mkdir()
+        for i in range(6):
+            _save_dummy_frame(frame_dir / f"{i:06d}.jpg")
+
+        paths = sorted(frame_dir.glob("*.jpg"))
+        full_result = np.array([False, True, False, False, True, False])
+        call_count = [0]
+        with patch("vllatent.ingest.content_filter._get_yolo_human_detector") as mock_det:
+            def _batch_detect(batch: list) -> np.ndarray:
+                start = call_count[0]
+                call_count[0] += len(batch)
+                return full_result[start:start + len(batch)]
+            mock_det.return_value = _batch_detect
+            visible = detect_humans_from_paths(paths, device="cpu", batch_size=4)
+
+        assert visible.shape == (6,)
+        assert visible[1] is np.True_
+        assert visible[4] is np.True_
+
+    def test_detect_humans_from_paths_empty_raises(self) -> None:
+        from vllatent.ingest.content_filter import detect_humans_from_paths
+        with pytest.raises(ValueError, match="frame_paths"):
+            detect_humans_from_paths([], device="cpu")
+
+    def test_human_classes_are_configurable(self) -> None:
+        """The HUMAN_CLASSES list should be accessible and cover ski-follow footage."""
+        from vllatent.ingest.content_filter import HUMAN_CLASSES
+        assert isinstance(HUMAN_CLASSES, (list, tuple))
+        assert {"person", "skier", "snowboarder"}.issubset(set(HUMAN_CLASSES))
+
+
 # ---------------------------------------------------------------------------
 # Minimum segment filter (continuity)
 # ---------------------------------------------------------------------------
@@ -457,11 +516,11 @@ class TestDetectShotBoundariesFromPaths:
 
 
 # ---------------------------------------------------------------------------
-# Full pipeline: filter_video_from_paths (motion + YOLO)
+# Full pipeline: filter_video_from_paths (motion + YOLO negative + human positive)
 # ---------------------------------------------------------------------------
 
 class TestFilterVideoFromPaths:
-    """filter_video_from_paths: motion + YOLO object detection pipeline."""
+    """filter_video_from_paths: motion + YOLO object/human detection pipeline."""
 
     def test_returns_filter_result_all_fpv(self, tmp_path: Path) -> None:
         """High motion + no rejected objects → all FPV."""
@@ -475,8 +534,10 @@ class TestFilterVideoFromPaths:
         paths = sorted(frame_dir.glob("*.jpg"))
         high_motion = np.ones(20, dtype=np.float32) * 30.0
         no_rejected = np.zeros(20, dtype=np.bool_)
+        human_visible = np.ones(20, dtype=np.bool_)
         with patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=high_motion), \
-             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=no_rejected):
+             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=no_rejected), \
+             patch("vllatent.ingest.content_filter.detect_humans_from_paths", return_value=human_visible):
             result = filter_video_from_paths(paths, device="cpu")
 
         assert isinstance(result, FilterResult)
@@ -484,6 +545,7 @@ class TestFilterVideoFromPaths:
         assert result.n_frames == 20
         assert result.fpv_mask.shape == (20,)
         assert result.n_fpv_frames == 20
+        np.testing.assert_array_equal(result.human_visible, human_visible)
 
     def test_motion_rejects_static_frames(self, tmp_path: Path) -> None:
         """Frames with zero motion should be rejected even with no objects detected."""
@@ -497,8 +559,10 @@ class TestFilterVideoFromPaths:
         paths = sorted(frame_dir.glob("*.jpg"))
         zero_motion = np.zeros(10, dtype=np.float32)
         no_rejected = np.zeros(10, dtype=np.bool_)
+        human_visible = np.ones(10, dtype=np.bool_)
         with patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=zero_motion), \
-             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=no_rejected):
+             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=no_rejected), \
+             patch("vllatent.ingest.content_filter.detect_humans_from_paths", return_value=human_visible):
             result = filter_video_from_paths(paths, device="cpu")
 
         assert result.n_fpv_frames == 0
@@ -516,8 +580,10 @@ class TestFilterVideoFromPaths:
         high_motion = np.ones(10, dtype=np.float32) * 30.0
         # Frames 3,4,5 have a drone visible; disable min segment to test YOLO in isolation
         rejected = np.array([False, False, False, True, True, True, False, False, False, False])
+        human_visible = np.ones(10, dtype=np.bool_)
         with patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=high_motion), \
-             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=rejected):
+             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=rejected), \
+             patch("vllatent.ingest.content_filter.detect_humans_from_paths", return_value=human_visible):
             result = filter_video_from_paths(paths, device="cpu", min_segment_frames=1)
 
         assert result.n_fpv_frames == 7
@@ -526,6 +592,27 @@ class TestFilterVideoFromPaths:
         assert not result.fpv_mask[5]
         assert result.fpv_mask[0]
         assert result.fpv_mask[6]
+
+    def test_human_gate_rejects_frames_without_person(self, tmp_path: Path) -> None:
+        """Frames without visible humans should be rejected before clipping."""
+        from vllatent.ingest.content_filter import filter_video_from_paths
+
+        frame_dir = tmp_path / "frames"
+        frame_dir.mkdir()
+        for i in range(10):
+            _save_dummy_frame(frame_dir / f"{i:06d}.jpg")
+
+        paths = sorted(frame_dir.glob("*.jpg"))
+        high_motion = np.ones(10, dtype=np.float32) * 30.0
+        no_rejected = np.zeros(10, dtype=np.bool_)
+        human_visible = np.array([True, True, False, False, True, True, True, False, False, True])
+        with patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=high_motion), \
+             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=no_rejected), \
+             patch("vllatent.ingest.content_filter.detect_humans_from_paths", return_value=human_visible):
+            result = filter_video_from_paths(paths, device="cpu", min_segment_frames=1)
+
+        assert result.n_fpv_frames == 6
+        np.testing.assert_array_equal(result.fpv_mask, human_visible)
 
     def test_short_segments_discarded(self, tmp_path: Path) -> None:
         """Accepted runs shorter than min_segment_frames are discarded."""
@@ -541,8 +628,10 @@ class TestFilterVideoFromPaths:
         # Drone at frames 3-5 splits into [0-2] (3 frames) and [6-19] (14 frames)
         rejected = np.zeros(20, dtype=np.bool_)
         rejected[3:6] = True
+        human_visible = np.ones(20, dtype=np.bool_)
         with patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=high_motion), \
-             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=rejected):
+             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=rejected), \
+             patch("vllatent.ingest.content_filter.detect_humans_from_paths", return_value=human_visible):
             result = filter_video_from_paths(paths, device="cpu", min_segment_frames=5)
 
         # [0-2] is only 3 frames < 5 minimum → discarded
@@ -566,8 +655,10 @@ class TestFilterVideoFromPaths:
         paths = sorted(frame_dir.glob("*.jpg"))
         high_motion = np.ones(n, dtype=np.float32) * 30.0
         no_rejected = np.zeros(n, dtype=np.bool_)
+        human_visible = np.ones(n, dtype=np.bool_)
         with patch("vllatent.ingest.content_filter.compute_motion_scores", return_value=high_motion), \
-             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=no_rejected):
+             patch("vllatent.ingest.content_filter.detect_rejected_objects_from_paths", return_value=no_rejected), \
+             patch("vllatent.ingest.content_filter.detect_humans_from_paths", return_value=human_visible):
             result = filter_video_from_paths(paths, device="cpu")
 
         assert result.fpv_mask.shape == (n,)
@@ -628,8 +719,10 @@ class TestFilterVideoIntegration:
         frames = _make_frames(20)
         high_motion = np.ones(20, dtype=np.float32) * 30.0
         no_rejected = np.zeros(20, dtype=np.bool_)
+        human_visible = np.ones(20, dtype=np.bool_)
         with patch("vllatent.ingest.content_filter._compute_motion_from_arrays", return_value=high_motion), \
-             patch("vllatent.ingest.content_filter.detect_rejected_objects", return_value=no_rejected):
+             patch("vllatent.ingest.content_filter.detect_rejected_objects", return_value=no_rejected), \
+             patch("vllatent.ingest.content_filter.detect_humans", return_value=human_visible):
             result = filter_video(frames, device="cpu")
 
         assert isinstance(result, FilterResult)
@@ -645,8 +738,10 @@ class TestFilterVideoIntegration:
         frames = _make_frames(20)
         zero_motion = np.zeros(20, dtype=np.float32)
         no_rejected = np.zeros(20, dtype=np.bool_)
+        human_visible = np.ones(20, dtype=np.bool_)
         with patch("vllatent.ingest.content_filter._compute_motion_from_arrays", return_value=zero_motion), \
-             patch("vllatent.ingest.content_filter.detect_rejected_objects", return_value=no_rejected):
+             patch("vllatent.ingest.content_filter.detect_rejected_objects", return_value=no_rejected), \
+             patch("vllatent.ingest.content_filter.detect_humans", return_value=human_visible):
             result = filter_video(frames, device="cpu")
 
         assert result.verdict == VideoVerdict.REJECT

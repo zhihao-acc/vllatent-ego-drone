@@ -1,10 +1,12 @@
 """Motion + YOLO-World open-vocabulary content filter + PySceneDetect shot boundaries (B1.7c).
 
-Two-signal FPV filter for sports footage:
+Three-signal FPV filter for sports-following footage:
 1. **Motion** (primary): frame-to-frame pixel difference rejects static/product shots.
-2. **YOLO-World** (semantic): open-vocabulary object detection rejects frames containing
+2. **YOLO-World negative**: open-vocabulary object detection rejects frames containing
    drones, cameras, gear, text overlays, etc. — objects that should never appear in
    first-person training data.
+3. **YOLO-World positive**: open-vocabulary human detection keeps only frames with a
+   visible person/skier/snowboarder before auto clipping.
 
 Shot boundaries detected via PySceneDetect AdaptiveDetector. Per-shot majority vote
 produces a whole-video verdict (ACCEPT / PARTIAL / REJECT).
@@ -63,6 +65,12 @@ REJECTED_CLASSES: list[str] = [
     "subtitle",
 ]
 
+HUMAN_CLASSES: list[str] = [
+    "person",
+    "skier",
+    "snowboarder",
+]
+
 _YOLO_CONFIDENCE_THRESHOLD = 0.15
 _YOLO_MODEL_ID = "yolov8s-worldv2.pt"
 
@@ -107,6 +115,7 @@ class FilterResult:
     # older constructions stay valid; populated by the filter_video* functions.
     motion_scores: np.ndarray | None = None
     rejected_objects: np.ndarray | None = None
+    human_visible: np.ndarray | None = None
 
 
 # ---------------------------------------------------------------------------
@@ -188,33 +197,58 @@ def detect_shot_boundaries_from_paths(
 # ---------------------------------------------------------------------------
 
 
-def _get_yolo_detector(
+def _get_yolo_detector_for_classes(
+    classes: list[str],
     device: str = "cpu",
     confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
 ) -> Callable[[list[np.ndarray]], np.ndarray]:
-    """Build a YOLO-World detector that flags frames containing rejected objects.
+    """Build a YOLO-World detector that flags frames containing any class.
 
     Lazy-loads ultralytics. Text embeddings are computed once via set_classes().
-    Returns a callable: list[np.ndarray] → np.ndarray[bool] (True = rejected).
+    Returns a callable: list[np.ndarray] → np.ndarray[bool] (True = detected).
     """
     from ultralytics import YOLOWorld
 
     model = YOLOWorld(_YOLO_MODEL_ID)
     model.to(device)
-    model.set_classes(REJECTED_CLASSES)
+    model.set_classes(classes)
 
     def _detect_batch(frames_batch: list[np.ndarray]) -> np.ndarray:
         from PIL import Image
 
         images = [Image.fromarray(f) for f in frames_batch]
         results = model.predict(images, conf=confidence, verbose=False)
-        rejected = np.zeros(len(frames_batch), dtype=np.bool_)
+        detected = np.zeros(len(frames_batch), dtype=np.bool_)
         for i, result in enumerate(results):
             if len(result.boxes) > 0:
-                rejected[i] = True
-        return rejected
+                detected[i] = True
+        return detected
 
     return _detect_batch
+
+
+def _get_yolo_detector(
+    device: str = "cpu",
+    confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
+) -> Callable[[list[np.ndarray]], np.ndarray]:
+    """Build a YOLO-World detector that flags frames containing rejected objects."""
+    return _get_yolo_detector_for_classes(
+        REJECTED_CLASSES,
+        device=device,
+        confidence=confidence,
+    )
+
+
+def _get_yolo_human_detector(
+    device: str = "cpu",
+    confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
+) -> Callable[[list[np.ndarray]], np.ndarray]:
+    """Build a YOLO-World detector that flags frames containing a visible human."""
+    return _get_yolo_detector_for_classes(
+        HUMAN_CLASSES,
+        device=device,
+        confidence=confidence,
+    )
 
 
 def detect_rejected_objects(
@@ -265,6 +299,56 @@ def detect_rejected_objects_from_paths(
         all_rejected.append(rejected)
 
     return np.concatenate(all_rejected)
+
+
+def detect_humans(
+    frames: list[np.ndarray],
+    *,
+    device: str = "cpu",
+    batch_size: int = 32,
+    confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
+) -> np.ndarray:
+    """Detect visible humans in frames using YOLO-World.
+
+    Returns per-frame boolean mask: True = frame contains a person/skier/snowboarder.
+    """
+    if not frames:
+        raise ValueError("frames: expected a non-empty list of RGB arrays")
+
+    detector = _get_yolo_human_detector(device=device, confidence=confidence)
+
+    all_visible: list[np.ndarray] = []
+    for i in range(0, len(frames), batch_size):
+        batch = frames[i : i + batch_size]
+        visible = detector(batch)
+        all_visible.append(visible)
+
+    return np.concatenate(all_visible)
+
+
+def detect_humans_from_paths(
+    frame_paths: list,
+    *,
+    device: str = "cpu",
+    batch_size: int = 32,
+    confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
+) -> np.ndarray:
+    """Detect visible humans by loading frames from file paths in bounded batches."""
+    if not frame_paths:
+        raise ValueError("frame_paths: expected a non-empty list of paths")
+
+    from PIL import Image
+
+    detector = _get_yolo_human_detector(device=device, confidence=confidence)
+
+    all_visible: list[np.ndarray] = []
+    for i in range(0, len(frame_paths), batch_size):
+        batch_paths = frame_paths[i : i + batch_size]
+        batch_frames = [np.array(Image.open(p)) for p in batch_paths]
+        visible = detector(batch_frames)
+        all_visible.append(visible)
+
+    return np.concatenate(all_visible)
 
 
 # ---------------------------------------------------------------------------
@@ -487,13 +571,15 @@ def filter_video_from_paths(
     min_segment_frames: int = _MIN_SEGMENT_FRAMES,
     yolo_confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
     batch_size: int = 32,
+    require_human: bool = True,
 ) -> FilterResult:
-    """Run full content filter on file paths: motion + YOLO + SBD + verdict.
+    """Run full content filter on file paths: motion + YOLO +/- human + SBD.
 
     Three-stage filter:
     1. Motion: reject static frames (below ``motion_threshold``).
     2. YOLO-World: reject frames containing drones, cameras, gear, etc.
-    3. Minimum segment: discard accepted runs shorter than ``min_segment_frames``.
+    3. YOLO-World: require a visible person/skier/snowboarder before clipping.
+    4. Minimum segment: discard accepted runs shorter than ``min_segment_frames``.
 
     Shot boundaries (AdaptiveDetector, threshold=2.0) split the video
     into independent camera recordings.  Each shot is classified as FPV
@@ -512,9 +598,19 @@ def filter_video_from_paths(
         frame_paths, device=device, batch_size=batch_size,
         confidence=yolo_confidence,
     )
+    if require_human:
+        human_visible = detect_humans_from_paths(
+            frame_paths, device=device, batch_size=batch_size,
+            confidence=yolo_confidence,
+        )
+    else:
+        human_visible = np.ones(len(frame_paths), dtype=np.bool_)
 
     has_motion = motion_scores >= motion_threshold
-    fpv_mask = filter_short_segments(has_motion & ~rejected_objects, min_segment_frames)
+    fpv_mask = filter_short_segments(
+        has_motion & ~rejected_objects & human_visible,
+        min_segment_frames,
+    )
 
     scores = np.where(fpv_mask, 1.0, 0.0).astype(np.float32)
 
@@ -531,6 +627,7 @@ def filter_video_from_paths(
         per_frame_scores=scores,
         motion_scores=motion_scores,
         rejected_objects=rejected_objects,
+        human_visible=human_visible,
     )
 
 
@@ -543,8 +640,9 @@ def filter_video(
     min_segment_frames: int = _MIN_SEGMENT_FRAMES,
     yolo_confidence: float = _YOLO_CONFIDENCE_THRESHOLD,
     batch_size: int = 32,
+    require_human: bool = True,
 ) -> FilterResult:
-    """Run full content filter on in-memory frames: motion + YOLO + SBD + verdict."""
+    """Run full content filter on in-memory frames: motion + YOLO +/- human + SBD."""
     if not frames:
         raise ValueError("frames: expected a non-empty list of RGB arrays")
 
@@ -554,9 +652,19 @@ def filter_video(
         frames, device=device, batch_size=batch_size,
         confidence=yolo_confidence,
     )
+    if require_human:
+        human_visible = detect_humans(
+            frames, device=device, batch_size=batch_size,
+            confidence=yolo_confidence,
+        )
+    else:
+        human_visible = np.ones(len(frames), dtype=np.bool_)
 
     has_motion = motion_scores >= motion_threshold
-    fpv_mask = filter_short_segments(has_motion & ~rejected_objects, min_segment_frames)
+    fpv_mask = filter_short_segments(
+        has_motion & ~rejected_objects & human_visible,
+        min_segment_frames,
+    )
 
     scores = np.where(fpv_mask, 1.0, 0.0).astype(np.float32)
 
@@ -573,6 +681,7 @@ def filter_video(
         per_frame_scores=scores,
         motion_scores=motion_scores,
         rejected_objects=rejected_objects,
+        human_visible=human_visible,
     )
 
 
@@ -589,6 +698,7 @@ def save_filter_result(frames_dir, result: FilterResult):
 
     ms = result.motion_scores
     ro = result.rejected_objects
+    hv = result.human_visible
     payload = {
         "verdict": result.verdict.value,
         "n_frames": int(result.n_frames),
@@ -603,6 +713,7 @@ def save_filter_result(frames_dir, result: FilterResult):
         ],
         "motion_scores": [round(float(x), 3) for x in np.asarray(ms).tolist()] if ms is not None else None,
         "rejected_objects": [int(x) for x in np.asarray(ro).tolist()] if ro is not None else None,
+        "human_visible": [int(x) for x in np.asarray(hv).tolist()] if hv is not None else None,
     }
     out = Path(frames_dir) / "_filter.json"
     out.write_text(json.dumps(payload))
@@ -622,6 +733,7 @@ def load_filter_result(frames_dir) -> dict | None:
 
 __all__ = [
     "REJECTED_CLASSES",
+    "HUMAN_CLASSES",
     "VideoVerdict",
     "ShotInfo",
     "ShotClassification",
@@ -633,6 +745,8 @@ __all__ = [
     "detect_shot_boundaries_from_paths",
     "detect_rejected_objects",
     "detect_rejected_objects_from_paths",
+    "detect_humans",
+    "detect_humans_from_paths",
     "filter_short_segments",
     "classify_shots",
     "video_verdict",

@@ -112,6 +112,8 @@ def main(argv: list[str] | None = None) -> int:
                    help="Skip MegaSaM (use existing output)")
     p.add_argument("--skip-encode", action="store_true",
                    help="Skip DINOv3 encoding (dry-run pipeline structure)")
+    p.add_argument("--no-track-persons", action="store_true",
+                   help="Disable B3 person-track cache labels")
     p.add_argument("--sub-clip-index", type=int, default=0,
                    help="Which sub-clip to test (0 = first)")
     p.add_argument("--fps", type=float, default=5.0, help="Source FPS")
@@ -145,6 +147,8 @@ def main(argv: list[str] | None = None) -> int:
     fpv_ranges = extract_fpv_ranges(filter_result.shots, filter_result.fpv_mask)
     _log(f"Verdict: {filter_result.verdict.value}")
     _log(f"FPV shots: {sum(1 for s in filter_result.shots if s.is_fpv)}/{len(filter_result.shots)}")
+    if filter_result.human_visible is not None:
+        _log(f"Human-visible frames: {int(filter_result.human_visible.sum())}/{filter_result.n_frames}")
     _log(f"FPV ranges (per-frame filtered): {fpv_ranges}")
 
     if filter_result.verdict == VideoVerdict.REJECT:
@@ -292,6 +296,7 @@ def main(argv: list[str] | None = None) -> int:
         cfg=cfg,
         cache_dir=cache_dir,
         skip_megasam=args.skip_megasam,
+        track_persons=not args.no_track_persons,
         device=args.device,
     )
 

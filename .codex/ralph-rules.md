@@ -32,9 +32,13 @@ Every iteration starts by reading:
   - `B3.1` reviewed cleanup of obsolete B1/B2 runnable paths (done 2026-07-07),
   - `B3.2` person-track cache backfill and data screens (done 2026-07-07),
   - `B3.3` 6-D plan-token contract and T configurability (done 2026-07-07),
-  - `B3.4` Stage-0 probes plus K1/K2 (done 2026-07-07 after G0/K2 gate replan;
-    G0/K1/K2 pass locally on the active T=8 cache),
-  - `B3.5` depth-6 per-step 6-D conditioned world model,
+  - `B3.4` Stage-0 probes plus K1/K2 (replanned; old `0.95` AUROC probe is a
+    diagnostic bug detector, not a hard blocker),
+  - `B3.4a` YOLO-standard data cleanup and expansion prep (active; add
+    human-positive filtering before auto clipping and prepare ski-first
+    user-gated expansion),
+  - `B3.5` depth-6 per-step 6-D conditioned world model (do not start while
+    B3.4a is active),
   - `B3.6` Stage-1 local gates G1a-G1d,
   - `B3.7` USER-GATED H20 depth-6 run,
   - `B3.8` planner-facing CEM/MPPI hindsight-replay evaluation.
@@ -72,13 +76,12 @@ Every iteration starts by reading:
   or EGO-Planner integration before deterministic B3 gates pass.
 - H20/SSH/docker/long jobs remain user-gated. Codex prepares one command only at
   B3.7 if B3.6 passes.
-- Current stop: B3.4 passes locally on the active T=8 cache after splitting G0
-  detector visibility from state supervision and recalibrating K2 to motion-delta
-  improvement. Latest refire: G0 presence AUROC `0.658`, center L2 `0.134`,
-  center L1 `0.084`, log-height MAE `0.230`; K1 plan-only R2 `0.0199`; K2 delta
-  improvement `54.9%` while raw state improvement remains `-5.2%`. B3.5 is the
-  next AUTO step in the plan, but do not start it in a loop where the user has
-  explicitly asked to stop before B3.5.
+- Current stop: B3.4a is active. Do not tune source selection by AUROC. Clean or
+  exclude bad `.npz` only by YOLO/person-label evidence, add YOLO
+  human-positive filtering after object-negative filtering and before auto
+  clipping, then prepare ski-first data expansion. Video download/full cache
+  expansion remains user-gated; provide paste-ready commands instead of running
+  those jobs. Do not start B3.5.
 
 ## B3 Verification Checklist
 
@@ -101,7 +104,7 @@ A healthy B3 local handoff should report:
 |---|---|---|
 | G0 | detector-visible presence is above a weak held-out sanity floor and person-state center/log-height decode on `person_state_valid` | fix labels/probes or replan |
 | K1 | plan-only camera-compensated person motion is near chance | rework causal separation or abort |
-| K2 | tiny conditioned predictor improves person-state motion deltas over persistence | abort or replan dense WM path |
+| K2 | tiny conditioned predictor improves raw person-state MSE over persistence on valid-current, full-future, moving person rows | abort or replan dense WM path |
 | G1a | conditioned predictor beats person-weighted latent persistence `>=10%` and null-plan `>=5%` | objective/conditioning bug hunt |
 | G1b | rollout beats persistence at every k<=8 | shorten/reweight before scaling |
 | G1c/K4 | probe transfer passes and gameability check passes | calibrate probes or state-head primary |

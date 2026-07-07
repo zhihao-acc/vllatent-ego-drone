@@ -50,15 +50,13 @@ Repo state is authoritative for code; vault notes are authoritative for why.
   provenance. `person_visible` is detector visibility; `person_state_valid` is
   the stricter followed-subject supervision mask. Old caches must still load
   with invisible-person defaults.
-- B3.4 Stage-0 now passes after the human-label gate rework and an explicit gate
-  replan. `person_visible` is detector visibility; `person_state_valid` is the
-  stricter followed-subject supervision mask. G0 presence is measured from
-  `person_visible` with a weak held-out sanity floor, while G0 center/log-height
-  are measured only on `person_state_valid`. K2 reports raw state MSE but gates on
-  motion-delta improvement over persistence. Latest active T=8 refire over the
-  778-clip / 28-source cache passed G0/K1/K2: presence AUROC `0.658`, center L2
-  `0.134`, center L1 `0.084`, log-height MAE `0.230`; K1 R2 `0.0199`; K2 delta
-  improvement `54.9%` while raw state improvement remained `-5.2%`.
+- B3.4's old `0.95` AUROC probe is retired as a hard blocker by user replan; use
+  it only as a bug detector. Active work is B3.4a: clean/exclude bad `.npz` by
+  YOLO/person-label evidence, add a YOLO human-positive signal after the existing
+  YOLO object-negative signal and before auto clipping, then prepare ski-first
+  data expansion. Future cache ingest must keep `track_persons=True` so strict
+  followed-subject windows are checked before MegaSaM/DINO. Do not start B3.5
+  until B3.4a is complete.
 - Do not continue to B2.12/H20. H20 becomes eligible only at B3.7 after B3.6
   local gates justify one serious depth-6 run.
 - Do not add diffusion, language, game data, SAM2, PI-Prober, metric waypoint

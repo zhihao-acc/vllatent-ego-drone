@@ -9,6 +9,7 @@ The decision logic lives in ``vllatent.ingest.curate`` (PURE, unit-tested); this
 network/orchestration shell. Run on the dev box:
 
     python scripts/curate_sports_clips.py --max-per-query 15 --out configs/sports_clips_candidates.yaml
+    python scripts/curate_sports_clips.py --clip-prefix ski --start-index 16 --out configs/sports_clips_b34a_ski.yaml
 
 Keyword strategy — FOLLOW-CAM ONLY (the deployment view): a drone CHASING/FOLLOWING a skier, so
 the followed skier is IN FRAME (from behind/above). This is what the latent world model must learn
@@ -147,8 +148,14 @@ def main() -> None:
     p.add_argument("--max-per-query", type=int, default=15)
     p.add_argument("--max-fetch", type=int, default=90, help="cap full-metadata fetches (time bound)")
     p.add_argument("--sport", default="skiing")
+    p.add_argument("--clip-prefix", default="cand", help="prefix for emitted clip IDs; do not include '_'")
+    p.add_argument("--start-index", type=int, default=1, help="first numeric suffix for emitted clip IDs")
     p.add_argument("--keywords", nargs="*", default=None, help="override the default keyword set")
     args = p.parse_args()
+    if "_" in args.clip_prefix:
+        raise SystemExit("--clip-prefix must not contain '_' because source split uses '_' as a separator")
+    if args.start_index < 0:
+        raise SystemExit("--start-index must be non-negative")
 
     gate = CurationGate()
     keywords = args.keywords or DEFAULT_KEYWORDS
@@ -185,8 +192,10 @@ def main() -> None:
         else:
             rejected.append({**meta, "_drop": "; ".join(reasons)})
 
-    entries = [candidate_to_entry(m, f"cand{i:02d}", sport=args.sport)
-               for i, m in enumerate(accepted, start=1)]
+    entries = [
+        candidate_to_entry(m, f"{args.clip_prefix}{i:02d}", sport=args.sport)
+        for i, m in enumerate(accepted, start=args.start_index)
+    ]
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(yaml.dump({"clips": entries}, default_flow_style=False, sort_keys=False))

@@ -93,9 +93,10 @@ def build_frame_panel(clip_id: str, frames_dir: Path, fdata: dict) -> tuple[str,
     fpv_mask = np.array(fdata["fpv_mask"], dtype=bool)
     motion = np.array(fdata["motion_scores"], dtype=float) if fdata.get("motion_scores") else None
     rejected = np.array(fdata["rejected_objects"], dtype=bool) if fdata.get("rejected_objects") else None
+    human = np.array(fdata["human_visible"], dtype=bool) if fdata.get("human_visible") else None
 
     reasons = qc_lib.classify_frame_reasons(
-        fpv_mask, motion, rejected, motion_threshold=fdata.get("motion_threshold", 8.0)
+        fpv_mask, motion, rejected, human, motion_threshold=fdata.get("motion_threshold", 8.0)
     )
     counts = {r: reasons.count(r) for r in set(reasons)}
     n = len(reasons)
@@ -103,7 +104,7 @@ def build_frame_panel(clip_id: str, frames_dir: Path, fdata: dict) -> tuple[str,
 
     strip = qc_lib.filmstrip_data_uri(reasons)
     sheet_html, stride = qc_lib.contact_sheet_html(frame_paths, reasons, motion)
-    present = [r for r in ["fpv", "object", "static", "short", "other"] if r in counts]
+    present = [r for r in ["fpv", "object", "static", "human", "short", "other"] if r in counts]
 
     breakdown = " · ".join(
         f"{qc_lib.REASON_LABELS[r]}: {counts.get(r, 0)}" for r in present

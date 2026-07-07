@@ -126,7 +126,8 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.1 | done | AUTO, verified 2026-07-07 | Cleanup obsolete B1/B2 runnable paths |
 | B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill, bad-source deletion, and data screens |
 | B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
-| B3.4 | done | AUTO/local, verified 2026-07-07 | Stage-0 probes plus K1/K2 pass after G0/K2 gate replan |
+| B3.4 | replanned | AUTO/local | Old 0.95 AUROC probe retired as a hard blocker; use it only as a bug detector |
+| B3.4a | in_progress | AUTO local + USER-gated expansion | YOLO-standard cache cleanup, human-positive pre-clipping filter, and ski-first data expansion prep |
 | B3.5 | pending | AUTO | Depth-6 per-step conditioned world model |
 | B3.6 | pending | AUTO/local, stop on OOM/blocker | Stage-1 local gates G1a-G1d |
 | B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
@@ -237,6 +238,10 @@ dry-run tests only.
   `778` clips, `28` sources, `14,900` windows, `2,927` `person_state_valid`
   windows, `4,987` trackable frames, `duplicate_frame_runs=0`,
   `time_remap_flags=13,992`, `accel_outlier_frames=1,559`.
+- Subject selection repair 2026-07-07: future YOLO/ByteTrack ingest now scores
+  candidate subject tracks by strict B3 trackability-window count first, then
+  trackable-frame count, then the old valid-count/centrality/area tie-breakers.
+  The ingest pipeline passes configured person-gate history/horizon into tracking.
 - Deps: B3.1. Blocks B3.4/B3.5.
 
 ### B3.3 - 6-D Plan Tokens And T Configurability
@@ -270,9 +275,8 @@ Run K1 causality and K2 tiny conditioned person-state predictor versus persisten
 - DoD: G0a detector-visible presence from `person_visible` clears a weak
   held-out sanity floor; G0b center/log-height decode only on
   `person_state_valid` clears bounded error thresholds; K1 is quantified; K2
-  improves person-state motion deltas over persistence. Raw state-MSE K2 is
-  still reported but no longer gates B3.4 because strict stable windows make
-  raw persistence unusually strong.
+  improves raw person-state MSE over persistence on valid-current, full-future,
+  moving person-state rows. Delta improvement is diagnostic only.
 - Test:
   `$PY -m pytest -q tests/test_person_probes.py tests/test_stage0_gates.py`
 - Verified 2026-07-07: added `vllatent.train.person_probes` and
@@ -345,7 +349,52 @@ Run K1 causality and K2 tiny conditioned person-state predictor versus persisten
   remained `-5.2%`. No active-cache source deletion was performed in this replan;
   visual audit montages for candidate weak sources were generated under
   `/tmp/b3_trackable_audit_g0_relabel/`.
+- Review follow-up 2026-07-07: the weak G0/K2 replan is not accepted as a true
+  B3.4 pass. Added a reusable upstream person-label quality prefilter so stage0
+  metrics and future training can use only clips with full-history usable
+  person-state windows. Screen counts now use the same full-history window
+  definition as ingest (`2,676` strict valid windows on the active 778-clip
+  cache, not the older padded-start `2,927` count).
+- K2 now gates on raw person-state MSE improvement again, evaluated only on rows
+  with valid current person state, full future `person_state_valid`, and non-static
+  future person motion. With the default prefilter, K1/K2 pass locally:
+  K1 R2 `0.04795`; K2 raw improvement `18.64%`.
+- User replan 2026-07-07: the old `0.95` held-out AUROC probe is no longer a
+  hard B3 blocker. It remains useful as a bug detector, but DINO's role is the
+  frozen spatial/object latent space; the decisive proof moves to trained-model
+  gates: person-state prediction, person-weighted latent improvement, plan
+  sensitivity, and source-held-out generalization.
+- The best accepted prefiltered refire in
+  `reports/stage0_gates_T8_token_prefilter_k2fixed.json` failed the old G0:
+  `person_visible` AUROC `0.659`, center L2 `0.120`, center L1 `0.073`, log-height
+  MAE `0.183` against old thresholds AUROC `>=0.95`, center L2 `<=0.10`. Stronger
+  token probes and stricter label-quality/source-volume filters did not produce
+  an honest `0.95` held-out AUROC on the current cache, so the next work is
+  upstream label/data replacement rather than AUROC tuning.
 - Deps: B3.2/B3.3. Blocks B3.5/B3.6.
+
+### B3.4a - YOLO-Standard Data Cleanup And Expansion Prep
+
+Use YOLO/ByteTrack label quality, not AUROC source-picking, to prepare the next B3
+cache before starting B3.5.
+
+- DoD: active-cache `.npz` files are cleared or excluded only when YOLO/person
+  evidence shows bad supervision: no followed human, tiny/edge/self/body-only
+  labels, bystanders instead of the followed subject, severe domain mismatch, or
+  object-filter violations. Do not delete clips solely because they hurt AUROC.
+- DoD: the ingest content filter keeps the existing YOLO object-negative signal,
+  then adds a YOLO human-positive signal before FPV range extraction and
+  `cut_fixed_clips()`. Accepted auto-clipped ranges must satisfy motion,
+  no rejected objects, and visible human evidence.
+- DoD: future cache generation keeps `track_persons=True`, so the downstream
+  segment gate still verifies strict followed-subject windows before MegaSaM/DINO.
+- DoD: prepare ski-first YouTube expansion inputs and paste-ready commands. If
+  ski footage is exhausted, extend to adjacent follow-sport footage that matches
+  the current depth-6 sports-following domain. Actual video download/full cache
+  expansion remains USER-gated; Codex stops before operating it.
+- Test:
+  `$PY -m pytest -q tests/test_content_filter.py tests/test_ingest_pipeline.py tests/test_person_tracking.py`
+- Deps: B3.4 replan. Blocks B3.5.
 
 ### B3.5 - Per-Step 6-D Conditioning In Depth-6 Predictor
 
@@ -358,7 +407,7 @@ person-weighted latent loss, and inverse-dynamics 6-D auxiliary head.
   count is logged.
 - Test:
   `$PY -m pytest -q tests/test_human_world_model.py tests/test_predictor.py tests/test_world_model_losses.py`
-- Deps: B3.3/B3.4. Blocks B3.6.
+- Deps: B3.3/B3.4a. Blocks B3.6.
 
 ### B3.6 - Stage-1 Local Depth-6 World-Model Gate
 

@@ -96,15 +96,175 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | superseded | 2026-07-07 | Superseded by B3 gates; Orin/Jetson later only after useful B3 checkpoint |
 | B3.0 — Write/approve Phase B-3 plan | done | 2026-07-07 | `plans/phase-b3-human-conditioned-world-model.md` created; active guidance aligned; B2.12/H20 inactive |
 | B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
-| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; invalid/tiny visible boxes are sanitized; latest T=8 screen has 778 clips / 28 sources / 14,900 windows / 2,927 trackable person-valid |
+| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; invalid/tiny visible boxes are sanitized; latest strict T=8 screen has 778 clips / 28 sources / 14,900 windows / 2,676 full-history person-valid |
 | B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
-| B3.4 — Stage-0 probes plus K1/K2 | done | 2026-07-07 | G0/K2 gate definitions replanned after review; active T=8 cache passes G0/K1/K2 (G0 AUROC 0.658, center L2 0.134, K1 R2 0.0199, K2 delta +54.9%) |
+| B3.4 — Stage-0 probes plus K1/K2 | replanned | 2026-07-07 | Old 0.95 AUROC probe retired as a hard blocker; use it as a bug detector only |
+| B3.4a — YOLO-standard data cleanup and expansion prep | in_progress | 2026-07-07 | Add human-positive filter before auto clipping, then prepare ski-first user-gated expansion |
 | B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
 | B3.6 — Stage-1 local depth-6 gate | pending | — | AUTO/local; stop on OOM/blocker; report G1a-G1d and K6 |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
-Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `superseded`.
+
+---
+
+## 2026-07-07 — B3.4a YOLO-standard cleanup and human-positive filter
+
+**Status:** B3.4a is locally implemented through the cache-clean and pipeline
+prep portion. Stop before ski-first YouTube curation/download/full cache expansion
+because that remains USER-gated. Do not start B3.5.
+
+**Replan.** Recorded the user replan in
+`plans/phase-b3-human-conditioned-world-model.md`: the old `0.95` held-out AUROC
+probe is now a diagnostic bug detector only. B3 proof moves to trained-model
+gates: person-state prediction, person-weighted latent improvement, plan
+sensitivity, and source-held-out generalization.
+
+**Cache cleanup.** Generated
+`reports/person_label_cleanup_T8_b34a_dryrun.json` from the YOLO/person-label
+quality filter (`history=3`, `horizon=8`). It kept `196` clips and rejected
+`582` clips: `563` `no_strict_person_windows`, `7`
+`low_trackable_visible_frac`, `7` `high_invalid_visible_frac`, and `5`
+`high_edge_visible_frac`. With approval, moved the rejected active-cache `.npz`
+files to `ingest_data/latent_cache_rejected_b34a/` instead of deleting them.
+Manifest:
+`ingest_data/latent_cache_rejected_b34a/person_label_cleanup_T8_b34a_manifest.json`.
+
+**Active screen after cleanup.** Re-ran:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/screen_person_cache.py --cache-dir ingest_data/latent_cache --history 3 --horizon 8 --out reports/person_screen_T8_b34a_yolo_clean.json`
+
+Result: active cache now has `196` clips, `20` sources, `5,031` T=8 windows,
+`2,545` strict person-valid windows, `4,057` trackable frames, `4,800`
+detector-visible frames, and `duplicate_frame_runs=0`.
+
+**Pipeline.** `vllatent.ingest.content_filter` now keeps the existing YOLO
+object-negative signal and adds a YOLO human-positive signal (`person`, `skier`,
+`snowboarder`) before FPV range extraction and `cut_fixed_clips()`. Accepted
+frames require motion, no rejected objects, and human-visible evidence. The
+filter persists `human_visible` in `_filter.json`; QC/verify tools display
+`no human` as a distinct rejection reason.
+
+**Ingest.** `scripts/ingest_youtube_pilot.py` now reports object-rejected and
+human-visible frame counts and passes `track_persons=True` by default into
+`process_clip`, so strict followed-subject gating still runs before MegaSaM/DINO.
+
+**Verification.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_content_filter.py tests/test_person_tracking.py tests/test_ingest_pipeline.py tests/test_sports_loader.py tests/test_collate.py tests/test_person_probes.py tests/test_stage0_gates.py tests/test_config.py`
+  passed (`202 passed`).
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m ruff check vllatent/ingest/content_filter.py tests/test_content_filter.py scripts/ingest_youtube_pilot.py scripts/qc_lib.py scripts/qc_report.py scripts/verify_filter.py scripts/test_e2e_subclip.py`
+  passed.
+- `git diff --check` passed.
+- `bash scripts/check_no_blobs.sh` passed.
+
+**Next USER gate.** Run ski-first curation and ingest with the new pipeline; paste
+the accepted candidate count, ingest summary, and post-expansion screen. Do not
+start B3.5 until that pasteback is reviewed.
+
+Paste block:
+`cd /home/zh/CODE/vllatent-ego-drone`
+`PY=/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python`
+`$PY scripts/curate_sports_clips.py --sport skiing --clip-prefix ski --start-index 16 --max-per-query 20 --max-fetch 120 --out configs/sports_clips_b34a_ski.yaml`
+Review/promote only true snow-ski/snowboard follow-cam entries, then run:
+`$PY scripts/ingest_youtube_pilot.py --clips configs/sports_clips_b34a_ski.yaml --config configs/sports.yaml --device cuda`
+`$PY scripts/screen_person_cache.py --cache-dir ingest_data/latent_cache --history 3 --horizon 8 --out reports/person_screen_T8_b34a_after_ski_expand.json`
+
+---
+
+## 2026-07-07 — B3.4 G0 split and weighting audit
+
+**Status:** B3.4 remains blocked on G0. Do not proceed to B3.5.
+
+**Audit.** Tested whether the remaining G0 failure was a source-split artifact or
+training imbalance rather than label/data/objective mismatch. On the current
+strict-prefiltered cache (`196` kept clips, `20` sources, `6,599` frames), a
+50-seed source-split sweep with the fast ridge G0 probe never approached the
+original `0.95` AUROC gate: min `0.316`, median `0.576`, max `0.697`, zero
+passing seeds. Token probes on representative best/default/worst splits stayed
+well below the gate (`0.675`, `0.659`, `0.628` AUROC).
+
+**Audit.** Tested source-balanced and source+class-balanced token-probe training
+on the default held-out sources (`cand17`, `cand26`, `cand36`, `cand39`). The
+best source/class-balanced variant reached only about `0.713` AUROC and worsened
+log-height error, so the remaining failure is not explained by large-source frame
+dominance in the probe loader.
+
+**Interpretation.** The original held-out G0 AUROC threshold is not locally
+reachable on the current cache through honest upstream label filtering, source
+filtering, probe-capacity tweaks, split choice, or source-balanced training. A
+real unblock now requires upstream label/data replacement or an explicit user
+decision to redefine G0 away from the old `0.95` detector-presence AUROC claim.
+
+---
+
+## 2026-07-07 — B3.4 subject-track selection repair
+
+**Status:** B3.4 remains blocked on G0. Do not proceed to B3.5.
+
+**Fixed.** Future YOLO/ByteTrack ingest now selects the followed subject by the
+actual B3 supervision objective: strict full-history/person-future window count,
+then trackable-frame count, then the old valid-count/centrality/area tie-breakers.
+The ingest pipeline passes its configured `person_gate_history` and
+`person_gate_horizon` into person tracking, so subject selection and the
+human-trackability pre-gate use the same window definition.
+
+**Evidence.** Added a regression where a sparse longer track previously beat a
+shorter track with one usable B3 history+horizon window; it now passes. Focused
+person/ingest tests passed (`47 passed`).
+
+**G0 audit.** This repair affects future track backfills, not the already-written
+active cache labels. Additional local probes on the current prefiltered cache did
+not clear the original G0 gate: presence-only token training reached AUROC about
+`0.72` but failed state decode, larger projected-token probes still failed
+presence (`0.60` AUROC with projection 192), and QC/visual bad-source filters did
+not produce a defensible G0/K2 pass. The active stop remains label/data/objective
+mismatch for G0 on the current cache.
+
+---
+
+## 2026-07-07 — B3.4 upstream label filter and raw K2 repair
+
+**Status:** B3.4 remains blocked on G0. Do not proceed to B3.5.
+
+**Implemented.** Added a reusable person-label quality prefilter in
+`vllatent.ingest.person_tracking`: full-history strict person-window counting,
+clip-level keep/reject decisions, and rejection reasons. `scripts/run_stage0_gates.py`
+now applies this prefilter before collecting G0/K1/K2 examples. `SportsTrainingDataset`
+can apply the same filter before constructing samples, so future B3 training does
+not have to rely on post-hoc source deletion.
+
+**Fixed.** `screen_clip_arrays()` now uses the same full-history window definition
+as ingest. The active screen is now `reports/person_screen_T8_strict_windows.json`:
+`778` clips, `28` sources, `14,900` windows, `2,676` strict person-valid windows,
+`4,987` trackable frames, `11,167` detector-visible frames.
+
+**Fixed.** K2 no longer gates on motion-delta improvement while raw state MSE is
+worse. It now gates raw person-state MSE again, but only on rows with valid current
+person state, full future `person_state_valid`, and non-static future person motion.
+K2 uses stronger ridge regularization for the tiny readout.
+
+**Active refire.** Re-ran:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/run_stage0_gates.py --cache-dir ingest_data/latent_cache --horizon 8 --stage0-probe token --out reports/stage0_gates_T8_token_prefilter_k2fixed.json`
+
+Result: failed G0, passed K1/K2. The prefilter kept `196` clips and rejected `582`
+before metrics (`563` no strict person windows, `7` low trackable/visible ratio,
+`7` high invalid-visible ratio, `5` high edge-visible ratio).
+- G0: `person_visible` AUROC `0.659009`, center L2 `0.120048`, center L1
+  `0.073361`, log-height MAE `0.183083`; original gate remains failed.
+- K1: plan-only R2 `0.047952`.
+- K2: raw improvement `0.186445`, persistence MSE `0.017511`, conditioned MSE
+  `0.014246`, `607` eligible rows, `72` held-out eligible rows.
+
+**Interpretation.** The old `>=0.95` held-out G0 AUROC is not reachable on the
+current cache through label-quality prefiltering alone without using AUROC itself
+to choose sources. Stronger token probes and stricter label-quality/source-volume
+filters still failed G0 or produced invalid near-all-positive validation splits.
+Next local work should either improve labels/data upstream or explicitly replace
+G0 with a better pre-training verification target.
+
+**Verification.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_person_tracking.py tests/test_person_probes.py tests/test_stage0_gates.py tests/test_sports_loader.py`
+  passed (`76 passed`).
 
 ---
 
