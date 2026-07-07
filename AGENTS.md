@@ -48,9 +48,10 @@ Repo state is authoritative for code; vault notes are authoritative for why.
 - Add optional cache keys `person_bbox (N,4)`, `person_visible (N,)`, and
   `person_conf (N,)` with detector/tracker provenance. Old caches must still
   load with invisible-person defaults.
-- B3.3 is done: the pure 6-D plan-token contract exists, loader/collate emit
-  B3 `planned_actions`, and `T=8` shape tests pass. The next AUTO step is B3.4:
-  Stage-0 probes plus K1/K2.
+- B3.4 code/tests are implemented, but the full local T=8 gate is blocked on
+  G0: source-held-out person-latent probe AUROC/center error missed threshold.
+  K1 and K2 passed. Do not proceed to B3.5 until G0 is fixed, recalibrated, or
+  explicitly replanned/waived.
 - Do not continue to B2.12/H20. H20 becomes eligible only at B3.7 after B3.6
   local gates justify one serious depth-6 run.
 - Do not add diffusion, language, game data, SAM2, PI-Prober, metric waypoint

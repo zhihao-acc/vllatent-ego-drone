@@ -121,7 +121,7 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.1 | done | AUTO, verified 2026-07-07 | Cleanup obsolete B1/B2 runnable paths |
 | B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill and data screens |
 | B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
-| B3.4 | pending | code AUTO, full gates USER-gated if long | Stage-0 probes plus K1/K2 |
+| B3.4 | blocked | AUTO/local, measured 2026-07-07 | Stage-0 probes plus K1/K2; G0 failed |
 | B3.5 | pending | AUTO | Depth-6 per-step conditioned world model |
 | B3.6 | pending | AUTO/local, stop on OOM/blocker | Stage-1 local gates G1a-G1d |
 | B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
@@ -242,6 +242,18 @@ Run K1 causality and K2 tiny conditioned person-state predictor versus persisten
   quantified; K2 beats person-state persistence by `>=10%` or B3 stops for replan.
 - Test:
   `$PY -m pytest -q tests/test_person_probes.py tests/test_stage0_gates.py`
+- Verified 2026-07-07: added `vllatent.train.person_probes` and
+  `scripts/run_stage0_gates.py`. Synthetic B3.4 tests passed (`10 passed`), ruff
+  passed, and full local T=8 gate ran over the post-exclusion cache.
+- Full local gate result with 8 spatial projections: B3.4 does **not** pass.
+  G0 failed with presence AUROC `0.621`, center L2 error `0.159`, and log-height
+  MAE `0.570`. K1 passed/quantified with plan-only R2 `0.0397`. K2 passed with
+  `41.35%` improvement over person-state persistence.
+- Bounded probe-capacity check with 32 spatial projections still failed G0:
+  presence AUROC `0.654`, center L2 error `0.153`, log-height MAE `0.462`; K1
+  remained pass and K2 remained pass at `29.21%` improvement.
+- Decision: do not proceed to B3.5 until G0 is fixed, recalibrated with a stronger
+  person probe, or explicitly replanned/waived.
 - Deps: B3.2/B3.3. Blocks B3.5/B3.6.
 
 ### B3.5 - Per-Step 6-D Conditioning In Depth-6 Predictor

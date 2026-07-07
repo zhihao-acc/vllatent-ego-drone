@@ -32,7 +32,7 @@ Every iteration starts by reading:
   - `B3.1` reviewed cleanup of obsolete B1/B2 runnable paths (done 2026-07-07),
   - `B3.2` person-track cache backfill and data screens (done 2026-07-07),
   - `B3.3` 6-D plan-token contract and T configurability (done 2026-07-07),
-  - `B3.4` Stage-0 probes plus K1/K2,
+  - `B3.4` Stage-0 probes plus K1/K2 (blocked 2026-07-07: G0 failed; K1/K2 passed),
   - `B3.5` depth-6 per-step 6-D conditioned world model,
   - `B3.6` Stage-1 local gates G1a-G1d,
   - `B3.7` USER-GATED H20 depth-6 run,
@@ -71,6 +71,8 @@ Every iteration starts by reading:
   or EGO-Planner integration before deterministic B3 gates pass.
 - H20/SSH/docker/long jobs remain user-gated. Codex prepares one command only at
   B3.7 if B3.6 passes.
+- Current stop: B3.4 G0 failed on the full local T=8 cache. Do not start B3.5
+  until the G0 latent-person probe is fixed, recalibrated, or explicitly waived.
 
 ## B3 Verification Checklist
 
