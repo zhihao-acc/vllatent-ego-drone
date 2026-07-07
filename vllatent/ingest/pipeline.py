@@ -93,6 +93,7 @@ def _build_clip_npz(
         "person_bbox": person_bbox.astype(np.float32),
         "person_visible": person_visible.astype(np.bool_),
         "person_conf": person_conf.astype(np.float32),
+        "person_bbox_space": np.array("encoder_crop"),
     }
 
 

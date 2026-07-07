@@ -50,6 +50,25 @@ class FrameProbeExamples:
 
 
 @dataclass(frozen=True, eq=False)
+class TokenProbeExamples:
+    token_features: np.ndarray
+    visible: np.ndarray
+    person_state: np.ndarray
+    sources: np.ndarray
+
+    def __post_init__(self) -> None:
+        n = self.token_features.shape[0]
+        if self.token_features.ndim != 3:
+            raise ValueError(f"token_features: expected 3D, got {self.token_features.shape}")
+        if self.visible.shape != (n,):
+            raise ValueError(f"visible: expected {(n,)}, got {self.visible.shape}")
+        if self.person_state.shape != (n, 4):
+            raise ValueError(f"person_state: expected {(n, 4)}, got {self.person_state.shape}")
+        if self.sources.shape != (n,):
+            raise ValueError(f"sources: expected {(n,)}, got {self.sources.shape}")
+
+
+@dataclass(frozen=True, eq=False)
 class WindowProbeExamples:
     latent_features: np.ndarray
     current_state: np.ndarray
@@ -83,6 +102,10 @@ class Stage0ProbeMetrics:
     center_l2_error: float
     center_l1_error: float
     log_height_mae: float
+    train_presence_auroc: float = float("nan")
+    train_center_l2_error: float = float("nan")
+    train_log_height_mae: float = float("nan")
+    per_source: dict[str, dict[str, float]] | None = None
 
 
 @dataclass(frozen=True)
@@ -280,6 +303,32 @@ def latent_spatial_features(
     return features.astype(np.float32, copy=False)
 
 
+def latent_token_features(
+    latents: np.ndarray,
+    *,
+    projection_dim: int = 64,
+    seed: int = SPATIAL_PROJECTION_SEED,
+) -> np.ndarray:
+    """Project patch tokens and append explicit 14x14 patch coordinates."""
+    arr = np.asarray(latents, dtype=np.float32)
+    if arr.ndim != 3:
+        raise ValueError(f"latents: expected (N,P,D), got {arr.shape}")
+    n, patches, dim = arr.shape
+    grid = int(round(patches ** 0.5))
+    if grid * grid != patches:
+        raise ValueError(f"latents: expected square patch grid, got P={patches}")
+    if projection_dim <= 0:
+        raise ValueError(f"projection_dim must be > 0, got {projection_dim}")
+    rng = np.random.default_rng(seed)
+    proj = rng.normal(0.0, 1.0 / np.sqrt(dim), size=(dim, projection_dim)).astype(np.float32)
+    tokens = arr @ proj
+    coords = np.linspace(0.0, 1.0, grid, dtype=np.float32)
+    yy, xx = np.meshgrid(coords, coords, indexing="ij")
+    xy = np.stack([xx.reshape(-1), yy.reshape(-1)], axis=1).astype(np.float32)
+    xy = np.broadcast_to(xy[None, :, :], (n, patches, 2))
+    return np.concatenate([tokens, xy], axis=2).astype(np.float32, copy=False)
+
+
 def collect_frame_probe_examples(
     cache_dir: str | Path,
     *,
@@ -325,6 +374,51 @@ def collect_frame_probe_examples(
     )
 
 
+def collect_token_probe_examples(
+    cache_dir: str | Path,
+    *,
+    clip_ids: list[str] | None = None,
+    limit_clips: int | None = None,
+    max_frames_per_clip: int | None = None,
+    projection_dim: int = 64,
+) -> TokenProbeExamples:
+    """Collect token-level projected DINO features and current-frame person labels."""
+    root = Path(cache_dir)
+    paths = [root / f"{cid}.npz" for cid in clip_ids] if clip_ids is not None else sorted(root.glob("*.npz"))
+    paths = [p for p in paths if p.exists()]
+    if limit_clips is not None:
+        paths = paths[:limit_clips]
+    if not paths:
+        raise ValueError(f"No .npz clips found in {cache_dir}")
+
+    token_features: list[np.ndarray] = []
+    visible: list[np.ndarray] = []
+    states: list[np.ndarray] = []
+    sources: list[np.ndarray] = []
+    for path in paths:
+        with np.load(str(path)) as data:
+            clip = {k: data[k] for k in data.files}
+        latents = np.asarray(clip["latents"])
+        n = latents.shape[0]
+        if max_frames_per_clip is not None and n > max_frames_per_clip:
+            idx = np.linspace(0, n - 1, max_frames_per_clip, dtype=np.int64)
+        else:
+            idx = np.arange(n, dtype=np.int64)
+        tracks = person_tracks_from_cache(clip)
+        state = person_state_from_bbox(tracks.person_bbox, tracks.person_visible)
+        token_features.append(latent_token_features(latents[idx], projection_dim=projection_dim))
+        visible.append(tracks.person_visible[idx].astype(np.bool_))
+        states.append(state[idx].astype(np.float32, copy=False))
+        sources.append(np.full(len(idx), clip_source(path.stem), dtype=object))
+
+    return TokenProbeExamples(
+        token_features=np.concatenate(token_features, axis=0).astype(np.float32, copy=False),
+        visible=np.concatenate(visible, axis=0).astype(np.bool_, copy=False),
+        person_state=np.concatenate(states, axis=0).astype(np.float32, copy=False),
+        sources=np.concatenate(sources, axis=0),
+    )
+
+
 def collect_window_probe_examples(
     dataset: SportsTrainingDataset,
     *,
@@ -364,6 +458,51 @@ def collect_window_probe_examples(
     )
 
 
+def _stage0_metrics_from_predictions(
+    *,
+    visible: np.ndarray,
+    true_state: np.ndarray,
+    presence_scores: np.ndarray,
+    pred_state: np.ndarray,
+) -> tuple[float, float, float, float, int]:
+    auc = binary_auroc(visible, presence_scores)
+    visible_mask = np.asarray(visible).astype(np.bool_)
+    if not np.any(visible_mask):
+        return float(auc), float("nan"), float("nan"), float("nan"), 0
+    center_delta = pred_state[visible_mask, :2] - true_state[visible_mask, :2]
+    center_l2 = float(np.mean(np.linalg.norm(center_delta.astype(np.float64), axis=1)))
+    center_l1 = float(np.mean(np.abs(center_delta.astype(np.float64))))
+    log_h = float(np.mean(np.abs((pred_state[visible_mask, 2] - true_state[visible_mask, 2]).astype(np.float64))))
+    return float(auc), center_l2, center_l1, log_h, int(visible_mask.sum())
+
+
+def _stage0_per_source_metrics(
+    sources: np.ndarray,
+    visible: np.ndarray,
+    true_state: np.ndarray,
+    presence_scores: np.ndarray,
+    pred_state: np.ndarray,
+) -> dict[str, dict[str, float]]:
+    out: dict[str, dict[str, float]] = {}
+    for src in sorted({str(s) for s in sources.tolist()}):
+        mask = np.array([str(s) == src for s in sources], dtype=np.bool_)
+        auc, center_l2, center_l1, log_h, n_visible = _stage0_metrics_from_predictions(
+            visible=visible[mask],
+            true_state=true_state[mask],
+            presence_scores=presence_scores[mask],
+            pred_state=pred_state[mask],
+        )
+        out[src] = {
+            "n": float(mask.sum()),
+            "n_visible": float(n_visible),
+            "presence_auroc": auc,
+            "center_l2_error": center_l2,
+            "center_l1_error": center_l1,
+            "log_height_mae": log_h,
+        }
+    return out
+
+
 def fit_stage0_probes(
     examples: FrameProbeExamples,
     *,
@@ -397,6 +536,17 @@ def fit_stage0_probes(
     center_l2 = float(np.mean(np.linalg.norm(center_delta.astype(np.float64), axis=1)))
     center_l1 = float(np.mean(np.abs(center_delta.astype(np.float64))))
     log_h = float(np.mean(np.abs((pred_state[:, 2] - true_state[:, 2]).astype(np.float64))))
+    train_presence_scores = presence_model.predict(examples.features[train_mask]).reshape(-1)
+    train_pred_state = state_model.predict(examples.features[train_visible])
+    train_true_state = examples.person_state[train_visible, :3]
+    train_center_delta = train_pred_state[:, :2] - train_true_state[:, :2]
+    train_auc = binary_auroc(examples.visible[train_mask], train_presence_scores)
+    train_center_l2 = float(np.mean(np.linalg.norm(train_center_delta.astype(np.float64), axis=1)))
+    train_log_h = float(np.mean(np.abs((train_pred_state[:, 2] - train_true_state[:, 2]).astype(np.float64))))
+    full_presence_scores = presence_model.predict(examples.features).reshape(-1)
+    full_pred_state = np.zeros((examples.features.shape[0], 3), dtype=np.float32)
+    full_pred_state[examples.visible] = state_model.predict(examples.features[examples.visible])
+
     return Stage0ProbeMetrics(
         n_train=int(train_mask.sum()),
         n_val=int(val_mask.sum()),
@@ -405,6 +555,158 @@ def fit_stage0_probes(
         center_l2_error=center_l2,
         center_l1_error=center_l1,
         log_height_mae=log_h,
+        train_presence_auroc=float(train_auc),
+        train_center_l2_error=train_center_l2,
+        train_log_height_mae=train_log_h,
+        per_source=_stage0_per_source_metrics(
+            examples.sources[val_mask],
+            examples.visible[val_mask],
+            examples.person_state[val_mask, :3],
+            full_presence_scores[val_mask],
+            full_pred_state[val_mask],
+        ),
+    )
+
+
+def fit_stage0_token_probe(
+    examples: TokenProbeExamples,
+    *,
+    val_frac: float = 0.2,
+    seed: int = 42,
+    split_retries: int = 50,
+    hidden_dim: int = 128,
+    epochs: int = 30,
+    batch_size: int = 256,
+    lr: float = 1e-3,
+    weight_decay: float = 1e-4,
+    state_loss_weight: float = 5.0,
+    device: str = "auto",
+) -> Stage0ProbeMetrics:
+    """Train a bounded token-level G0 probe over patch tokens plus coordinates."""
+    import torch
+    import torch.nn as nn
+    import torch.nn.functional as F
+    from torch.utils.data import DataLoader, TensorDataset
+
+    if hidden_dim <= 0:
+        raise ValueError(f"hidden_dim must be > 0, got {hidden_dim}")
+    if epochs <= 0:
+        raise ValueError(f"epochs must be > 0, got {epochs}")
+    if batch_size <= 0:
+        raise ValueError(f"batch_size must be > 0, got {batch_size}")
+    train_mask, val_mask = source_split_masks_with_label_support(
+        examples.sources,
+        examples.visible,
+        val_frac=val_frac,
+        seed=seed,
+        max_retries=split_retries,
+    )
+
+    class _TokenPersonProbe(nn.Module):
+        def __init__(self, in_dim: int, hidden: int) -> None:
+            super().__init__()
+            self.token_net = nn.Sequential(
+                nn.LayerNorm(in_dim),
+                nn.Linear(in_dim, hidden),
+                nn.GELU(),
+                nn.Linear(hidden, hidden),
+                nn.GELU(),
+            )
+            self.score = nn.Linear(hidden, 1)
+            self.presence = nn.Linear(hidden, 1)
+            self.state = nn.Linear(hidden, 3)
+
+        def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+            h = self.token_net(x)
+            attn = torch.softmax(self.score(h).squeeze(-1), dim=1)
+            pooled = (h * attn.unsqueeze(-1)).sum(dim=1)
+            logits = self.presence(pooled).squeeze(-1)
+            raw_state = self.state(pooled)
+            center = (x[..., -2:] * attn.unsqueeze(-1)).sum(dim=1)
+            state = torch.cat([center, raw_state[:, 2:3]], dim=1)
+            return logits, state
+
+    torch.manual_seed(seed)
+    dev = torch.device("cuda" if device == "auto" and torch.cuda.is_available() else ("cpu" if device == "auto" else device))
+    x = torch.from_numpy(examples.token_features.astype(np.float32, copy=False))
+    y_visible = torch.from_numpy(examples.visible.astype(np.float32))
+    y_state = torch.from_numpy(examples.person_state[:, :3].astype(np.float32, copy=False))
+    train_idx = torch.from_numpy(np.flatnonzero(train_mask).astype(np.int64))
+    val_idx = torch.from_numpy(np.flatnonzero(val_mask).astype(np.int64))
+
+    train_dataset = TensorDataset(x[train_idx], y_visible[train_idx], y_state[train_idx])
+    generator = torch.Generator()
+    generator.manual_seed(seed)
+    loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, generator=generator)
+    model = _TokenPersonProbe(x.shape[-1], hidden_dim).to(dev)
+    opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+    pos = float(examples.visible[train_mask].sum())
+    neg = float(train_mask.sum() - pos)
+    pos_weight = torch.tensor([max(neg / max(pos, 1.0), 1.0)], device=dev)
+
+    model.train()
+    for _ in range(epochs):
+        for xb, vb, sb in loader:
+            xb = xb.to(dev)
+            vb = vb.to(dev)
+            sb = sb.to(dev)
+            logits, pred = model(xb)
+            loss_presence = F.binary_cross_entropy_with_logits(logits, vb, pos_weight=pos_weight)
+            visible = vb > 0.5
+            if torch.any(visible):
+                loss_state = F.smooth_l1_loss(pred[visible], sb[visible])
+            else:
+                loss_state = pred.sum() * 0.0
+            loss = loss_presence + state_loss_weight * loss_state
+            opt.zero_grad(set_to_none=True)
+            loss.backward()
+            opt.step()
+
+    def _predict(indices: torch.Tensor) -> tuple[np.ndarray, np.ndarray]:
+        scores: list[np.ndarray] = []
+        states: list[np.ndarray] = []
+        eval_dataset = TensorDataset(x[indices])
+        eval_loader = DataLoader(eval_dataset, batch_size=batch_size, shuffle=False)
+        model.eval()
+        with torch.no_grad():
+            for (xb,) in eval_loader:
+                logits, pred = model(xb.to(dev))
+                scores.append(logits.detach().cpu().numpy())
+                states.append(pred.detach().cpu().numpy())
+        return np.concatenate(scores, axis=0), np.concatenate(states, axis=0)
+
+    train_scores, train_pred = _predict(train_idx)
+    val_scores, val_pred = _predict(val_idx)
+    train_auc, train_center_l2, _, train_log_h, _ = _stage0_metrics_from_predictions(
+        visible=examples.visible[train_mask],
+        true_state=examples.person_state[train_mask, :3],
+        presence_scores=train_scores,
+        pred_state=train_pred,
+    )
+    val_auc, val_center_l2, val_center_l1, val_log_h, n_val_visible = _stage0_metrics_from_predictions(
+        visible=examples.visible[val_mask],
+        true_state=examples.person_state[val_mask, :3],
+        presence_scores=val_scores,
+        pred_state=val_pred,
+    )
+    return Stage0ProbeMetrics(
+        n_train=int(train_mask.sum()),
+        n_val=int(val_mask.sum()),
+        n_val_visible=n_val_visible,
+        presence_auroc=val_auc,
+        center_l2_error=val_center_l2,
+        center_l1_error=val_center_l1,
+        log_height_mae=val_log_h,
+        train_presence_auroc=train_auc,
+        train_center_l2_error=train_center_l2,
+        train_log_height_mae=train_log_h,
+        per_source=_stage0_per_source_metrics(
+            examples.sources[val_mask],
+            examples.visible[val_mask],
+            examples.person_state[val_mask, :3],
+            val_scores,
+            val_pred,
+        ),
     )
 
 
@@ -562,14 +864,18 @@ __all__ = [
     "Stage0GateDecision",
     "Stage0GateThresholds",
     "Stage0ProbeMetrics",
+    "TokenProbeExamples",
     "WindowProbeExamples",
     "binary_auroc",
     "collect_frame_probe_examples",
+    "collect_token_probe_examples",
     "collect_window_probe_examples",
     "evaluate_stage0_gates",
     "fit_ridge",
     "fit_stage0_probes",
+    "fit_stage0_token_probe",
     "latent_spatial_features",
+    "latent_token_features",
     "run_k1_plan_only_causality",
     "run_k2_conditioned_predictor",
     "source_split_masks",

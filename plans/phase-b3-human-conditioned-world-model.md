@@ -252,6 +252,21 @@ Run K1 causality and K2 tiny conditioned person-state predictor versus persisten
 - Bounded probe-capacity check with 32 spatial projections still failed G0:
   presence AUROC `0.654`, center L2 error `0.153`, log-height MAE `0.462`; K1
   remained pass and K2 remained pass at `29.21%` improvement.
+- Rework/refire 2026-07-07: fixed the person bbox coordinate contract so new
+  tracks are selected/stored in DINO encoder-crop coordinates, converted the
+  local 820-cache post-exclusion set in place, replaced G0 with a bounded
+  token-level torch probe over patch features plus explicit patch coordinates,
+  and added train/per-source G0 diagnostics.
+- Refired token G0/K1/K2 after conversion: B3.4 still does **not** pass. Default
+  token probe (`projection_dim=64`, hidden `128`, `30` epochs) got G0 presence
+  AUROC `0.681`, center L2 `0.196`, train AUROC `0.918`, train center L2
+  `0.172`; K1 passed with plan-only R2 `0.0387`; K2 passed with `40.97%`
+  improvement.
+- Strong token-capacity check (`projection_dim=128`, hidden `256`, `60` epochs)
+  still failed G0: presence AUROC `0.658`, center L2 `0.219`, train AUROC
+  `0.999`, train center L2 `0.155`; K1/K2 remained pass. This points to label
+  calibration/source drift/criterion mismatch rather than the previous moment
+  feature bottleneck.
 - Decision: do not proceed to B3.5 until G0 is fixed, recalibrated with a stronger
   person probe, or explicitly replanned/waived.
 - Deps: B3.2/B3.3. Blocks B3.5/B3.6.

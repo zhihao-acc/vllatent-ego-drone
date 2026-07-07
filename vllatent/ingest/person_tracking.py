@@ -15,6 +15,9 @@ import numpy as np
 PERSON_BBOX_KEY = "person_bbox"
 PERSON_VISIBLE_KEY = "person_visible"
 PERSON_CONF_KEY = "person_conf"
+PERSON_BBOX_SPACE_KEY = "person_bbox_space"
+PERSON_BBOX_SPACE_ENCODER_CROP = "encoder_crop"
+PERSON_BBOX_SPACE_RAW_FRAME = "raw_frame"
 PERSON_BBOX_DIM = 4
 PERSON_TRACK_CLASSES = ("person", "skier", "snowboarder")
 PERSON_TRACKER_ID = "yolov8s-worldv2.pt+bytetrack"
@@ -116,18 +119,53 @@ def person_tracks_from_cache(clip: dict[str, np.ndarray]) -> PersonTrackResult:
     )
 
 
-def _xyxy_to_norm_cxcywh(xyxy: np.ndarray, image_hw: tuple[int, int]) -> np.ndarray:
+def _center_crop_bounds(image_hw: tuple[int, int]) -> tuple[int, int, int]:
     h, w = image_hw
+    crop = min(h, w)
+    top = (h - crop) // 2
+    left = (w - crop) // 2
+    return top, left, crop
+
+
+def xyxy_to_encoder_crop_cxcywh(xyxy: np.ndarray, image_hw: tuple[int, int]) -> np.ndarray:
+    """Convert raw-frame pixel xyxy into DINO encoder center-crop normalized cxcywh."""
+    h, w = image_hw
+    top, left, crop = _center_crop_bounds(image_hw)
     x1, y1, x2, y2 = xyxy.astype(np.float32)
-    x1 = float(np.clip(x1, 0, w))
-    x2 = float(np.clip(x2, 0, w))
-    y1 = float(np.clip(y1, 0, h))
-    y2 = float(np.clip(y2, 0, h))
+    x1 = float(np.clip(x1, left, left + crop))
+    x2 = float(np.clip(x2, left, left + crop))
+    y1 = float(np.clip(y1, top, top + crop))
+    y2 = float(np.clip(y2, top, top + crop))
     bw = max(0.0, x2 - x1)
     bh = max(0.0, y2 - y1)
-    cx = x1 + 0.5 * bw
-    cy = y1 + 0.5 * bh
-    return np.array([cx / w, cy / h, bw / w, bh / h], dtype=np.float32)
+    cx = x1 - left + 0.5 * bw
+    cy = y1 - top + 0.5 * bh
+    return np.array([cx / crop, cy / crop, bw / crop, bh / crop], dtype=np.float32)
+
+
+def raw_frame_cxcywh_to_encoder_crop(
+    person_bbox: np.ndarray,
+    image_hw: tuple[int, int],
+) -> np.ndarray:
+    """Convert raw-frame normalized cxcywh boxes into encoder-crop coordinates."""
+    bbox = np.asarray(person_bbox, dtype=np.float32)
+    if bbox.ndim != 2 or bbox.shape[1] != PERSON_BBOX_DIM:
+        raise ValueError(f"person_bbox: expected (N,{PERSON_BBOX_DIM}), got {bbox.shape}")
+    h, w = image_hw
+    cx = bbox[:, 0] * float(w)
+    cy = bbox[:, 1] * float(h)
+    bw = bbox[:, 2] * float(w)
+    bh = bbox[:, 3] * float(h)
+    xyxy = np.stack(
+        [
+            cx - 0.5 * bw,
+            cy - 0.5 * bh,
+            cx + 0.5 * bw,
+            cy + 0.5 * bh,
+        ],
+        axis=1,
+    )
+    return np.stack([xyxy_to_encoder_crop_cxcywh(row, image_hw) for row in xyxy]).astype(np.float32)
 
 
 def select_subject_track(
@@ -150,7 +188,7 @@ def select_subject_track(
         return empty_person_tracks(n_frames)
 
     def _score(items: list[TrackedDetection]) -> tuple[int, float, float]:
-        boxes = np.stack([_xyxy_to_norm_cxcywh(d.xyxy, image_hw) for d in items])
+        boxes = np.stack([xyxy_to_encoder_crop_cxcywh(d.xyxy, image_hw) for d in items])
         centers = boxes[:, :2]
         centrality = -float(np.mean(np.sum((centers - 0.5) ** 2, axis=1)))
         area = float(np.mean(boxes[:, 2] * boxes[:, 3]))
@@ -163,7 +201,7 @@ def select_subject_track(
     visible = np.zeros(n_frames, dtype=np.bool_)
     conf = np.zeros(n_frames, dtype=np.float32)
     for det in selected:
-        bbox[det.frame_idx] = _xyxy_to_norm_cxcywh(det.xyxy, image_hw)
+        bbox[det.frame_idx] = xyxy_to_encoder_crop_cxcywh(det.xyxy, image_hw)
         visible[det.frame_idx] = True
         conf[det.frame_idx] = np.float32(det.confidence)
 
@@ -175,6 +213,7 @@ def select_subject_track(
             "detector": PERSON_TRACKER_ID,
             "tracker": "bytetrack",
             "classes": list(PERSON_TRACK_CLASSES),
+            "bbox_space": PERSON_BBOX_SPACE_ENCODER_CROP,
             "selection": "longest_then_central_then_largest",
         },
     )
@@ -250,6 +289,7 @@ def track_persons_from_paths(
             "detector": model_id,
             "confidence": confidence,
             "classes": list(classes),
+            "bbox_space": PERSON_BBOX_SPACE_ENCODER_CROP,
         },
     )
 
@@ -456,6 +496,9 @@ def screen_cache_dir(
 __all__ = [
     "PERSON_BBOX_DIM",
     "PERSON_BBOX_KEY",
+    "PERSON_BBOX_SPACE_ENCODER_CROP",
+    "PERSON_BBOX_SPACE_KEY",
+    "PERSON_BBOX_SPACE_RAW_FRAME",
     "PERSON_CONF_KEY",
     "PERSON_TRACK_CLASSES",
     "PERSON_TRACKER_ID",
@@ -468,10 +511,12 @@ __all__ = [
     "empty_person_tracks",
     "person_state_from_bbox",
     "person_tracks_from_cache",
+    "raw_frame_cxcywh_to_encoder_crop",
     "screen_clip_arrays",
     "screen_cache_dir",
     "select_subject_track",
     "time_remap_flags_from_deltas",
     "track_persons_from_paths",
     "validate_person_track_arrays",
+    "xyxy_to_encoder_crop_cxcywh",
 ]

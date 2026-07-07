@@ -36,6 +36,7 @@ class TestBuildClipNpz:
         assert result["person_bbox"].shape == (5, 4)
         assert result["person_visible"].shape == (5,)
         assert result["person_conf"].shape == (5,)
+        assert str(result["person_bbox_space"].tolist()) == "encoder_crop"
         assert "quality_mask" not in result
 
     def test_accepts_person_tracks(self) -> None:

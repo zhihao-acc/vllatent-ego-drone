@@ -6,11 +6,14 @@ import pytest
 
 from vllatent.train.person_probes import (
     FrameProbeExamples,
+    TokenProbeExamples,
     WindowProbeExamples,
     binary_auroc,
     fit_ridge,
     fit_stage0_probes,
+    fit_stage0_token_probe,
     latent_spatial_features,
+    latent_token_features,
     run_k1_plan_only_causality,
     run_k2_conditioned_predictor,
     source_split_masks,
@@ -62,6 +65,15 @@ def test_latent_spatial_features_are_deterministic() -> None:
         latent_spatial_features(rng.normal(size=(1, 10, 8)).astype(np.float32))
 
 
+def test_latent_token_features_append_coordinates() -> None:
+    rng = np.random.default_rng(0)
+    latents = rng.normal(size=(2, 196, 8)).astype(np.float32)
+    feats = latent_token_features(latents, projection_dim=4, seed=7)
+    assert feats.shape == (2, 196, 6)
+    np.testing.assert_allclose(feats[:, 0, -2:], np.tile([0.0, 0.0], (2, 1)), atol=1e-6)
+    np.testing.assert_allclose(feats[:, -1, -2:], np.tile([1.0, 1.0], (2, 1)), atol=1e-6)
+
+
 def _frame_examples() -> FrameProbeExamples:
     features = []
     visible = []
@@ -101,6 +113,56 @@ def test_fit_stage0_probes_source_held_out() -> None:
     assert metrics.presence_auroc > 0.98
     assert metrics.center_l2_error < 0.02
     assert metrics.log_height_mae < 0.02
+
+
+@pytest.mark.torch
+def test_fit_stage0_token_probe_decodes_synthetic_tokens() -> None:
+    pytest.importorskip("torch")
+    rng = np.random.default_rng(0)
+    n_per_source = 24
+    patches = 16
+    tokens = []
+    visible = []
+    states = []
+    sources = []
+    coords = np.array(
+        [[0.0, 0.0], [1.0 / 3.0, 0.0], [2.0 / 3.0, 0.0], [1.0, 0.0],
+         [0.0, 1.0 / 3.0], [1.0 / 3.0, 1.0 / 3.0], [2.0 / 3.0, 1.0 / 3.0], [1.0, 1.0 / 3.0],
+         [0.0, 2.0 / 3.0], [1.0 / 3.0, 2.0 / 3.0], [2.0 / 3.0, 2.0 / 3.0], [1.0, 2.0 / 3.0],
+         [0.0, 1.0], [1.0 / 3.0, 1.0], [2.0 / 3.0, 1.0], [1.0, 1.0]],
+        dtype=np.float32,
+    )
+    for src in ("a", "b", "c", "d"):
+        for i in range(n_per_source):
+            is_visible = i % 3 != 0
+            center = coords[(i * 5) % patches].copy()
+            feat = rng.normal(0.0, 0.05, size=(patches, 6)).astype(np.float32)
+            feat[:, -2:] = coords
+            if is_visible:
+                nearest = int((i * 5) % patches)
+                feat[nearest, 0] = 4.0
+                feat[nearest, 1:3] = center
+            tokens.append(feat)
+            visible.append(is_visible)
+            states.append([center[0], center[1], -1.2, float(is_visible)] if is_visible else [0.0, 0.0, 0.0, 0.0])
+            sources.append(src)
+    metrics = fit_stage0_token_probe(
+        TokenProbeExamples(
+            token_features=np.stack(tokens).astype(np.float32),
+            visible=np.asarray(visible, dtype=np.bool_),
+            person_state=np.asarray(states, dtype=np.float32),
+            sources=np.asarray(sources, dtype=object),
+        ),
+        val_frac=0.25,
+        seed=1,
+        hidden_dim=32,
+        epochs=30,
+        batch_size=16,
+        lr=3e-3,
+        device="cpu",
+    )
+    assert metrics.presence_auroc > 0.95
+    assert metrics.center_l2_error < 0.12
 
 
 def _window_examples() -> WindowProbeExamples:

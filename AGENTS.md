@@ -48,10 +48,11 @@ Repo state is authoritative for code; vault notes are authoritative for why.
 - Add optional cache keys `person_bbox (N,4)`, `person_visible (N,)`, and
   `person_conf (N,)` with detector/tracker provenance. Old caches must still
   load with invisible-person defaults.
-- B3.4 code/tests are implemented, but the full local T=8 gate is blocked on
-  G0: source-held-out person-latent probe AUROC/center error missed threshold.
-  K1 and K2 passed. Do not proceed to B3.5 until G0 is fixed, recalibrated, or
-  explicitly replanned/waived.
+- B3.4 remains blocked on G0 after rework. The bbox coordinate contract is fixed
+  to DINO encoder-crop coordinates and the local cache was converted; G0 now uses
+  a token-level torch probe with train/per-source diagnostics. K1 and K2 pass,
+  but G0 still misses threshold. Do not proceed to B3.5 until label/probe target
+  quality is fixed, G0 is recalibrated, or the gate is explicitly replanned/waived.
 - Do not continue to B2.12/H20. H20 becomes eligible only at B3.7 after B3.6
   local gates justify one serious depth-6 run.
 - Do not add diffusion, language, game data, SAM2, PI-Prober, metric waypoint

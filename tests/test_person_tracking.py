@@ -13,11 +13,13 @@ from vllatent.ingest.person_tracking import (
     duplicate_frame_runs_from_latents,
     empty_person_tracks,
     person_state_from_bbox,
+    raw_frame_cxcywh_to_encoder_crop,
     screen_cache_dir,
     screen_clip_arrays,
     select_subject_track,
     time_remap_flags_from_deltas,
     validate_person_track_arrays,
+    xyxy_to_encoder_crop_cxcywh,
 )
 
 
@@ -60,6 +62,15 @@ def test_select_subject_tie_breaks_by_centrality() -> None:
     result = select_subject_track(detections, n_frames=3, image_hw=(100, 100))
     np.testing.assert_allclose(result.person_bbox[0], [0.5, 0.5, 0.2, 0.2], atol=1e-6)
     assert result.person_conf[0] == pytest.approx(0.9)
+
+
+def test_encoder_crop_bbox_conversion_for_wide_frame() -> None:
+    # 1280x720 crops to x=[280,1000], y=[0,720] before DINO resize.
+    bbox = xyxy_to_encoder_crop_cxcywh(np.array([280, 180, 1000, 540], dtype=np.float32), (720, 1280))
+    np.testing.assert_allclose(bbox, [0.5, 0.5, 1.0, 0.5], atol=1e-6)
+    raw = np.array([[0.5, 0.5, 720 / 1280, 0.5]], dtype=np.float32)
+    converted = raw_frame_cxcywh_to_encoder_crop(raw, (720, 1280))
+    np.testing.assert_allclose(converted[0], [0.5, 0.5, 1.0, 0.5], atol=1e-6)
 
 
 def test_person_state_masks_invisible_rows() -> None:
