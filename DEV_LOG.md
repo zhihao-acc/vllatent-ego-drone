@@ -160,16 +160,17 @@ human-visible frame counts and passes `track_persons=True` by default into
 **Next USER gate.** Run ski-first curation and ingest with the new pipeline; paste
 the accepted candidate count, ingest summary, and post-expansion screen. Do not
 start B3.5 until that pasteback is reviewed.
-The curation script now dedupes by default against both `configs/sports_clips.yaml`
-and `configs/sports_clips_candidates.yaml` (`60` existing video IDs/titles), so the
-B3.4a search does not repeat the prior 15 curated clips or the prior 45 candidates.
+The curation script now dedupes by default against `configs/sports_clips.yaml`,
+`configs/sports_clips_candidates.yaml`, and `configs/sports_clips_b34a_ski.yaml`.
+After the first B3.4a user run, that excludes `103` existing video IDs/titles:
+the prior 15 curated clips, prior 45 candidates, and current 43 B3.4a ski entries.
 
 Paste block:
 `cd /home/zh/CODE/vllatent-ego-drone`
 `PY=/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python`
-`$PY scripts/curate_sports_clips.py --sport skiing --clip-prefix ski --start-index 16 --max-per-query 20 --max-fetch 120 --out configs/sports_clips_b34a_ski.yaml`
+`$PY scripts/curate_sports_clips.py --sport skiing --keyword-preset ski-large --clip-prefix ski --start-index 59 --max-per-query 20 --target-accepted 500 --max-fetch 2500 --out configs/sports_clips_b34a_ski_500.yaml`
 Review/promote only true snow-ski/snowboard follow-cam entries, then run:
-`$PY scripts/ingest_youtube_pilot.py --clips configs/sports_clips_b34a_ski.yaml --config configs/sports.yaml --device cuda`
+`$PY scripts/ingest_youtube_pilot.py --clips configs/sports_clips_b34a_ski_500.yaml --config configs/sports.yaml --device cuda`
 `$PY scripts/screen_person_cache.py --cache-dir ingest_data/latent_cache --history 3 --horizon 8 --out reports/person_screen_T8_b34a_after_ski_expand.json`
 
 ---

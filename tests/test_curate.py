@@ -1,6 +1,7 @@
 """B1.22c tests: curation gates + 3-level dedup (PURE — no torch, no yt-dlp)."""
 from __future__ import annotations
 
+from scripts.curate_sports_clips import KEYWORD_PRESETS, load_existing_many
 from vllatent.ingest.curate import (
     CurationGate,
     candidate_to_entry,
@@ -132,3 +133,34 @@ def test_candidate_to_entry_schema() -> None:
     assert e["clip_id"] == "cand01"
     assert e["sport"] == "skiing"
     assert "1080p" in e["notes"] and "120s" in e["notes"] and "30fps" in e["notes"]
+
+
+def test_large_ski_keyword_preset_is_broad_and_unique() -> None:
+    preset = KEYWORD_PRESETS["ski-large"]
+    assert len(preset) >= 150
+    assert len({" ".join(k.lower().split()) for k in preset}) == len(preset)
+    assert "FPV drone skiing chase" in preset
+    assert any("snowboard" in k.lower() for k in preset)
+    assert any("Chamonix" in k for k in preset)
+
+
+def test_load_existing_many_unions_prior_yaml_files(tmp_path) -> None:
+    first = tmp_path / "sports_clips.yaml"
+    second = tmp_path / "sports_clips_candidates.yaml"
+    first.write_text(
+        "clips:\n"
+        "- url: https://www.youtube.com/watch?v=a\n"
+        "  clip_id: ski01\n"
+        "  notes: first\n"
+    )
+    second.write_text(
+        "clips:\n"
+        "- url: https://www.youtube.com/watch?v=b\n"
+        "  clip_id: cand01\n"
+        "  notes: second\n"
+    )
+
+    ids, titles = load_existing_many([first, second])
+
+    assert ids == {"a", "b"}
+    assert titles == ["first", "second"]

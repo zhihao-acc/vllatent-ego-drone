@@ -57,6 +57,128 @@ DEFAULT_KEYWORDS = [
 ]
 
 
+def _unique_keywords(items: list[str]) -> list[str]:
+    """Deduplicate keyword strings while preserving first-seen order."""
+    seen: set[str] = set()
+    out: list[str] = []
+    for item in items:
+        key = " ".join(item.lower().split())
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(item)
+    return out
+
+
+_SKI_LARGE_SUBJECTS = [
+    "skiing",
+    "skier",
+    "skiers",
+    "alpine skiing",
+    "downhill skiing",
+    "freeride skiing",
+    "backcountry skiing",
+    "powder skiing",
+    "big mountain skiing",
+    "slopestyle skiing",
+    "snowboarding",
+    "snowboarder",
+    "snowboarders",
+    "freeride snowboarding",
+    "backcountry snowboarding",
+    "powder snowboarding",
+]
+
+_SKI_LARGE_INTENTS = [
+    "FPV drone chase",
+    "FPV drone follow",
+    "FPV drone following",
+    "FPV drone chasing",
+    "drone follow cam",
+    "drone chase cam",
+    "drone chasing",
+    "drone following",
+    "cinematic FPV",
+    "FPV follow cam",
+    "follow cam drone",
+    "tracking drone",
+]
+
+_SKI_LARGE_PLACES = [
+    "Alps",
+    "Chamonix",
+    "Verbier",
+    "Zermatt",
+    "Laax",
+    "Engelberg",
+    "St Anton",
+    "Whistler",
+    "Revelstoke",
+    "Jackson Hole",
+    "Mammoth",
+    "Tahoe",
+    "Colorado",
+    "Utah",
+    "Japan powder",
+    "Hokkaido",
+    "New Zealand",
+    "Chile",
+    "Patagonia",
+]
+
+_SKI_LARGE_CHANNELS = [
+    "Gimbal God skiing",
+    "Johnny FPV skiing",
+    "Gab707 skiing",
+    "FPV drone ski edit",
+    "Red Bull skiing FPV",
+    "GoPro skiing drone",
+    "FWT freeride drone",
+    "X Games skiing drone",
+    "ski movie FPV drone",
+    "snowboard movie FPV drone",
+]
+
+SKI_LARGE_KEYWORDS = _unique_keywords(
+    DEFAULT_KEYWORDS
+    + _SKI_LARGE_CHANNELS
+    + [f"{intent} {subject}" for intent in _SKI_LARGE_INTENTS for subject in _SKI_LARGE_SUBJECTS]
+    + [f"{subject} {intent}" for subject in _SKI_LARGE_SUBJECTS[:8] for intent in _SKI_LARGE_INTENTS[:6]]
+    + [f"{intent} skiing {place}" for intent in _SKI_LARGE_INTENTS[:6] for place in _SKI_LARGE_PLACES]
+    + [f"{intent} snowboarding {place}" for intent in _SKI_LARGE_INTENTS[:4] for place in _SKI_LARGE_PLACES[:10]]
+    + [
+        "ski drone chase 4k",
+        "ski drone follow 4k",
+        "skiing drone chase 4k",
+        "skiing drone follow 4k",
+        "snowboard drone chase 4k",
+        "snowboard drone follow 4k",
+        "FPV drone winter sports ski",
+        "FPV drone mountain skiing",
+        "FPV drone mountain snowboarding",
+        "FPV drone ski resort follow",
+        "FPV drone ski race chase",
+        "FPV drone downhill race ski",
+        "FPV drone snowboard park follow",
+        "FPV drone terrain park snowboard",
+        "FPV drone freeride world tour",
+        "FPV drone heli skiing",
+        "FPV drone heliskiing",
+        "drone chasing pro skier",
+        "drone following pro skier",
+        "drone chasing snowboarder",
+        "drone following snowboarder",
+        "racing drone follows skier",
+        "racing drone follows snowboarder",
+    ]
+)
+
+KEYWORD_PRESETS = {
+    "ski": DEFAULT_KEYWORDS,
+    "ski-large": SKI_LARGE_KEYWORDS,
+}
+
+
 def _ytdlp_env() -> dict[str, str]:
     """yt-dlp env with the socks:// ALL_PROXY popped (it breaks yt-dlp's requests; use --proxy)."""
     env = dict(os.environ)
@@ -157,24 +279,34 @@ def main() -> None:
     p.add_argument(
         "--existing",
         nargs="*",
-        default=["configs/sports_clips.yaml", "configs/sports_clips_candidates.yaml"],
+        default=[
+            "configs/sports_clips.yaml",
+            "configs/sports_clips_candidates.yaml",
+            "configs/sports_clips_b34a_ski.yaml",
+        ],
         help="YAML files whose clip URLs/titles must be excluded",
     )
     p.add_argument("--proxy", default=os.environ.get("YTDLP_PROXY", "http://127.0.0.1:7890"))
     p.add_argument("--max-per-query", type=int, default=15)
     p.add_argument("--max-fetch", type=int, default=90, help="cap full-metadata fetches (time bound)")
+    p.add_argument("--target-accepted", type=int, default=0, help="stop after this many accepted entries (0=off)")
     p.add_argument("--sport", default="skiing")
     p.add_argument("--clip-prefix", default="cand", help="prefix for emitted clip IDs; do not include '_'")
     p.add_argument("--start-index", type=int, default=1, help="first numeric suffix for emitted clip IDs")
+    p.add_argument("--keyword-preset", choices=sorted(KEYWORD_PRESETS), default="ski")
     p.add_argument("--keywords", nargs="*", default=None, help="override the default keyword set")
     args = p.parse_args()
     if "_" in args.clip_prefix:
         raise SystemExit("--clip-prefix must not contain '_' because source split uses '_' as a separator")
     if args.start_index < 0:
         raise SystemExit("--start-index must be non-negative")
+    if args.max_fetch < 0:
+        raise SystemExit("--max-fetch must be non-negative")
+    if args.target_accepted < 0:
+        raise SystemExit("--target-accepted must be non-negative")
 
     gate = CurationGate()
-    keywords = args.keywords or DEFAULT_KEYWORDS
+    keywords = args.keywords or KEYWORD_PRESETS[args.keyword_preset]
     existing_paths = [Path(p) for p in args.existing]
     existing_ids, existing_titles = load_existing_many(existing_paths)
     existing_labels = ", ".join(str(p) for p in existing_paths)
@@ -192,13 +324,20 @@ def main() -> None:
 
     accepted: list[dict] = []
     rejected: list[dict] = []
-    for c in kept[:args.max_fetch]:
+    metadata_fetches = 0
+    for c in kept:
+        if args.target_accepted > 0 and len(accepted) >= args.target_accepted:
+            break
         # cheap title pre-filter — skip the metadata fetch for off-domain / meta titles
         title_l = (c.get("title") or "").lower()
         hit = next((b for b in gate.reject_title_substrings if b in title_l), None)
         if hit:
             rejected.append({**c, "_drop": f"title~{hit.strip()!r}"})
             continue
+        if args.max_fetch > 0 and metadata_fetches >= args.max_fetch:
+            rejected.append({**c, "_drop": "max-fetch"})
+            break
+        metadata_fetches += 1
         meta = fetch_meta(c["id"], args.proxy)
         if meta is None:
             rejected.append({**c, "_drop": "meta-fail"})
@@ -218,6 +357,7 @@ def main() -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(yaml.dump({"clips": entries}, default_flow_style=False, sort_keys=False))
 
+    print(f"[curate] metadata fetches: {metadata_fetches}/{args.max_fetch or 'unbounded'}")
     print(f"\n[curate] ACCEPTED {len(accepted)} → {out_path}")
     for m in accepted:
         print(f"  + {m['id']}  {m['height']}p/{m['fps']}fps/{int(m.get('duration') or 0)}s  {m['title'][:60]}")
