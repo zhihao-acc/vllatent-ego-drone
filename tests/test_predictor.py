@@ -35,6 +35,17 @@ class TestLatentPredictor:
         out = model(history, z_t, action, dt)
         assert out.shape == (2, HORIZON, PATCH_TOKENS, 384)
 
+    def test_output_shape_horizon8(self) -> None:
+        horizon = 8
+        model = LatentPredictor(dim=384, depth=1, heads=6, horizon=horizon)
+        B = 2
+        history = torch.randn(B, HISTORY, PATCH_TOKENS, 384)
+        z_t = torch.randn(B, PATCH_TOKENS, 384)
+        action = torch.randn(B, DOF)
+        dt = torch.full((B, horizon), 0.2)
+        out = model(history, z_t, action, dt)
+        assert out.shape == (B, horizon, PATCH_TOKENS, 384)
+
     def test_residual_mode_zero_init_matches_persistence(self) -> None:
         model = LatentPredictor(dim=32, depth=1, heads=4, prediction_mode="residual")
         model.eval()

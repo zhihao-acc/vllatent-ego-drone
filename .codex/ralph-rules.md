@@ -31,7 +31,7 @@ Every iteration starts by reading:
   - `B3.0` write/approve Phase B-3 plan and align guidance (done 2026-07-07),
   - `B3.1` reviewed cleanup of obsolete B1/B2 runnable paths (done 2026-07-07),
   - `B3.2` person-track cache backfill and data screens (done 2026-07-07),
-  - `B3.3` 6-D plan-token contract and T configurability,
+  - `B3.3` 6-D plan-token contract and T configurability (done 2026-07-07),
   - `B3.4` Stage-0 probes plus K1/K2,
   - `B3.5` depth-6 per-step 6-D conditioned world model,
   - `B3.6` Stage-1 local gates G1a-G1d,

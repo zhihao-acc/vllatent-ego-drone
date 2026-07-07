@@ -35,6 +35,8 @@ class TrainingBatch(NamedTuple):
     person_state_target: torch.Tensor     # (B, T, 4) f32
     target_deltas: torch.Tensor    # (B, T, 4) f32
     last_action: torch.Tensor      # (B, 4) f32 — most recent known action (FiLM conditioning)
+    planned_actions: torch.Tensor  # (B, T, 6) f32 — B3 candidate/teacher-forced plan input
+    planned_actions_valid_mask: torch.Tensor  # (B, T) bool
     vo_confidence: torch.Tensor    # (B, T) f32
     frame_quality: torch.Tensor    # (B,) f32
     dt_seconds: torch.Tensor       # (B, T) f32
@@ -79,6 +81,8 @@ def collate_sports_batch(samples: list[SportsSample]) -> TrainingBatch:
     person_state_target = torch.from_numpy(np.stack([s.person_state_target for s in samples]))
     target_deltas = torch.from_numpy(np.stack([s.target_deltas for s in samples]))
     last_action = torch.from_numpy(np.stack([s.last_action for s in samples]))
+    planned_actions = torch.from_numpy(np.stack([s.planned_actions for s in samples]))
+    planned_actions_valid_mask = torch.from_numpy(np.stack([s.planned_actions_valid_mask for s in samples]))
     vo_conf = torch.from_numpy(np.stack([s.vo_confidence for s in samples]))
     dt_sec = torch.from_numpy(np.stack([s.dt_seconds for s in samples]))
 
@@ -100,6 +104,8 @@ def collate_sports_batch(samples: list[SportsSample]) -> TrainingBatch:
         person_state_target=person_state_target,
         target_deltas=target_deltas,
         last_action=last_action,
+        planned_actions=planned_actions,
+        planned_actions_valid_mask=planned_actions_valid_mask,
         vo_confidence=vo_conf,
         frame_quality=fq,
         dt_seconds=dt_sec,

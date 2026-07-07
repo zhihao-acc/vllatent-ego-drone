@@ -97,7 +97,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.0 — Write/approve Phase B-3 plan | done | 2026-07-07 | `plans/phase-b3-human-conditioned-world-model.md` created; active guidance aligned; B2.12/H20 inactive |
 | B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
 | B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person sources and failed rows excluded from local cache; post-exclusion T=8 screen has 820 clips / 33 sources / 15,698 windows / 8,077 person-valid |
-| B3.3 — 6-D plan-token contract and T configurability | pending | — | AUTO; `PLAN_TOKEN_DIM=6`, yaw, valid mask, T=8 through loader/collate/model |
+| B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
 | B3.4 — Stage-0 probes plus K1/K2 | pending | — | AUTO/local; G0 probes, K1 causality, K2 tiny predictor gate |
 | B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
 | B3.6 — Stage-1 local depth-6 gate | pending | — | AUTO/local; stop on OOM/blocker; report G1a-G1d and K6 |
@@ -105,6 +105,36 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-07 — B3.3 6-D plan tokens and T=8 configurability done
+
+**Status:** B3.3 is done. Next AUTO step is B3.4: Stage-0 probes plus K1/K2.
+
+**Implemented.** Added pure `vllatent.plan_tokens` with `PLAN_TOKEN_DIM=6` and
+`PLAN_TOKEN_FIELDS = (unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio, yaw_rate_norm, valid)`.
+`plan_tokens_from_deltas()` keeps translation scale-free, clips finite yaw-rate normalization, and
+sets `valid = moving & speed_valid & vo_confidence >= threshold`.
+
+**Dataset/batch seam.** `SportsTrainingDataset` now accepts `history` and `horizon` while preserving
+legacy defaults. `SportsTrainingDataset(..., horizon=8)` emits T=8 target latents, future person-state
+labels, `dt_seconds`, and B3 teacher-forced/candidate `planned_actions (T,6)` with
+`planned_actions_valid_mask (T,)`. `collate_sports_batch` carries `planned_actions (B,T,6)` and its
+valid mask in `TrainingBatch`. Future person/world labels are still label fields only and are not
+accepted by `LatentPredictor.forward`.
+
+**Verified.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_plan_tokens.py tests/test_sports_loader.py tests/test_collate.py tests/test_predictor.py`
+  -> `73 passed`.
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m ruff check vllatent/plan_tokens.py vllatent/data/sports_loader.py vllatent/data/collate.py tests/test_plan_tokens.py tests/test_sports_loader.py tests/test_collate.py tests/test_predictor.py`
+  -> OK.
+- `git diff --check` -> OK.
+
+**Next.** B3.4 is local/AUTO unless a probe run becomes long enough to warrant a user gate. Build
+real-latent probes for person presence/center/log-height, then run K1 causality and K2 tiny
+conditioned person-state predictor versus persistence. Required B3.4 tests:
+`$PY -m pytest -q tests/test_person_probes.py tests/test_stage0_gates.py`.
 
 ---
 

@@ -120,7 +120,7 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.0 | done | USER approval received 2026-07-07 | Write/approve B3 plan and align active guidance |
 | B3.1 | done | AUTO, verified 2026-07-07 | Cleanup obsolete B1/B2 runnable paths |
 | B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill and data screens |
-| B3.3 | pending | AUTO | 6-D plan-token contract and T configurability |
+| B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
 | B3.4 | pending | code AUTO, full gates USER-gated if long | Stage-0 probes plus K1/K2 |
 | B3.5 | pending | AUTO | Depth-6 per-step conditioned world model |
 | B3.6 | pending | AUTO/local, stop on OOM/blocker | Stage-1 local gates G1a-G1d |
@@ -220,6 +220,17 @@ config-driven so `T=8` works through loader/collate/model tests.
   labels never appear in inputs.
 - Test:
   `$PY -m pytest -q tests/test_plan_tokens.py tests/test_sports_loader.py tests/test_collate.py tests/test_predictor.py`
+- Verified 2026-07-07: added pure `vllatent.plan_tokens` with
+  `PLAN_TOKEN_DIM=6`, `PLAN_TOKEN_FIELDS`, clipped yaw-rate normalization, and
+  VO/motion/speed-composed validity. `SportsTrainingDataset(..., horizon=8)`
+  emits `planned_actions (T,6)` and `planned_actions_valid_mask (T,)`;
+  `collate_sports_batch` emits `planned_actions (B,T,6)` as the B3
+  world-model input. `LatentPredictor(horizon=8)` shape test passes. Future
+  person/world labels remain labels only and are not threaded into model
+  `forward`.
+- Verified command:
+  `$PY -m pytest -q tests/test_plan_tokens.py tests/test_sports_loader.py tests/test_collate.py tests/test_predictor.py`
+  passed (`73 passed`). Ruff and `git diff --check` passed.
 - Deps: B3.1. Blocks B3.4/B3.5.
 
 ### B3.4 - Stage-0 Probes Plus K1/K2

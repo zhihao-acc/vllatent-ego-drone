@@ -18,6 +18,7 @@ from vllatent.data.collate import (  # noqa: E402
     collate_sports_batch,
 )
 from vllatent.data.sports_loader import SportsTrainingDataset  # noqa: E402
+from vllatent.plan_tokens import PLAN_TOKEN_DIM  # noqa: E402
 
 
 def _make_clip_npz(path: Path, n_frames: int = 20, fps: float = 5.0) -> None:
@@ -60,6 +61,8 @@ class TestCollate:
         assert batch.person_state_target.shape == (B, HORIZON, 4)
         assert batch.target_deltas.shape == (B, HORIZON, DOF)
         assert batch.last_action.shape == (B, DOF)
+        assert batch.planned_actions.shape == (B, HORIZON, PLAN_TOKEN_DIM)
+        assert batch.planned_actions_valid_mask.shape == (B, HORIZON)
         assert batch.vo_confidence.shape == (B, HORIZON)
         assert batch.frame_quality.shape == (B,)
         assert batch.dt_seconds.shape == (B, HORIZON)
@@ -84,6 +87,8 @@ class TestCollate:
         assert batch.person_state_target.dtype == torch.float32
         assert batch.target_deltas.dtype == torch.float32
         assert batch.last_action.dtype == torch.float32
+        assert batch.planned_actions.dtype == torch.float32
+        assert batch.planned_actions_valid_mask.dtype == torch.bool
         assert batch.vo_confidence.dtype == torch.float32
         assert batch.frame_quality.dtype == torch.float32
         assert batch.dt_seconds.dtype == torch.float32
@@ -117,6 +122,17 @@ class TestCollate:
         batch = next(iter(loader))
         assert isinstance(batch, TrainingBatch)
         assert batch.z_t.shape[0] == 4
+
+    def test_horizon8_batch_shapes(self, tmp_path: Path) -> None:
+        horizon = 8
+        _make_clip_npz(tmp_path / "c1.npz", n_frames=20)
+        ds = SportsTrainingDataset(tmp_path, horizon=horizon)
+        batch = collate_sports_batch([ds[0], ds[1]])
+        assert batch.target_latents.shape == (2, horizon, PATCH_TOKENS, EMBED_DIM)
+        assert batch.person_state_target.shape == (2, horizon, 4)
+        assert batch.planned_actions.shape == (2, horizon, PLAN_TOKEN_DIM)
+        assert batch.planned_actions_valid_mask.shape == (2, horizon)
+        assert batch.dt_seconds.shape == (2, horizon)
 
     def test_action_policy_batch_shapes(self, tmp_path: Path) -> None:
         _make_clip_npz(tmp_path / "c1.npz")

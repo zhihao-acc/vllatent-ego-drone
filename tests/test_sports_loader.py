@@ -17,6 +17,7 @@ from vllatent.data.sports_loader import (
     physics_clip,
     velocity_normalize,
 )
+from vllatent.plan_tokens import PLAN_TOKEN_DIM
 from vllatent.scale_free_targets import SCALE_FREE_ACTION_DIM
 from vllatent.schemas import DOF, EMBED_DIM, HISTORY, HORIZON, LATENT_DTYPE, MASK_DTYPE, PATCH_TOKENS
 
@@ -204,6 +205,10 @@ class TestSportsTrainingDataset:
         assert sample.target_deltas.dtype == np.float32
         assert sample.last_action.shape == (DOF,)
         assert sample.last_action.dtype == np.float32
+        assert sample.planned_actions.shape == (HORIZON, PLAN_TOKEN_DIM)
+        assert sample.planned_actions.dtype == np.float32
+        assert sample.planned_actions_valid_mask.shape == (HORIZON,)
+        assert sample.planned_actions_valid_mask.dtype == MASK_DTYPE
         assert sample.target_actions_scale_free.shape == (HORIZON, SCALE_FREE_ACTION_DIM)
         assert sample.target_actions_scale_free.dtype == np.float32
         assert sample.target_actions_moving_mask.shape == (HORIZON,)
@@ -283,6 +288,22 @@ class TestSportsTrainingDataset:
         _make_clip_npz(tmp_path / "clip01.npz", n_frames=20)
         ds = SportsTrainingDataset(tmp_path)
         assert len(ds) == 20 - HORIZON
+
+    def test_horizon8_configurable(self, tmp_path: Path) -> None:
+        horizon = 8
+        _make_clip_npz(tmp_path / "clip01.npz", n_frames=20, include_person=True)
+        ds = SportsTrainingDataset(tmp_path, horizon=horizon)
+        sample = ds[0]
+        assert ds.horizon == horizon
+        assert len(ds) == 20 - horizon
+        assert sample.target_latents.shape == (horizon, PATCH_TOKENS, EMBED_DIM)
+        assert sample.target_person_bbox.shape == (horizon, 4)
+        assert sample.person_state_target.shape == (horizon, 4)
+        assert sample.target_deltas.shape == (horizon, DOF)
+        assert sample.planned_actions.shape == (horizon, PLAN_TOKEN_DIM)
+        assert sample.planned_actions_valid_mask.shape == (horizon,)
+        assert sample.vo_confidence.shape == (horizon,)
+        assert sample.dt_seconds.shape == (horizon,)
 
     def test_multi_clip(self, tmp_path: Path) -> None:
         _make_clip_npz(tmp_path / "clip01.npz", n_frames=15)
@@ -416,6 +437,7 @@ class TestSportsTrainingDataset:
         )
         assert a.odom_reference_speed == pytest.approx(b.odom_reference_speed)
         assert not np.allclose(a.target_actions_scale_free, b.target_actions_scale_free)
+        assert not np.allclose(a.planned_actions, b.planned_actions)
 
 
 class TestDomainPlumbing:
