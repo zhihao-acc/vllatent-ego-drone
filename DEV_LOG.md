@@ -96,15 +96,63 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | superseded | 2026-07-07 | Superseded by B3 gates; Orin/Jetson later only after useful B3 checkpoint |
 | B3.0 — Write/approve Phase B-3 plan | done | 2026-07-07 | `plans/phase-b3-human-conditioned-world-model.md` created; active guidance aligned; B2.12/H20 inactive |
 | B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
-| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; invalid/tiny visible boxes are sanitized; latest T=8 screen has 801 clips / 31 sources / 15,359 windows / 6,638 person-valid |
+| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; invalid/tiny visible boxes are sanitized; latest T=8 screen has 778 clips / 28 sources / 14,900 windows / 2,927 trackable person-valid |
 | B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
-| B3.4 — Stage-0 probes plus K1/K2 | blocked | 2026-07-07 | Token G0 and encoder-crop bbox fix landed/refired; bad-label sources deleted; invalid/tiny labels masked; K1/K2 pass, but G0 still fails (latest AUROC 0.688, center L2 0.209) |
+| B3.4 — Stage-0 probes plus K1/K2 | blocked | 2026-07-07 | Token G0 and encoder-crop bbox fix landed/refired; `person_state_valid` trackability mask added; bad-label/domain sources deleted; K1 passes, but G0/K2 fail (latest AUROC 0.752, center L2 0.157, K2 -5.21%) |
 | B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
 | B3.6 — Stage-1 local depth-6 gate | pending | — | AUTO/local; stop on OOM/blocker; report G1a-G1d and K6 |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-07 — B3.4 human-trackability target refire
+
+**Status:** B3.4 remains blocked. Do not proceed to B3.5.
+
+**Implemented.** Split the detector label from the training label:
+`person_visible` remains YOLO/ByteTrack detector visibility, while
+`person_state_valid` is the stricter followed-subject supervision mask used by
+G0/person-state labels. The mask requires valid non-edge encoder-crop geometry,
+area at least 4 DINO patches, bounded consecutive center jumps, and a minimum
+3-frame run. Old caches without the new key still load via computed fallback.
+
+**Ingest gate.** `process_clip(track_persons=True)` now runs YOLO/ByteTrack on
+accepted-frame segments before MegaSaM/DINO and rejects segments without a usable
+B3 person-state window. The gate uses `ingest.person_gate_history` and
+`ingest.person_gate_horizon` (defaults H=3/T=8) rather than the old fixed
+schema horizon.
+
+**Source deletion.** Generated per-source audit montages in
+`/tmp/b3_trackable_audit/` for the weak validation sources. Based on those
+montages and the user's dataset review, deleted `cand38`, `cand40`, and
+`cand45` from `ingest_data/latent_cache` (`23` clips total). I did not delete
+the broad 525-clip zero-window keep-set; that was only tested through a symlink
+cache.
+
+**Active screen.** Re-ran:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/screen_person_cache.py --cache-dir ingest_data/latent_cache --history 3 --horizon 8 --out reports/person_screen_T8_after_trackable_source_delete.json`
+
+Result: `778` clips, `28` sources, `14,900` T=8 windows, `2,927`
+`person_state_valid` windows, `4,987` trackable frames, `11,167` sanitized
+detector-visible frames, `duplicate_frame_runs=0`, `time_remap_flags=13,992`,
+and `accel_outlier_frames=1,559`.
+
+**Active G0/K1/K2 refire.** Re-ran:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/run_stage0_gates.py --cache-dir ingest_data/latent_cache --horizon 8 --stage0-probe token --out reports/stage0_gates_T8_token_after_trackable_source_delete.json`
+
+Result: failed G0 and K2; passed K1.
+- G0: presence AUROC `0.751973`, center L2 `0.157432`, center L1 `0.097204`, log-height MAE `0.196025`.
+- G0 train diagnostics: train AUROC `0.993010`, train center L2 `0.123912`, train log-height MAE `0.090865`.
+- K1: plan-only R2 `0.019881`, zero MSE `0.234595`, plan-only MSE `0.229931`.
+- K2: persistence MSE `0.186654`, conditioned MSE `0.196371`, improvement `-0.052057`.
+
+**Interpretation.** The stricter target removes obvious invalid/domain-mismatched
+material and makes the label contract usable, but B3.4 still does not justify
+B3.5. Next local work should either improve/recalibrate the person-state target
+and K2 setup, or explicitly replan/waive the B3.4 gates.
 
 ---
 
@@ -299,9 +347,10 @@ old-cache invisible-person fallback, `person_state_target` conversion, duplicate
 accel/person-presence screens, and a cache-dir screen aggregator with clip/window/source counts.
 
 **Cache and loader contract.** `_build_clip_npz()` now writes optional B3 person keys:
-`person_bbox (N,4)`, `person_visible (N,)`, and `person_conf (N,)`. Existing caches without those
-keys still load with invisible-person defaults. `SportsSample` and `TrainingBatch` now expose
-history/future person boxes, visibility, confidence, and `person_state_target (cx,cy,log_h,visibility)`.
+`person_bbox (N,4)`, `person_visible (N,)`, `person_state_valid (N,)`, and
+`person_conf (N,)`. Existing caches without those keys still load with invisible-person defaults.
+`SportsSample` and `TrainingBatch` now expose history/future person boxes, detector visibility,
+trackable supervision validity, confidence, and `person_state_target (cx,cy,log_h,visibility)`.
 
 **Scripts.** Added `scripts/backfill_person_tracks.py` for dry-run/full backfills with JSONL logs,
 and `scripts/screen_person_cache.py` for JSON screen reports after backfill.

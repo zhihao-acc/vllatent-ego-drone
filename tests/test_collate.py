@@ -54,9 +54,11 @@ class TestCollate:
         assert batch.target_latents.shape == (B, HORIZON, PATCH_TOKENS, EMBED_DIM)
         assert batch.history_person_bbox.shape == (B, HISTORY, 4)
         assert batch.history_person_visible.shape == (B, HISTORY)
+        assert batch.history_person_state_valid.shape == (B, HISTORY)
         assert batch.history_person_conf.shape == (B, HISTORY)
         assert batch.target_person_bbox.shape == (B, HORIZON, 4)
         assert batch.target_person_visible.shape == (B, HORIZON)
+        assert batch.target_person_state_valid.shape == (B, HORIZON)
         assert batch.target_person_conf.shape == (B, HORIZON)
         assert batch.person_state_target.shape == (B, HORIZON, 4)
         assert batch.target_deltas.shape == (B, HORIZON, DOF)
@@ -80,9 +82,11 @@ class TestCollate:
         assert batch.history_mask.dtype == torch.bool
         assert batch.history_person_bbox.dtype == torch.float32
         assert batch.history_person_visible.dtype == torch.bool
+        assert batch.history_person_state_valid.dtype == torch.bool
         assert batch.history_person_conf.dtype == torch.float32
         assert batch.target_person_bbox.dtype == torch.float32
         assert batch.target_person_visible.dtype == torch.bool
+        assert batch.target_person_state_valid.dtype == torch.bool
         assert batch.target_person_conf.dtype == torch.float32
         assert batch.person_state_target.dtype == torch.float32
         assert batch.target_deltas.dtype == torch.float32

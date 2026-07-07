@@ -245,6 +245,8 @@ class IngestConfig:
     megasam_model: str = "megasam_base"
     undistort_model: str = "pinhole"
     quality_threshold: float = 0.3
+    person_gate_history: int = HISTORY
+    person_gate_horizon: int = 8
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:
@@ -266,6 +268,10 @@ class IngestConfig:
             )
         if not (0.0 <= self.quality_threshold <= 1.0):
             raise ValueError(f"ingest.quality_threshold must be in [0,1], got {self.quality_threshold}")
+        for name in ("person_gate_history", "person_gate_horizon"):
+            value = getattr(self, name)
+            if not isinstance(value, int) or value < 1:
+                raise ValueError(f"ingest.{name} must be a positive int, got {value!r}")
 
 
 # YAML section name -> its frozen dataclass. Keep in sync with Config's fields.

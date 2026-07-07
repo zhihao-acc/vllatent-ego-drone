@@ -88,9 +88,11 @@ class SportsSample:
     target_latents: np.ndarray   # (T, P, D) fp16 — GT future latents (L_latent targets)
     history_person_bbox: np.ndarray    # (H, 4) f32 — observed person boxes, normalized cxcywh
     history_person_visible: np.ndarray # (H,) bool — observed person visibility
+    history_person_state_valid: np.ndarray # (H,) bool — observed trackable person-state labels
     history_person_conf: np.ndarray    # (H,) f32 — observed person detector confidence
     target_person_bbox: np.ndarray     # (T, 4) f32 — future person boxes, labels only
     target_person_visible: np.ndarray  # (T,) bool — future person visibility, labels only
+    target_person_state_valid: np.ndarray # (T,) bool — future trackable person-state labels only
     target_person_conf: np.ndarray     # (T,) f32 — future person confidence, labels only
     person_state_target: np.ndarray    # (T, 4) f32 — cx,cy,log_h,visibility, labels only
     target_deltas: np.ndarray    # (T, 4) f32 — preprocessed future deltas (L_wp targets)
@@ -419,16 +421,19 @@ class SportsTrainingDataset:
         person_tracks = self._clip_person_tracks[clip_idx]
         hist_person_bbox = np.zeros((self._history, PERSON_BBOX_DIM), dtype=np.float32)
         hist_person_visible = np.zeros(self._history, dtype=MASK_DTYPE)
+        hist_person_state_valid = np.zeros(self._history, dtype=MASK_DTYPE)
         hist_person_conf = np.zeros(self._history, dtype=np.float32)
         for h in range(self._history):
             src_idx = t - self._history + 1 + h
             if src_idx >= 0:
                 hist_person_bbox[h] = person_tracks.person_bbox[src_idx]
                 hist_person_visible[h] = person_tracks.person_visible[src_idx]
+                hist_person_state_valid[h] = person_tracks.person_state_valid[src_idx]
                 hist_person_conf[h] = person_tracks.person_conf[src_idx]
 
         target_person_bbox = person_tracks.person_bbox[t + 1: t + 1 + self._horizon]
         target_person_visible = person_tracks.person_visible[t + 1: t + 1 + self._horizon]
+        target_person_state_valid = person_tracks.person_state_valid[t + 1: t + 1 + self._horizon]
         target_person_conf = person_tracks.person_conf[t + 1: t + 1 + self._horizon]
         if target_person_bbox.shape[0] < self._horizon:
             pad_n = self._horizon - target_person_bbox.shape[0]
@@ -440,11 +445,15 @@ class SportsTrainingDataset:
                 [target_person_visible, np.zeros(pad_n, dtype=MASK_DTYPE)],
                 axis=0,
             )
+            target_person_state_valid = np.concatenate(
+                [target_person_state_valid, np.zeros(pad_n, dtype=MASK_DTYPE)],
+                axis=0,
+            )
             target_person_conf = np.concatenate(
                 [target_person_conf, np.zeros(pad_n, dtype=np.float32)],
                 axis=0,
             )
-        person_state_target = person_state_from_bbox(target_person_bbox, target_person_visible)
+        person_state_target = person_state_from_bbox(target_person_bbox, target_person_state_valid)
 
         target_v = np.zeros((self._horizon, DOF), dtype=np.float32)
         target_velocity_like = np.zeros((self._horizon, DOF), dtype=np.float32)
@@ -510,9 +519,11 @@ class SportsTrainingDataset:
             target_latents=target_lat,
             history_person_bbox=hist_person_bbox,
             history_person_visible=hist_person_visible,
+            history_person_state_valid=hist_person_state_valid,
             history_person_conf=hist_person_conf,
             target_person_bbox=target_person_bbox.astype(np.float32, copy=False),
             target_person_visible=target_person_visible.astype(MASK_DTYPE, copy=False),
+            target_person_state_valid=target_person_state_valid.astype(MASK_DTYPE, copy=False),
             target_person_conf=target_person_conf.astype(np.float32, copy=False),
             person_state_target=person_state_target,
             target_deltas=target_v,

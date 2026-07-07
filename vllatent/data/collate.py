@@ -28,9 +28,11 @@ class TrainingBatch(NamedTuple):
     target_latents: torch.Tensor   # (B, T, P, D) fp16
     history_person_bbox: torch.Tensor     # (B, H, 4) f32
     history_person_visible: torch.Tensor  # (B, H) bool
+    history_person_state_valid: torch.Tensor  # (B, H) bool
     history_person_conf: torch.Tensor     # (B, H) f32
     target_person_bbox: torch.Tensor      # (B, T, 4) f32
     target_person_visible: torch.Tensor   # (B, T) bool
+    target_person_state_valid: torch.Tensor  # (B, T) bool
     target_person_conf: torch.Tensor      # (B, T) f32
     person_state_target: torch.Tensor     # (B, T, 4) f32
     target_deltas: torch.Tensor    # (B, T, 4) f32
@@ -74,9 +76,11 @@ def collate_sports_batch(samples: list[SportsSample]) -> TrainingBatch:
     target_latents = torch.from_numpy(np.stack([s.target_latents for s in samples]))
     history_person_bbox = torch.from_numpy(np.stack([s.history_person_bbox for s in samples]))
     history_person_visible = torch.from_numpy(np.stack([s.history_person_visible for s in samples]))
+    history_person_state_valid = torch.from_numpy(np.stack([s.history_person_state_valid for s in samples]))
     history_person_conf = torch.from_numpy(np.stack([s.history_person_conf for s in samples]))
     target_person_bbox = torch.from_numpy(np.stack([s.target_person_bbox for s in samples]))
     target_person_visible = torch.from_numpy(np.stack([s.target_person_visible for s in samples]))
+    target_person_state_valid = torch.from_numpy(np.stack([s.target_person_state_valid for s in samples]))
     target_person_conf = torch.from_numpy(np.stack([s.target_person_conf for s in samples]))
     person_state_target = torch.from_numpy(np.stack([s.person_state_target for s in samples]))
     target_deltas = torch.from_numpy(np.stack([s.target_deltas for s in samples]))
@@ -97,9 +101,11 @@ def collate_sports_batch(samples: list[SportsSample]) -> TrainingBatch:
         target_latents=target_latents,
         history_person_bbox=history_person_bbox,
         history_person_visible=history_person_visible,
+        history_person_state_valid=history_person_state_valid,
         history_person_conf=history_person_conf,
         target_person_bbox=target_person_bbox,
         target_person_visible=target_person_visible,
+        target_person_state_valid=target_person_state_valid,
         target_person_conf=target_person_conf,
         person_state_target=person_state_target,
         target_deltas=target_deltas,

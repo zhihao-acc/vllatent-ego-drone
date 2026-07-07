@@ -14,6 +14,7 @@ import numpy as np
 
 PERSON_BBOX_KEY = "person_bbox"
 PERSON_VISIBLE_KEY = "person_visible"
+PERSON_STATE_VALID_KEY = "person_state_valid"
 PERSON_CONF_KEY = "person_conf"
 PERSON_BBOX_SPACE_KEY = "person_bbox_space"
 PERSON_BBOX_SPACE_ENCODER_CROP = "encoder_crop"
@@ -21,6 +22,11 @@ PERSON_BBOX_SPACE_RAW_FRAME = "raw_frame"
 PERSON_BBOX_DIM = 4
 PERSON_MIN_BBOX_AREA = 0.0025
 PERSON_EDGE_MARGIN = 1e-6
+PERSON_DINO_PATCH_GRID = 14
+PERSON_TRACKABLE_MIN_AREA_PATCHES = 4.0
+PERSON_TRACKABLE_MIN_AREA = PERSON_TRACKABLE_MIN_AREA_PATCHES / float(PERSON_DINO_PATCH_GRID * PERSON_DINO_PATCH_GRID)
+PERSON_TRACKABLE_MAX_CENTER_JUMP = 0.25
+PERSON_TRACKABLE_MIN_RUN = 3
 PERSON_TRACK_CLASSES = ("person", "skier", "snowboarder")
 PERSON_TRACKER_ID = "yolov8s-worldv2.pt+bytetrack"
 PERSON_TRACK_CONFIDENCE = 0.15
@@ -42,6 +48,7 @@ class PersonTrackResult:
 
     person_bbox: np.ndarray
     person_visible: np.ndarray
+    person_state_valid: np.ndarray
     person_conf: np.ndarray
     provenance: dict[str, Any]
 
@@ -57,6 +64,7 @@ class ScreenReport:
     accel_outlier_frames: int
     person_visible_frames: int
     person_valid_windows: int
+    person_trackable_frames: int
 
 
 def empty_person_tracks(n_frames: int) -> PersonTrackResult:
@@ -64,6 +72,7 @@ def empty_person_tracks(n_frames: int) -> PersonTrackResult:
     return PersonTrackResult(
         person_bbox=np.zeros((n_frames, PERSON_BBOX_DIM), dtype=np.float32),
         person_visible=np.zeros(n_frames, dtype=np.bool_),
+        person_state_valid=np.zeros(n_frames, dtype=np.bool_),
         person_conf=np.zeros(n_frames, dtype=np.float32),
         provenance={
             "detector": "none",
@@ -94,6 +103,12 @@ def validate_person_track_arrays(
         raise ValueError("person_conf contains non-finite values")
 
 
+def validate_person_state_valid(*, n_frames: int, person_state_valid: np.ndarray) -> None:
+    """Validate optional B3 trackable-person supervision mask."""
+    if person_state_valid.shape != (n_frames,):
+        raise ValueError(f"person_state_valid: expected ({n_frames},), got {person_state_valid.shape}")
+
+
 def valid_encoder_crop_bbox_mask(
     person_bbox: np.ndarray,
     *,
@@ -122,6 +137,82 @@ def valid_encoder_crop_bbox_mask(
         & (x2 <= 1.0)
         & (y2 <= 1.0)
     )
+
+
+def non_edge_encoder_crop_bbox_mask(
+    person_bbox: np.ndarray,
+    *,
+    edge_margin: float = PERSON_EDGE_MARGIN,
+) -> np.ndarray:
+    """Return boxes that do not touch the normalized encoder-crop boundary."""
+    bbox = np.asarray(person_bbox, dtype=np.float32)
+    if bbox.ndim != 2 or bbox.shape[1] != PERSON_BBOX_DIM:
+        raise ValueError(f"person_bbox: expected (N,{PERSON_BBOX_DIM}), got {bbox.shape}")
+    cx = bbox[:, 0]
+    cy = bbox[:, 1]
+    bw = bbox[:, 2]
+    bh = bbox[:, 3]
+    x1 = cx - 0.5 * bw
+    x2 = cx + 0.5 * bw
+    y1 = cy - 0.5 * bh
+    y2 = cy + 0.5 * bh
+    return (
+        (x1 > float(edge_margin))
+        & (y1 > float(edge_margin))
+        & (x2 < 1.0 - float(edge_margin))
+        & (y2 < 1.0 - float(edge_margin))
+    )
+
+
+def _keep_runs(mask: np.ndarray, *, min_run: int) -> np.ndarray:
+    """Keep only True runs with at least ``min_run`` consecutive frames."""
+    arr = np.asarray(mask).astype(np.bool_)
+    if min_run <= 1 or arr.size == 0:
+        return arr.copy()
+    out = np.zeros_like(arr, dtype=np.bool_)
+    start: int | None = None
+    for i, value in enumerate(arr):
+        if bool(value) and start is None:
+            start = i
+        if (not bool(value) or i == arr.size - 1) and start is not None:
+            end = i + 1 if bool(value) and i == arr.size - 1 else i
+            if end - start >= min_run:
+                out[start:end] = True
+            start = None
+    return out
+
+
+def person_trackable_mask(
+    person_bbox: np.ndarray,
+    person_visible: np.ndarray,
+    *,
+    min_area: float = PERSON_TRACKABLE_MIN_AREA,
+    max_center_jump: float = PERSON_TRACKABLE_MAX_CENTER_JUMP,
+    min_run: int = PERSON_TRACKABLE_MIN_RUN,
+) -> np.ndarray:
+    """Return frames safe for person-state supervision, stricter than detector visibility."""
+    bbox = np.asarray(person_bbox, dtype=np.float32)
+    visible = np.asarray(person_visible).astype(np.bool_)
+    if bbox.ndim != 2 or bbox.shape[1] != PERSON_BBOX_DIM:
+        raise ValueError(f"person_bbox: expected (N,{PERSON_BBOX_DIM}), got {bbox.shape}")
+    if visible.shape != (bbox.shape[0],):
+        raise ValueError(f"person_visible: expected ({bbox.shape[0]},), got {visible.shape}")
+
+    valid_geom = valid_encoder_crop_bbox_mask(bbox, min_area=min_area)
+    non_edge = non_edge_encoder_crop_bbox_mask(bbox)
+    trackable = visible & valid_geom & non_edge
+
+    if max_center_jump > 0.0 and np.any(trackable):
+        idx = np.flatnonzero(trackable)
+        centers = bbox[idx, :2]
+        for j in range(1, len(idx)):
+            if idx[j] != idx[j - 1] + 1:
+                continue
+            jump = float(np.linalg.norm((centers[j] - centers[j - 1]).astype(np.float64)))
+            if jump > max_center_jump:
+                trackable[idx[j]] = False
+
+    return _keep_runs(trackable, min_run=min_run)
 
 
 def sanitize_person_track_arrays(
@@ -173,13 +264,22 @@ def person_tracks_from_cache(clip: dict[str, np.ndarray]) -> PersonTrackResult:
         person_visible=visible,
         person_conf=conf,
     )
+    if PERSON_STATE_VALID_KEY in clip:
+        state_valid = np.asarray(clip[PERSON_STATE_VALID_KEY]).astype(np.bool_)
+        validate_person_state_valid(n_frames=n_frames, person_state_valid=state_valid)
+        state_valid &= person_trackable_mask(bbox, visible)
+    else:
+        state_valid = person_trackable_mask(bbox, visible)
     return PersonTrackResult(
         person_bbox=bbox,
         person_visible=visible,
+        person_state_valid=state_valid,
         person_conf=conf,
         provenance={
             "source": "cache",
             "sanitized_invisible_frames": raw_visible - int(np.sum(visible)),
+            "computed_state_valid_frames": int(np.sum(state_valid)),
+            "state_valid_source": "cache" if PERSON_STATE_VALID_KEY in clip else "computed",
         },
     )
 
@@ -280,6 +380,7 @@ def select_subject_track(
     return PersonTrackResult(
         person_bbox=bbox,
         person_visible=visible,
+        person_state_valid=person_trackable_mask(bbox, visible),
         person_conf=conf,
         provenance={
             "detector": PERSON_TRACKER_ID,
@@ -355,6 +456,7 @@ def track_persons_from_paths(
     return PersonTrackResult(
         person_bbox=result.person_bbox,
         person_visible=result.person_visible,
+        person_state_valid=result.person_state_valid,
         person_conf=result.person_conf,
         provenance={
             **result.provenance,
@@ -448,6 +550,7 @@ def screen_clip_arrays(
     latents: np.ndarray,
     deltas: np.ndarray,
     person_visible: np.ndarray,
+    person_state_valid: np.ndarray | None = None,
     history: int,
     horizon: int,
 ) -> ScreenReport:
@@ -459,9 +562,10 @@ def screen_clip_arrays(
     n_windows = max(0, n_frames - horizon)
     person_valid_windows = 0
     visible = np.asarray(person_visible).astype(np.bool_)
+    state_valid = visible if person_state_valid is None else np.asarray(person_state_valid).astype(np.bool_)
     for t in range(n_windows):
-        hist = visible[max(0, t - history + 1) : t + 1]
-        fut = visible[t + 1 : t + 1 + horizon]
+        hist = state_valid[max(0, t - history + 1) : t + 1]
+        fut = state_valid[t + 1 : t + 1 + horizon]
         hist_ok = hist.size > 0 and float(np.mean(hist)) >= (2.0 / 3.0)
         fut_ok = fut.size > 0 and float(np.mean(fut)) >= 0.5
         if hist_ok and fut_ok:
@@ -474,6 +578,7 @@ def screen_clip_arrays(
         accel_outlier_frames=int(np.sum(accel)),
         person_visible_frames=int(np.sum(visible)),
         person_valid_windows=person_valid_windows,
+        person_trackable_frames=int(np.sum(state_valid)),
     )
 
 
@@ -511,6 +616,7 @@ def person_label_quality_stats(
         | (y2 >= 1.0 - float(edge_margin))
     )
     valid = visible & valid_encoder_crop_bbox_mask(bbox, min_area=min_area)
+    trackable = person_trackable_mask(bbox, visible)
 
     idx = np.flatnonzero(visible)
     jumps = np.zeros(0, dtype=np.float32)
@@ -528,6 +634,7 @@ def person_label_quality_stats(
     return {
         "visible_frames_raw": int(np.sum(visible)),
         "visible_frames_sanitized": int(np.sum(valid)),
+        "trackable_frames": int(np.sum(trackable)),
         "invalid_visible_frames": int(np.sum(visible & ~valid)),
         "degenerate_visible_frames": int(np.sum(degenerate)),
         "tiny_visible_frames": int(np.sum(tiny)),
@@ -568,6 +675,7 @@ def screen_cache_dir(
         "sources": 0,
         "person_valid_windows": 0,
         "person_visible_frames": 0,
+        "person_trackable_frames": 0,
         "duplicate_frame_runs": 0,
         "time_remap_flags": 0,
         "accel_outlier_frames": 0,
@@ -591,14 +699,19 @@ def screen_cache_dir(
             latents=arrays["latents"],
             deltas=arrays["deltas"],
             person_visible=tracks.person_visible,
+            person_state_valid=tracks.person_state_valid,
             history=history,
             horizon=horizon,
         )
         source = path.stem.split("_")[0]
-        source_entry = sources.setdefault(source, {"clips": 0, "windows": 0, "person_valid_windows": 0})
+        source_entry = sources.setdefault(
+            source,
+            {"clips": 0, "windows": 0, "person_valid_windows": 0, "person_trackable_frames": 0},
+        )
         source_entry["clips"] += 1
         source_entry["windows"] += report.n_windows
         source_entry["person_valid_windows"] += report.person_valid_windows
+        source_entry["person_trackable_frames"] += report.person_trackable_frames
         for src_key, qc_key in (
             ("person_invalid_visible_frames", "invalid_visible_frames"),
             ("person_degenerate_visible_frames", "degenerate_visible_frames"),
@@ -616,7 +729,7 @@ def screen_cache_dir(
         if report.accel_outlier_frames:
             flags.append("accel_outliers")
         if report.n_windows and report.person_valid_windows == 0:
-            flags.append("person_absent_windows")
+            flags.append("person_untrackable_windows")
         if int(qc.get("invalid_visible_frames", 0)):
             flags.append("person_invalid_labels")
         if int(qc.get("edge_visible_frames", 0)):
@@ -629,6 +742,7 @@ def screen_cache_dir(
             "n_windows": report.n_windows,
             "person_valid_windows": report.person_valid_windows,
             "person_visible_frames": report.person_visible_frames,
+            "person_trackable_frames": report.person_trackable_frames,
             "duplicate_frame_runs": report.duplicate_frame_runs,
             "time_remap_flags": report.time_remap_flags,
             "accel_outlier_frames": report.accel_outlier_frames,
@@ -642,6 +756,7 @@ def screen_cache_dir(
         totals["windows"] += report.n_windows
         totals["person_valid_windows"] += report.person_valid_windows
         totals["person_visible_frames"] += report.person_visible_frames
+        totals["person_trackable_frames"] += report.person_trackable_frames
         totals["duplicate_frame_runs"] += report.duplicate_frame_runs
         totals["time_remap_flags"] += report.time_remap_flags
         totals["accel_outlier_frames"] += report.accel_outlier_frames
@@ -669,8 +784,14 @@ __all__ = [
     "PERSON_BBOX_SPACE_KEY",
     "PERSON_BBOX_SPACE_RAW_FRAME",
     "PERSON_CONF_KEY",
+    "PERSON_DINO_PATCH_GRID",
     "PERSON_TRACK_CLASSES",
     "PERSON_TRACKER_ID",
+    "PERSON_STATE_VALID_KEY",
+    "PERSON_TRACKABLE_MAX_CENTER_JUMP",
+    "PERSON_TRACKABLE_MIN_AREA",
+    "PERSON_TRACKABLE_MIN_AREA_PATCHES",
+    "PERSON_TRACKABLE_MIN_RUN",
     "PERSON_VISIBLE_KEY",
     "PersonTrackResult",
     "ScreenReport",
@@ -680,6 +801,7 @@ __all__ = [
     "empty_person_tracks",
     "person_state_from_bbox",
     "person_label_quality_stats",
+    "person_trackable_mask",
     "person_tracks_from_cache",
     "raw_frame_cxcywh_to_encoder_crop",
     "screen_clip_arrays",
@@ -689,6 +811,7 @@ __all__ = [
     "track_persons_from_paths",
     "sanitize_person_track_arrays",
     "validate_person_track_arrays",
+    "validate_person_state_valid",
     "valid_encoder_crop_bbox_mask",
     "xyxy_to_encoder_crop_cxcywh",
 ]

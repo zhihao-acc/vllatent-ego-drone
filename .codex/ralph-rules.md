@@ -32,8 +32,8 @@ Every iteration starts by reading:
   - `B3.1` reviewed cleanup of obsolete B1/B2 runnable paths (done 2026-07-07),
   - `B3.2` person-track cache backfill and data screens (done 2026-07-07),
   - `B3.3` 6-D plan-token contract and T configurability (done 2026-07-07),
-  - `B3.4` Stage-0 probes plus K1/K2 (blocked 2026-07-07: token G0 failed after
-    encoder-crop bbox fix, bad-source deletion, and invalid-label masking; K1/K2 passed),
+  - `B3.4` Stage-0 probes plus K1/K2 (blocked 2026-07-07: token G0 and K2 failed
+    after encoder-crop bbox fix, `person_state_valid` masking, and bad-source deletion; K1 passed),
   - `B3.5` depth-6 per-step 6-D conditioned world model,
   - `B3.6` Stage-1 local gates G1a-G1d,
   - `B3.7` USER-GATED H20 depth-6 run,
@@ -60,8 +60,8 @@ Every iteration starts by reading:
 - Target labels include future latents, person state `(cx, cy, log_h, visibility)`,
   masks, confidences, and optional inverse-dynamics labels.
 - Person-track cache keys are optional and backward-compatible:
-  `person_bbox (N,4)`, `person_visible (N,)`, `person_conf (N,)`, plus detector
-  provenance in manifests/backfill logs.
+  `person_bbox (N,4)`, `person_visible (N,)`, `person_state_valid (N,)`,
+  `person_conf (N,)`, plus detector provenance in manifests/backfill logs.
 - Translation conditioning remains scale-free and invariant to positive rescaling.
 - Yaw-rate normalization is finite and clipped. Metric speed is controller-side,
   clamped strictly below `7.5 m/s`.
@@ -72,11 +72,13 @@ Every iteration starts by reading:
   or EGO-Planner integration before deterministic B3 gates pass.
 - H20/SSH/docker/long jobs remain user-gated. Codex prepares one command only at
   B3.7 if B3.6 passes.
-- Current stop: B3.4 G0 failed on the local T=8 cache even after encoder-crop bbox
-  conversion, a token-level torch probe, user-approved bad-source deletion down to
-  801 clips / 31 sources, and invalid zero/tiny label masking. Latest G0 after
-  masking: AUROC `0.688`, center L2 `0.209`; K1/K2 pass. Do not start B3.5 until
-  label/probe target quality is fixed, G0 is recalibrated, or the gate is explicitly waived.
+- Current stop: B3.4 failed on the active local T=8 cache after encoder-crop bbox
+  conversion, token G0, `person_state_valid` trackability masking, and
+  user-approved source deletion down to 778 clips / 28 sources. Latest refire:
+  G0 AUROC `0.752`, center L2 `0.157`; K1 passes with plan-only R2 `0.0199`;
+  K2 fails at `-5.21%` versus persistence. Do not start B3.5 until label/probe
+  target quality is fixed, G0/K2 are recalibrated, or the gates are explicitly
+  replanned/waived.
 
 ## B3 Verification Checklist
 

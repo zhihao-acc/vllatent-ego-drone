@@ -191,12 +191,16 @@ class TestSportsTrainingDataset:
         assert sample.history_person_bbox.dtype == np.float32
         assert sample.history_person_visible.shape == (HISTORY,)
         assert sample.history_person_visible.dtype == MASK_DTYPE
+        assert sample.history_person_state_valid.shape == (HISTORY,)
+        assert sample.history_person_state_valid.dtype == MASK_DTYPE
         assert sample.history_person_conf.shape == (HISTORY,)
         assert sample.history_person_conf.dtype == np.float32
         assert sample.target_person_bbox.shape == (HORIZON, 4)
         assert sample.target_person_bbox.dtype == np.float32
         assert sample.target_person_visible.shape == (HORIZON,)
         assert sample.target_person_visible.dtype == MASK_DTYPE
+        assert sample.target_person_state_valid.shape == (HORIZON,)
+        assert sample.target_person_state_valid.dtype == MASK_DTYPE
         assert sample.target_person_conf.shape == (HORIZON,)
         assert sample.target_person_conf.dtype == np.float32
         assert sample.person_state_target.shape == (HORIZON, 4)
@@ -232,14 +236,18 @@ class TestSportsTrainingDataset:
         _make_clip_npz(tmp_path / "clip01.npz", n_frames=20)
         sample = SportsTrainingDataset(tmp_path)[0]
         assert not np.any(sample.history_person_visible)
+        assert not np.any(sample.history_person_state_valid)
         assert not np.any(sample.target_person_visible)
+        assert not np.any(sample.target_person_state_valid)
         np.testing.assert_allclose(sample.person_state_target, 0.0)
 
     def test_person_labels_read_from_cache(self, tmp_path: Path) -> None:
         _make_clip_npz(tmp_path / "clip01.npz", n_frames=20, include_person=True)
         sample = SportsTrainingDataset(tmp_path)[3]
         assert np.all(sample.history_person_visible)
+        assert np.all(sample.history_person_state_valid)
         assert np.all(sample.target_person_visible)
+        assert np.all(sample.target_person_state_valid)
         np.testing.assert_allclose(sample.target_person_bbox[0], [0.5, 0.4, 0.2, 0.25], atol=1e-6)
         assert sample.person_state_target[0, 2] == pytest.approx(np.log(0.25))
 

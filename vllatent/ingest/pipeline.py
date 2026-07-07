@@ -55,12 +55,15 @@ def _build_clip_npz(
     timestamps: np.ndarray,
     person_bbox: np.ndarray | None = None,
     person_visible: np.ndarray | None = None,
+    person_state_valid: np.ndarray | None = None,
     person_conf: np.ndarray | None = None,
 ) -> dict[str, np.ndarray]:
     """Validate and return the arrays dict for a single segment's .npz."""
     from vllatent.ingest.person_tracking import (
         empty_person_tracks,
+        person_trackable_mask,
         sanitize_person_track_arrays,
+        validate_person_state_valid,
         validate_person_track_arrays,
     )
 
@@ -80,6 +83,7 @@ def _build_clip_npz(
         tracks = empty_person_tracks(n)
         person_bbox = tracks.person_bbox
         person_visible = tracks.person_visible
+        person_state_valid = tracks.person_state_valid
         person_conf = tracks.person_conf
     validate_person_track_arrays(
         n_frames=n,
@@ -92,6 +96,15 @@ def _build_clip_npz(
         person_visible=person_visible,
         person_conf=person_conf,
     )
+    computed_state_valid = person_trackable_mask(person_bbox, person_visible)
+    if person_state_valid is None:
+        person_state_valid = computed_state_valid
+    else:
+        validate_person_state_valid(
+            n_frames=n,
+            person_state_valid=np.asarray(person_state_valid).astype(np.bool_),
+        )
+        person_state_valid = np.asarray(person_state_valid).astype(np.bool_) & computed_state_valid
 
     return {
         "latents": latents.astype(LATENT_DTYPE),
@@ -101,9 +114,25 @@ def _build_clip_npz(
         "timestamps": timestamps.astype(np.float64),
         "person_bbox": person_bbox.astype(np.float32),
         "person_visible": person_visible.astype(np.bool_),
+        "person_state_valid": person_state_valid.astype(np.bool_),
         "person_conf": person_conf.astype(np.float32),
         "person_bbox_space": np.array("encoder_crop"),
     }
+
+
+def _passes_human_trackability_gate(person_state_valid: np.ndarray, *, history: int, horizon: int) -> bool:
+    """Return whether a segment has at least one usable B3 person-state window."""
+    state_valid = np.asarray(person_state_valid).astype(np.bool_)
+    if state_valid.size < history + horizon + 1:
+        return False
+    for t in range(max(0, state_valid.size - horizon)):
+        hist = state_valid[max(0, t - history + 1) : t + 1]
+        fut = state_valid[t + 1 : t + 1 + horizon]
+        hist_ok = hist.size > 0 and float(np.mean(hist)) >= (2.0 / 3.0)
+        fut_ok = fut.size > 0 and float(np.mean(fut)) >= 0.5
+        if hist_ok and fut_ok:
+            return True
+    return False
 
 
 def _write_clip_npz(
@@ -147,6 +176,7 @@ def _process_segment(
     cache_dir: Path,
     skip_megasam: bool,
     track_persons: bool,
+    person_tracks: Any | None = None,
     device: str,
 ) -> ClipPipelineResult:
     """Process a single quality-accepted segment through MegaSaM → DINOv3 → cache."""
@@ -193,10 +223,10 @@ def _process_segment(
     qualities = segment_qualities[:n]
     vo_conf = megasam_result.confidences[:n].astype(np.float32)
     timestamps = np.arange(n, dtype=np.float64) / cfg.target_fps
-    if track_persons:
+    if person_tracks is None and track_persons:
         _log(f"  {segment_id}: tracking person subject with YOLO-World/ByteTrack")
         person_tracks = track_persons_from_paths(segment_frame_paths[:n], device=device)
-    else:
+    elif person_tracks is None:
         person_tracks = empty_person_tracks(n)
 
     # --- Cache assembly ---
@@ -206,9 +236,10 @@ def _process_segment(
         vo_confidence=vo_conf,
         frame_quality=qualities,
         timestamps=timestamps,
-        person_bbox=person_tracks.person_bbox,
-        person_visible=person_tracks.person_visible,
-        person_conf=person_tracks.person_conf,
+        person_bbox=person_tracks.person_bbox[:n],
+        person_visible=person_tracks.person_visible[:n],
+        person_state_valid=person_tracks.person_state_valid[:n],
+        person_conf=person_tracks.person_conf[:n],
     )
 
     latent_rel = f"{segment_id}.npz"
@@ -300,7 +331,12 @@ def process_clip(
         )
 
     n_frames_on_disk = len(list(frames_dir.glob("*.jpg")))
-    if n_frames_on_disk < MIN_SEGMENT_FRAMES:
+    min_segment_frames = (
+        cfg.person_gate_history + cfg.person_gate_horizon + 1
+        if track_persons
+        else MIN_SEGMENT_FRAMES
+    )
+    if n_frames_on_disk < min_segment_frames:
         errors.append(f"too few frames extracted: {n_frames_on_disk}")
         return [ClipPipelineResult(
             clip_id=clip_id, n_frames=n_frames_on_disk, n_accepted=0,
@@ -333,13 +369,13 @@ def process_clip(
     _log(f"quality: {n_accepted}/{len(qualities)} frames accepted (threshold={cfg.quality_threshold})")
 
     # --- Stage 3b: Find contiguous accepted segments ---
-    segments = find_accepted_segments(quality_mask, min_length=MIN_SEGMENT_FRAMES)
+    segments = find_accepted_segments(quality_mask, min_length=min_segment_frames)
     if not segments:
-        _log(f"no accepted segments >= {MIN_SEGMENT_FRAMES} frames, rejecting {clip_id}")
+        _log(f"no accepted segments >= {min_segment_frames} frames, rejecting {clip_id}")
         return [ClipPipelineResult(
             clip_id=clip_id, n_frames=len(frame_paths), n_accepted=0,
             latent_path="", stages_skipped=skipped,
-            errors=[f"all segments rejected (need >= {MIN_SEGMENT_FRAMES} contiguous accepted frames)"],
+            errors=[f"all segments rejected (need >= {min_segment_frames} contiguous accepted frames)"],
         )]
     _log(f"found {len(segments)} accepted segment(s): {segments}")
 
@@ -353,6 +389,27 @@ def process_clip(
         seg_qualities = qualities[seg_start:seg_end]
 
         try:
+            person_tracks = None
+            if track_persons:
+                from vllatent.ingest.person_tracking import track_persons_from_paths
+
+                _log(f"  {segment_id}: pre-gating person trackability")
+                person_tracks = track_persons_from_paths(seg_paths, device=device)
+                if not _passes_human_trackability_gate(
+                    person_tracks.person_state_valid,
+                    history=cfg.person_gate_history,
+                    horizon=cfg.person_gate_horizon,
+                ):
+                    _log(f"  {segment_id}: rejected by B3 human-trackability gate")
+                    results.append(ClipPipelineResult(
+                        clip_id=segment_id,
+                        n_frames=seg_end - seg_start,
+                        n_accepted=0,
+                        latent_path="",
+                        stages_skipped=skipped,
+                        errors=["rejected by B3 human-trackability gate"],
+                    ))
+                    continue
             result = _process_segment(
                 segment_id=segment_id,
                 segment_frame_paths=seg_paths,
@@ -361,6 +418,7 @@ def process_clip(
                 cache_dir=cache_dir,
                 skip_megasam=skip_megasam,
                 track_persons=track_persons,
+                person_tracks=person_tracks,
                 device=device,
             )
             results.append(result)

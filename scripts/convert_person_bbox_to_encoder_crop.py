@@ -14,7 +14,9 @@ from vllatent.ingest.person_tracking import (
     PERSON_BBOX_SPACE_KEY,
     PERSON_BBOX_SPACE_RAW_FRAME,
     PERSON_CONF_KEY,
+    PERSON_STATE_VALID_KEY,
     PERSON_VISIBLE_KEY,
+    person_trackable_mask,
     raw_frame_cxcywh_to_encoder_crop,
     sanitize_person_track_arrays,
 )
@@ -73,11 +75,13 @@ def convert_one(path: Path, frames_dir: Path, *, dry_run: bool = False) -> dict[
         person_visible=visible,
         person_conf=conf,
     )
+    state_valid = person_trackable_mask(converted, visible)
     if dry_run:
         record["status"] = "would_convert"
     else:
         arrays[PERSON_BBOX_KEY] = converted.astype(np.float32)
         arrays[PERSON_VISIBLE_KEY] = visible
+        arrays[PERSON_STATE_VALID_KEY] = state_valid
         if PERSON_CONF_KEY in arrays:
             arrays[PERSON_CONF_KEY] = conf
         arrays[PERSON_BBOX_SPACE_KEY] = np.array(PERSON_BBOX_SPACE_ENCODER_CROP)
@@ -87,6 +91,7 @@ def convert_one(path: Path, frames_dir: Path, *, dry_run: bool = False) -> dict[
         record["status"] = "converted"
     record["image_hw"] = list(image_hw)
     record["visible_frames"] = int(visible.sum())
+    record["state_valid_frames"] = int(state_valid.sum())
     record["sanitized_invisible_frames"] = raw_visible - int(visible.sum())
     return record
 

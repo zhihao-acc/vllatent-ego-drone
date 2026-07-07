@@ -360,9 +360,9 @@ def collect_frame_probe_examples(
         else:
             idx = np.arange(n, dtype=np.int64)
         tracks = person_tracks_from_cache(clip)
-        state = person_state_from_bbox(tracks.person_bbox, tracks.person_visible)
+        state = person_state_from_bbox(tracks.person_bbox, tracks.person_state_valid)
         features.append(latent_spatial_features(latents[idx], n_projections=n_spatial_projections))
-        visible.append(tracks.person_visible[idx].astype(np.bool_))
+        visible.append(tracks.person_state_valid[idx].astype(np.bool_))
         states.append(state[idx].astype(np.float32, copy=False))
         sources.append(np.full(len(idx), clip_source(path.stem), dtype=object))
 
@@ -405,9 +405,9 @@ def collect_token_probe_examples(
         else:
             idx = np.arange(n, dtype=np.int64)
         tracks = person_tracks_from_cache(clip)
-        state = person_state_from_bbox(tracks.person_bbox, tracks.person_visible)
+        state = person_state_from_bbox(tracks.person_bbox, tracks.person_state_valid)
         token_features.append(latent_token_features(latents[idx], projection_dim=projection_dim))
-        visible.append(tracks.person_visible[idx].astype(np.bool_))
+        visible.append(tracks.person_state_valid[idx].astype(np.bool_))
         states.append(state[idx].astype(np.float32, copy=False))
         sources.append(np.full(len(idx), clip_source(path.stem), dtype=object))
 
@@ -440,12 +440,12 @@ def collect_window_probe_examples(
         latent_features.append(latent_spatial_features(sample.z_t[None], n_projections=n_spatial_projections)[0])
         current = person_state_from_bbox(
             sample.history_person_bbox[-1:],
-            sample.history_person_visible[-1:],
+            sample.history_person_state_valid[-1:],
         )[0]
         current_states.append(current)
         planned_actions.append(sample.planned_actions)
         target_states.append(sample.person_state_target)
-        target_visible.append(sample.target_person_visible)
+        target_visible.append(sample.target_person_state_valid)
         sources.append(dataset.sample_sources[idx])
 
     return WindowProbeExamples(

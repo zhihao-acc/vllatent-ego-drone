@@ -82,7 +82,12 @@ Sports cache `.npz` files gain optional person-track labels:
 
 - `person_bbox (N,4)`: normalized `cx, cy, w, h` in encoder crop coordinates. Absent
   frames store zeros.
-- `person_visible (N,)`: boolean or 0/1 visibility flag.
+- `person_visible (N,)`: boolean or 0/1 detector visibility after geometry
+  sanitization.
+- `person_state_valid (N,)`: optional stricter B3 supervision mask for trackable
+  followed-subject labels. It is computed from valid non-edge crop boxes, DINO
+  patch-scale area, bounded center jumps, and a minimum visible run; old caches
+  without the key fall back to a computed mask.
 - `person_conf (N,)`: detector/tracker confidence in `[0,1]`.
 
 The loader must keep old caches working by filling missing keys with invisible
@@ -96,8 +101,8 @@ Replace B1/B2 runnable training batches with a B3 world-model batch shaped aroun
 - inputs: `z_t`, `history_latents`, `history_mask`, observed history motion if used,
   `planned_actions (B,T,6)`, `dt_seconds (B,T)`, and source/window metadata;
 - labels only: `target_latents`, `person_state_target (cx, cy, log_h, visibility)`,
-  `person_visible`, `person_conf`, person-derived patch weights, VO/quality masks,
-  and optional inverse-dynamics labels.
+  `person_visible`, `person_state_valid`, `person_conf`, person-derived patch
+  weights, VO/quality masks, and optional inverse-dynamics labels.
 
 `target_latents`, future person labels, and future masks must not be accepted by
 model `forward`.
@@ -121,7 +126,7 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.1 | done | AUTO, verified 2026-07-07 | Cleanup obsolete B1/B2 runnable paths |
 | B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill, bad-source deletion, and data screens |
 | B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
-| B3.4 | blocked | AUTO/local, measured 2026-07-07 | Stage-0 probes plus K1/K2; G0 failed |
+| B3.4 | blocked | AUTO/local, measured 2026-07-07 | Stage-0 probes plus K1/K2; G0/K2 failed |
 | B3.5 | pending | AUTO | Depth-6 per-step conditioned world model |
 | B3.6 | pending | AUTO/local, stop on OOM/blocker | Stage-1 local gates G1a-G1d |
 | B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
@@ -227,6 +232,11 @@ dry-run tests only.
   `2,781` edge-touching visible labels, `2,599` flicker transitions,
   `duplicate_frame_runs=0`, `time_remap_flags=14,501`,
   `accel_outlier_frames=1,656`.
+- Trackable-source deletion 2026-07-07: after per-source montage review, deleted
+  `cand38`, `cand40`, and `cand45` from the active cache. Latest T=8 screen:
+  `778` clips, `28` sources, `14,900` windows, `2,927` `person_state_valid`
+  windows, `4,987` trackable frames, `duplicate_frame_runs=0`,
+  `time_remap_flags=13,992`, `accel_outlier_frames=1,559`.
 - Deps: B3.1. Blocks B3.4/B3.5.
 
 ### B3.3 - 6-D Plan Tokens And T Configurability
@@ -294,8 +304,30 @@ Run K1 causality and K2 tiny conditioned person-state predictor versus persisten
   `0.209`, center L1 `0.132`, log-height MAE `0.349`; train AUROC `0.950`,
   train center L2 `0.142`; K1 passed with plan-only R2 `0.0270`; K2 passed
   with `37.05%` improvement.
-- Decision: do not proceed to B3.5 until G0 is fixed, recalibrated with a stronger
-  person probe, or explicitly replanned/waived.
+- Human-label gate rework/refire 2026-07-07: `person_visible` now means detector
+  visibility, while `person_state_valid` is the stricter B3 followed-subject
+  supervision mask. The mask requires valid non-edge encoder-crop boxes, area at
+  least 4 DINO patches, bounded consecutive center jumps, and a minimum run of
+  3 frames. New ingest runs with `track_persons=True` apply the configured
+  `ingest.person_gate_history`/`ingest.person_gate_horizon` before MegaSaM/DINO,
+  so segments without at least one usable B3 person-state window are rejected
+  early.
+- Per-source audit montages were generated under `/tmp/b3_trackable_audit/`.
+  After visual/source review, `cand38`, `cand40`, and `cand45` were deleted from
+  the active cache; `cand27`, `cand41`, and `cand13` remain because their montage
+  samples include plausible follow-subject footage even though many labels are
+  weak. The active cache is now 778 clips / 28 sources.
+- Active T=8 screen after trackable-source deletion:
+  `14,900` windows, `2,927` `person_state_valid` windows, `4,987` trackable
+  frames, `11,167` sanitized detector-visible frames, `duplicate_frame_runs=0`,
+  `time_remap_flags=13,992`, and `accel_outlier_frames=1,559`.
+- Active token G0/K1/K2 refire after trackable-source deletion still failed:
+  G0 presence AUROC `0.752`, center L2 `0.157`, center L1 `0.097`, log-height
+  MAE `0.196`; train AUROC `0.993`, train center L2 `0.124`. K1 passed with
+  plan-only R2 `0.0199`; K2 failed with conditioned MSE worse than persistence
+  (`-5.21%` improvement).
+- Decision: do not proceed to B3.5 until G0/K2 are fixed, recalibrated with a
+  better person-state target/probe, or explicitly replanned/waived.
 - Deps: B3.2/B3.3. Blocks B3.5/B3.6.
 
 ### B3.5 - Per-Step 6-D Conditioning In Depth-6 Predictor

@@ -45,18 +45,23 @@ Repo state is authoritative for code; vault notes are authoritative for why.
 - Future person/world targets are labels only: target latents, person state
   `(cx, cy, log_h, visibility)`, masks, and confidences must not enter model
   `forward`.
-- Add optional cache keys `person_bbox (N,4)`, `person_visible (N,)`, and
-  `person_conf (N,)` with detector/tracker provenance. Old caches must still
-  load with invisible-person defaults.
-- B3.4 remains blocked on G0 after rework. The bbox coordinate contract is fixed
-  to DINO encoder-crop coordinates and the local cache was converted; G0 now uses
-  a token-level torch probe with train/per-source diagnostics. User-approved
-  bad-label sources `cand11`/`cand28` were deleted from the active cache after
-  earlier low/no-person source exclusions, leaving 801 clips / 31 sources. Invalid
-  zero/tiny crop boxes are masked invisible on cache read/write. K1 and K2 pass,
-  but G0 still misses threshold after masking (`AUROC=0.688`, center L2 `0.209`).
-  Do not proceed to B3.5 until label/probe target quality is fixed, G0 is
-  recalibrated, or the gate is explicitly replanned/waived.
+- Add optional cache keys `person_bbox (N,4)`, `person_visible (N,)`,
+  `person_state_valid (N,)`, and `person_conf (N,)` with detector/tracker
+  provenance. `person_visible` is detector visibility; `person_state_valid` is
+  the stricter followed-subject supervision mask. Old caches must still load
+  with invisible-person defaults.
+- B3.4 remains blocked after the human-label gate rework. The bbox coordinate
+  contract is fixed to DINO encoder-crop coordinates; invalid/tiny crop boxes are
+  masked invisible; edge/tiny/jumpy/flickery labels are excluded from
+  `person_state_valid`; and the ingest path pre-gates accepted segments with the
+  configured B3 human-trackability H/T before MegaSaM/DINO work. User-approved
+  bad-label/domain sources `cand11`, `cand28`, `cand38`, `cand40`, and `cand45`
+  were deleted from the active cache after earlier low/no-person exclusions,
+  leaving 778 clips / 28 sources. Latest active T=8 refire: G0 failed
+  (`AUROC=0.752`, center L2 `0.157`) and K2 failed (`-5.21%` vs persistence);
+  K1 passed (`R2=0.0199`). Do not proceed to B3.5 until label/probe target
+  quality is fixed, G0/K2 are recalibrated, or the gates are explicitly
+  replanned/waived.
 - Do not continue to B2.12/H20. H20 becomes eligible only at B3.7 after B3.6
   local gates justify one serious depth-6 run.
 - Do not add diffusion, language, game data, SAM2, PI-Prober, metric waypoint

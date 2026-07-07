@@ -109,15 +109,18 @@ def test_ingest_config_defaults() -> None:
     assert c.name == "wild_video"
     assert c.target_fps == 5.0
     assert c.quality_threshold == 0.3
+    assert c.person_gate_history == HISTORY
+    assert c.person_gate_horizon == 8
 
 
 def test_ingest_config_from_yaml(tmp_path) -> None:
     p = tmp_path / "ingest.yaml"
-    p.write_text("ingest:\n  sport: snowboard\n  target_fps: 10.0\n")
+    p.write_text("ingest:\n  sport: snowboard\n  target_fps: 10.0\n  person_gate_horizon: 6\n")
     cfg = Config.from_yaml(p)
     assert cfg.ingest is not None
     assert cfg.ingest.sport == "snowboard"
     assert cfg.ingest.target_fps == 10.0
+    assert cfg.ingest.person_gate_horizon == 6
 
 
 def test_ingest_config_absent_by_default() -> None:
@@ -142,6 +145,8 @@ def test_train_config_recovery_defaults() -> None:
     lambda: IngestConfig(resolution_h=0),
     lambda: IngestConfig(quality_threshold=1.5),
     lambda: IngestConfig(name=""),
+    lambda: IngestConfig(person_gate_history=0),
+    lambda: IngestConfig(person_gate_horizon=0),
     lambda: TrainConfig(adam_beta1=-0.1),
     lambda: TrainConfig(adam_beta2=1.0),
     lambda: TrainConfig(adam_beta1=0.99, adam_beta2=0.95),

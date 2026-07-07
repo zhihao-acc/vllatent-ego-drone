@@ -10,12 +10,14 @@ from vllatent.ingest.person_tracking import (
     PERSON_BBOX_DIM,
     PERSON_BBOX_SPACE_ENCODER_CROP,
     PERSON_BBOX_SPACE_KEY,
+    PERSON_STATE_VALID_KEY,
     PersonTrackResult,
     TrackedDetection,
     accel_outlier_flags_from_deltas,
     duplicate_frame_runs_from_latents,
     empty_person_tracks,
     person_state_from_bbox,
+    person_trackable_mask,
     person_tracks_from_cache,
     raw_frame_cxcywh_to_encoder_crop,
     screen_cache_dir,
@@ -31,8 +33,10 @@ def test_empty_person_tracks_shapes() -> None:
     tracks = empty_person_tracks(5)
     assert tracks.person_bbox.shape == (5, PERSON_BBOX_DIM)
     assert tracks.person_visible.shape == (5,)
+    assert tracks.person_state_valid.shape == (5,)
     assert tracks.person_conf.shape == (5,)
     assert not np.any(tracks.person_visible)
+    assert not np.any(tracks.person_state_valid)
 
 
 def test_validate_person_track_arrays_rejects_bad_shape() -> None:
@@ -102,9 +106,40 @@ def test_person_tracks_from_cache_sanitizes_tiny_visible_boxes() -> None:
     }
     result = person_tracks_from_cache(clip)
     assert result.person_visible.tolist() == [False, True]
+    assert result.person_state_valid.tolist() == [False, False]
     np.testing.assert_allclose(result.person_bbox[0], np.zeros(4, dtype=np.float32))
     assert result.person_conf[0] == pytest.approx(0.0)
     assert result.provenance["sanitized_invisible_frames"] == 1
+
+
+def test_person_trackable_mask_requires_patch_scale_non_edge_run() -> None:
+    bbox = np.array(
+        [
+            [0.5, 0.5, 0.20, 0.20],
+            [0.5, 0.5, 0.20, 0.20],
+            [0.5, 0.5, 0.20, 0.20],
+            [0.1, 0.5, 0.20, 0.20],  # touches left edge.
+            [0.5, 0.5, 0.04, 0.04],  # smaller than 4 DINO patches.
+        ],
+        dtype=np.float32,
+    )
+    visible = np.ones(5, dtype=np.bool_)
+    mask = person_trackable_mask(bbox, visible)
+    assert mask.tolist() == [True, True, True, False, False]
+
+
+def test_person_tracks_from_cache_uses_state_valid_key_conservatively() -> None:
+    bbox = np.tile(np.array([[0.5, 0.5, 0.20, 0.20]], dtype=np.float32), (4, 1))
+    clip = {
+        "latents": np.ones((4, 1, 1), dtype=np.float32),
+        "person_bbox": bbox,
+        "person_visible": np.ones(4, dtype=np.bool_),
+        "person_state_valid": np.array([True, False, True, True]),
+        "person_conf": np.ones(4, dtype=np.float32),
+    }
+    result = person_tracks_from_cache(clip)
+    assert result.person_visible.tolist() == [True, True, True, True]
+    assert result.person_state_valid.tolist() == [True, False, True, True]
 
 
 def test_person_state_masks_invisible_rows() -> None:
@@ -230,6 +265,7 @@ def test_backfill_writes_encoder_crop_bbox_space(tmp_path: Path, monkeypatch: py
         return PersonTrackResult(
             person_bbox=np.tile(np.array([[0.5, 0.5, 0.2, 0.3]], dtype=np.float32), (2, 1)),
             person_visible=np.ones(2, dtype=np.bool_),
+            person_state_valid=np.ones(2, dtype=np.bool_),
             person_conf=np.ones(2, dtype=np.float32),
             provenance={"bbox_space": PERSON_BBOX_SPACE_ENCODER_CROP},
         )
@@ -245,3 +281,4 @@ def test_backfill_writes_encoder_crop_bbox_space(tmp_path: Path, monkeypatch: py
     assert record["status"] == "backfilled"
     with np.load(str(cache_path)) as data:
         assert str(data[PERSON_BBOX_SPACE_KEY].tolist()) == PERSON_BBOX_SPACE_ENCODER_CROP
+        assert data[PERSON_STATE_VALID_KEY].tolist() == [True, True]

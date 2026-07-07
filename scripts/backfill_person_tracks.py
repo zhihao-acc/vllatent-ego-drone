@@ -18,6 +18,7 @@ from vllatent.ingest.person_tracking import (
     PERSON_BBOX_SPACE_ENCODER_CROP,
     PERSON_BBOX_SPACE_KEY,
     PERSON_CONF_KEY,
+    PERSON_STATE_VALID_KEY,
     PERSON_TRACK_CLASSES,
     PERSON_TRACKER_ID,
     PERSON_VISIBLE_KEY,
@@ -90,6 +91,7 @@ def backfill_one(
     arrays[PERSON_BBOX_KEY] = tracks.person_bbox
     arrays[PERSON_BBOX_SPACE_KEY] = np.array(PERSON_BBOX_SPACE_ENCODER_CROP)
     arrays[PERSON_VISIBLE_KEY] = tracks.person_visible
+    arrays[PERSON_STATE_VALID_KEY] = tracks.person_state_valid
     arrays[PERSON_CONF_KEY] = tracks.person_conf
     _write_npz(cache_path, arrays)
     record["status"] = "backfilled"
