@@ -119,7 +119,7 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 |---|---|---|---|
 | B3.0 | done | USER approval received 2026-07-07 | Write/approve B3 plan and align active guidance |
 | B3.1 | done | AUTO, verified 2026-07-07 | Cleanup obsolete B1/B2 runnable paths |
-| B3.2 | in_progress | code done 2026-07-07, full backfill USER-gated | Person-track cache backfill and data screens |
+| B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill and data screens |
 | B3.3 | pending | AUTO | 6-D plan-token contract and T configurability |
 | B3.4 | pending | code AUTO, full gates USER-gated if long | Stage-0 probes plus K1/K2 |
 | B3.5 | pending | AUTO | Depth-6 per-step conditioned world model |
@@ -192,33 +192,22 @@ dry-run tests only.
   clip/window/source counts and flags cand06-like artifacts.
 - Test:
   `$PY -m pytest -q tests/test_person_tracking.py tests/test_ingest_pipeline.py tests/test_sports_loader.py tests/test_collate.py`
-- Code verified 2026-07-07: person-track contract, optional cache arrays,
+- Verified 2026-07-07: person-track contract, optional cache arrays,
   loader/collate fallback, dry-run-capable backfill script, and cache-screen CLI
-  are implemented. Fixture tests passed. Waiting at the USER gate for the real
-  cache dry-run/full backfill and screen report.
-- USER-gated commands:
-  ```bash
-  PY=/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python
-  $PY scripts/backfill_person_tracks.py \
-    --cache-dir ingest_data/latent_cache \
-    --frames-root ingest_data/frames \
-    --device cuda \
-    --dry-run \
-    --limit 20 \
-    --log-jsonl reports/person_backfill_dryrun.jsonl
-
-  $PY scripts/backfill_person_tracks.py \
-    --cache-dir ingest_data/latent_cache \
-    --frames-root ingest_data/frames \
-    --device cuda \
-    --log-jsonl reports/person_backfill_full.jsonl
-
-  $PY scripts/screen_person_cache.py \
-    --cache-dir ingest_data/latent_cache \
-    --history 3 \
-    --horizon 8 \
-    --out reports/person_screen_T8.json
-  ```
+  are implemented. Fixture tests passed.
+- User pasteback: dry run `20/20 would_backfill`; full backfill `796 backfilled`,
+  `102 skipped_existing`, `9 frame_count_mismatch`, `1 missing_frames`.
+  The tracker path worked; user manually reviewed low-person sources and judged
+  them dataset-side no-goal/true-FPV shots.
+- Exclusion decision: delete cache `.npz` files for low/no-person sources
+  `cand04`, `cand18`, `cand20`, `cand30`, `ski03`, plus remaining failed
+  frame-mismatch rows outside those sources: `cand03_fpv00_c000`,
+  `cand03_fpv07_c000`, `cand11_fpv18_c000`, `cand15_fpv00_c000`,
+  `cand19_fpv21_c000`, `cand22_fpv00_c000`, `cand36_fpv00_c000`,
+  `cand39_fpv02_c001`.
+- Post-exclusion T=8 screen: `820` clips, `33` sources, `15,698` windows,
+  `8,077` person-valid windows (`51.5%`), `duplicate_frame_runs=0`,
+  `time_remap_flags=14,724`, `accel_outlier_frames=1,698`.
 - Deps: B3.1. Blocks B3.4/B3.5.
 
 ### B3.3 - 6-D Plan Tokens And T Configurability

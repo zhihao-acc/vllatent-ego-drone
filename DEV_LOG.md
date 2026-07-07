@@ -96,7 +96,7 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.14 — B2b readout + Jetson decision | superseded | 2026-07-07 | Superseded by B3 gates; Orin/Jetson later only after useful B3 checkpoint |
 | B3.0 — Write/approve Phase B-3 plan | done | 2026-07-07 | `plans/phase-b3-human-conditioned-world-model.md` created; active guidance aligned; B2.12/H20 inactive |
 | B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
-| B3.2 — Person-track cache backfill and data screens | in_progress | 2026-07-07 | Code done and verified; waiting at USER gate for real dry-run/full person-track cache backfill and T=8 screen report |
+| B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person sources and failed rows excluded from local cache; post-exclusion T=8 screen has 820 clips / 33 sources / 15,698 windows / 8,077 person-valid |
 | B3.3 — 6-D plan-token contract and T configurability | pending | — | AUTO; `PLAN_TOKEN_DIM=6`, yaw, valid mask, T=8 through loader/collate/model |
 | B3.4 — Stage-0 probes plus K1/K2 | pending | — | AUTO/local; G0 probes, K1 causality, K2 tiny predictor gate |
 | B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
@@ -105,6 +105,33 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-07 — B3.2 closed after low-person source exclusion
+
+**Status:** B3.2 is done. Next AUTO step is B3.3: 6-D plan-token contract and T configurability.
+
+**User pasteback and decision.** Dry run was `20/20 would_backfill`. Full backfill reported
+`796 backfilled`, `102 skipped_existing`, `9 frame_count_mismatch`, and `1 missing_frames`, so
+`898/908` caches had person keys. The initial T=8 screen had `18,211` windows and `8,173`
+person-valid windows (`44.9%`), with `duplicate_frame_runs=0`. Motion screens were noisy
+(`16,751` time-remap flags, `2,063` accel-outlier frames, `833/908` flagged clips), so they remain
+downstream masks/diagnostics rather than a backfill-failure criterion.
+
+**Exclusion decision.** User confirmed manual review: the systematic person-track gaps reflect
+dataset-side low/no-human true-FPV shots, not YOLO failure. Deleted local cache `.npz` files for
+low/no-person sources `cand04`, `cand18`, `cand20`, `cand30`, and `ski03`, plus failed
+frame-mismatch rows outside those sources: `cand03_fpv00_c000`, `cand03_fpv07_c000`,
+`cand11_fpv18_c000`, `cand15_fpv00_c000`, `cand19_fpv21_c000`, `cand22_fpv00_c000`,
+`cand36_fpv00_c000`, and `cand39_fpv02_c001`. Frames and reports were left intact.
+
+**Post-exclusion screen.** Remaining cache:
+`820` clips, `33` sources, `15,698` T=8 windows, `8,077` person-valid windows (`51.5%`),
+`duplicate_frame_runs=0`, `time_remap_flags=14,724`, and `accel_outlier_frames=1,698`.
+
+**Verification.** Re-ran `scripts/screen_person_cache.py --cache-dir ingest_data/latent_cache --history 3 --horizon 8 --out reports/person_screen_T8_after_exclusion.json`.
+No matching `.npz` files remain for the excluded low-person sources.
 
 ---
 
