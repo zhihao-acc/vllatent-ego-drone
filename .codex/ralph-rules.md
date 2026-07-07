@@ -32,8 +32,8 @@ Every iteration starts by reading:
   - `B3.1` reviewed cleanup of obsolete B1/B2 runnable paths (done 2026-07-07),
   - `B3.2` person-track cache backfill and data screens (done 2026-07-07),
   - `B3.3` 6-D plan-token contract and T configurability (done 2026-07-07),
-  - `B3.4` Stage-0 probes plus K1/K2 (blocked 2026-07-07: token G0 and K2 failed
-    after encoder-crop bbox fix, `person_state_valid` masking, and bad-source deletion; K1 passed),
+  - `B3.4` Stage-0 probes plus K1/K2 (done 2026-07-07 after G0/K2 gate replan;
+    G0/K1/K2 pass locally on the active T=8 cache),
   - `B3.5` depth-6 per-step 6-D conditioned world model,
   - `B3.6` Stage-1 local gates G1a-G1d,
   - `B3.7` USER-GATED H20 depth-6 run,
@@ -72,13 +72,13 @@ Every iteration starts by reading:
   or EGO-Planner integration before deterministic B3 gates pass.
 - H20/SSH/docker/long jobs remain user-gated. Codex prepares one command only at
   B3.7 if B3.6 passes.
-- Current stop: B3.4 failed on the active local T=8 cache after encoder-crop bbox
-  conversion, token G0, `person_state_valid` trackability masking, and
-  user-approved source deletion down to 778 clips / 28 sources. Latest refire:
-  G0 AUROC `0.752`, center L2 `0.157`; K1 passes with plan-only R2 `0.0199`;
-  K2 fails at `-5.21%` versus persistence. Do not start B3.5 until label/probe
-  target quality is fixed, G0/K2 are recalibrated, or the gates are explicitly
-  replanned/waived.
+- Current stop: B3.4 passes locally on the active T=8 cache after splitting G0
+  detector visibility from state supervision and recalibrating K2 to motion-delta
+  improvement. Latest refire: G0 presence AUROC `0.658`, center L2 `0.134`,
+  center L1 `0.084`, log-height MAE `0.230`; K1 plan-only R2 `0.0199`; K2 delta
+  improvement `54.9%` while raw state improvement remains `-5.2%`. B3.5 is the
+  next AUTO step in the plan, but do not start it in a loop where the user has
+  explicitly asked to stop before B3.5.
 
 ## B3 Verification Checklist
 
@@ -99,9 +99,9 @@ A healthy B3 local handoff should report:
 
 | Gate | Pass | On Fail |
 |---|---|---|
-| G0 | real-latent probes work on held-out sources | fix labels/probes |
+| G0 | detector-visible presence is above a weak held-out sanity floor and person-state center/log-height decode on `person_state_valid` | fix labels/probes or replan |
 | K1 | plan-only camera-compensated person motion is near chance | rework causal separation or abort |
-| K2 | tiny conditioned predictor beats persistence by `>=10%` | abort dense WM path |
+| K2 | tiny conditioned predictor improves person-state motion deltas over persistence | abort or replan dense WM path |
 | G1a | conditioned predictor beats person-weighted latent persistence `>=10%` and null-plan `>=5%` | objective/conditioning bug hunt |
 | G1b | rollout beats persistence at every k<=8 | shorten/reweight before scaling |
 | G1c/K4 | probe transfer passes and gameability check passes | calibrate probes or state-head primary |

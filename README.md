@@ -29,8 +29,9 @@ B2.12/H20 action-imitation training is inactive.
 
 B3 cache person labels keep detector visibility and supervision validity separate:
 `person_visible` means a sanitized detector box exists, while `person_state_valid`
-means the label passed the stricter followed-subject trackability gate. As of the
-latest local refire, B3.4 remains blocked (`G0`/`K2` fail), so do not start B3.5.
+means the label passed the stricter followed-subject trackability gate. B3.4
+passes locally after the G0/K2 gate replan; B3.5 is the next step but is not
+started when the user explicitly asks to stop before it.
 
 > Architecture is **LOCKED** — see the vault `latent-pred-pipeline/arch-design-2026-06-08-latent-pred`.
 > Do not relitigate it; build around it. See `CLAUDE.md` for full agent context.

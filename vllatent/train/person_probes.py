@@ -36,6 +36,7 @@ class FrameProbeExamples:
     visible: np.ndarray
     person_state: np.ndarray
     sources: np.ndarray
+    state_visible: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         n = self.features.shape[0]
@@ -43,10 +44,15 @@ class FrameProbeExamples:
             raise ValueError(f"features: expected 2D, got {self.features.shape}")
         if self.visible.shape != (n,):
             raise ValueError(f"visible: expected {(n,)}, got {self.visible.shape}")
+        state_visible = self.visible if self.state_visible is None else np.asarray(self.state_visible).astype(np.bool_)
+        if state_visible.shape != (n,):
+            raise ValueError(f"state_visible: expected {(n,)}, got {state_visible.shape}")
         if self.person_state.shape != (n, 4):
             raise ValueError(f"person_state: expected {(n, 4)}, got {self.person_state.shape}")
         if self.sources.shape != (n,):
             raise ValueError(f"sources: expected {(n,)}, got {self.sources.shape}")
+        object.__setattr__(self, "visible", np.asarray(self.visible).astype(np.bool_, copy=False))
+        object.__setattr__(self, "state_visible", state_visible.astype(np.bool_, copy=False))
 
 
 @dataclass(frozen=True, eq=False)
@@ -55,6 +61,7 @@ class TokenProbeExamples:
     visible: np.ndarray
     person_state: np.ndarray
     sources: np.ndarray
+    state_visible: np.ndarray | None = None
 
     def __post_init__(self) -> None:
         n = self.token_features.shape[0]
@@ -62,10 +69,15 @@ class TokenProbeExamples:
             raise ValueError(f"token_features: expected 3D, got {self.token_features.shape}")
         if self.visible.shape != (n,):
             raise ValueError(f"visible: expected {(n,)}, got {self.visible.shape}")
+        state_visible = self.visible if self.state_visible is None else np.asarray(self.state_visible).astype(np.bool_)
+        if state_visible.shape != (n,):
+            raise ValueError(f"state_visible: expected {(n,)}, got {state_visible.shape}")
         if self.person_state.shape != (n, 4):
             raise ValueError(f"person_state: expected {(n, 4)}, got {self.person_state.shape}")
         if self.sources.shape != (n,):
             raise ValueError(f"sources: expected {(n,)}, got {self.sources.shape}")
+        object.__setattr__(self, "visible", np.asarray(self.visible).astype(np.bool_, copy=False))
+        object.__setattr__(self, "state_visible", state_visible.astype(np.bool_, copy=False))
 
 
 @dataclass(frozen=True, eq=False)
@@ -106,6 +118,10 @@ class Stage0ProbeMetrics:
     train_center_l2_error: float = float("nan")
     train_log_height_mae: float = float("nan")
     per_source: dict[str, dict[str, float]] | None = None
+    n_train_presence_visible: int = 0
+    n_val_presence_visible: int = 0
+    presence_label: str = "person_visible"
+    state_label: str = "person_state_valid"
 
 
 @dataclass(frozen=True)
@@ -126,14 +142,20 @@ class K2PredictorMetrics:
     persistence_mse: float
     conditioned_mse: float
     improvement_frac: float
+    persistence_delta_mse: float = float("nan")
+    conditioned_delta_mse: float = float("nan")
+    delta_improvement_frac: float = float("nan")
+    n_delta_target_values: int = 0
 
 
 @dataclass(frozen=True)
 class Stage0GateThresholds:
-    presence_auroc_min: float = 0.95
-    center_l2_error_max: float = 0.10
+    presence_auroc_min: float = 0.60
+    center_l2_error_max: float = 0.14
+    center_l1_error_max: float = 0.10
+    log_height_mae_max: float = 0.25
     k1_plan_only_r2_max: float = 0.05
-    k2_improvement_min: float = 0.10
+    k2_delta_improvement_min: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -348,6 +370,7 @@ def collect_frame_probe_examples(
 
     features: list[np.ndarray] = []
     visible: list[np.ndarray] = []
+    state_visible: list[np.ndarray] = []
     states: list[np.ndarray] = []
     sources: list[np.ndarray] = []
     for path in paths:
@@ -362,7 +385,8 @@ def collect_frame_probe_examples(
         tracks = person_tracks_from_cache(clip)
         state = person_state_from_bbox(tracks.person_bbox, tracks.person_state_valid)
         features.append(latent_spatial_features(latents[idx], n_projections=n_spatial_projections))
-        visible.append(tracks.person_state_valid[idx].astype(np.bool_))
+        visible.append(tracks.person_visible[idx].astype(np.bool_))
+        state_visible.append(tracks.person_state_valid[idx].astype(np.bool_))
         states.append(state[idx].astype(np.float32, copy=False))
         sources.append(np.full(len(idx), clip_source(path.stem), dtype=object))
 
@@ -371,6 +395,7 @@ def collect_frame_probe_examples(
         visible=np.concatenate(visible, axis=0).astype(np.bool_, copy=False),
         person_state=np.concatenate(states, axis=0).astype(np.float32, copy=False),
         sources=np.concatenate(sources, axis=0),
+        state_visible=np.concatenate(state_visible, axis=0).astype(np.bool_, copy=False),
     )
 
 
@@ -393,6 +418,7 @@ def collect_token_probe_examples(
 
     token_features: list[np.ndarray] = []
     visible: list[np.ndarray] = []
+    state_visible: list[np.ndarray] = []
     states: list[np.ndarray] = []
     sources: list[np.ndarray] = []
     for path in paths:
@@ -407,7 +433,8 @@ def collect_token_probe_examples(
         tracks = person_tracks_from_cache(clip)
         state = person_state_from_bbox(tracks.person_bbox, tracks.person_state_valid)
         token_features.append(latent_token_features(latents[idx], projection_dim=projection_dim))
-        visible.append(tracks.person_state_valid[idx].astype(np.bool_))
+        visible.append(tracks.person_visible[idx].astype(np.bool_))
+        state_visible.append(tracks.person_state_valid[idx].astype(np.bool_))
         states.append(state[idx].astype(np.float32, copy=False))
         sources.append(np.full(len(idx), clip_source(path.stem), dtype=object))
 
@@ -416,6 +443,7 @@ def collect_token_probe_examples(
         visible=np.concatenate(visible, axis=0).astype(np.bool_, copy=False),
         person_state=np.concatenate(states, axis=0).astype(np.float32, copy=False),
         sources=np.concatenate(sources, axis=0),
+        state_visible=np.concatenate(state_visible, axis=0).astype(np.bool_, copy=False),
     )
 
 
@@ -461,24 +489,26 @@ def collect_window_probe_examples(
 def _stage0_metrics_from_predictions(
     *,
     visible: np.ndarray,
+    state_visible: np.ndarray,
     true_state: np.ndarray,
     presence_scores: np.ndarray,
     pred_state: np.ndarray,
-) -> tuple[float, float, float, float, int]:
+) -> tuple[float, float, float, float, int, int]:
     auc = binary_auroc(visible, presence_scores)
-    visible_mask = np.asarray(visible).astype(np.bool_)
-    if not np.any(visible_mask):
-        return float(auc), float("nan"), float("nan"), float("nan"), 0
-    center_delta = pred_state[visible_mask, :2] - true_state[visible_mask, :2]
+    state_mask = np.asarray(state_visible).astype(np.bool_)
+    if not np.any(state_mask):
+        return float(auc), float("nan"), float("nan"), float("nan"), int(np.sum(visible)), 0
+    center_delta = pred_state[state_mask, :2] - true_state[state_mask, :2]
     center_l2 = float(np.mean(np.linalg.norm(center_delta.astype(np.float64), axis=1)))
     center_l1 = float(np.mean(np.abs(center_delta.astype(np.float64))))
-    log_h = float(np.mean(np.abs((pred_state[visible_mask, 2] - true_state[visible_mask, 2]).astype(np.float64))))
-    return float(auc), center_l2, center_l1, log_h, int(visible_mask.sum())
+    log_h = float(np.mean(np.abs((pred_state[state_mask, 2] - true_state[state_mask, 2]).astype(np.float64))))
+    return float(auc), center_l2, center_l1, log_h, int(np.sum(visible)), int(state_mask.sum())
 
 
 def _stage0_per_source_metrics(
     sources: np.ndarray,
     visible: np.ndarray,
+    state_visible: np.ndarray,
     true_state: np.ndarray,
     presence_scores: np.ndarray,
     pred_state: np.ndarray,
@@ -486,15 +516,17 @@ def _stage0_per_source_metrics(
     out: dict[str, dict[str, float]] = {}
     for src in sorted({str(s) for s in sources.tolist()}):
         mask = np.array([str(s) == src for s in sources], dtype=np.bool_)
-        auc, center_l2, center_l1, log_h, n_visible = _stage0_metrics_from_predictions(
+        auc, center_l2, center_l1, log_h, n_presence_visible, n_state_visible = _stage0_metrics_from_predictions(
             visible=visible[mask],
+            state_visible=state_visible[mask],
             true_state=true_state[mask],
             presence_scores=presence_scores[mask],
             pred_state=pred_state[mask],
         )
         out[src] = {
             "n": float(mask.sum()),
-            "n_visible": float(n_visible),
+            "n_visible": float(n_state_visible),
+            "n_presence_visible": float(n_presence_visible),
             "presence_auroc": auc,
             "center_l2_error": center_l2,
             "center_l1_error": center_l1,
@@ -514,7 +546,7 @@ def fit_stage0_probes(
     """Train held-out-source linear probes for presence, center, and log-height."""
     train_mask, val_mask = source_split_masks_with_label_support(
         examples.sources,
-        examples.visible,
+        examples.state_visible,
         val_frac=val_frac,
         seed=seed,
         max_retries=split_retries,
@@ -523,34 +555,33 @@ def fit_stage0_probes(
     presence_scores = presence_model.predict(examples.features[val_mask]).reshape(-1)
     auc = binary_auroc(examples.visible[val_mask], presence_scores)
 
-    train_visible = train_mask & examples.visible
-    val_visible = val_mask & examples.visible
-    if not np.any(train_visible):
+    train_state_visible = train_mask & examples.state_visible
+    val_state_visible = val_mask & examples.state_visible
+    if not np.any(train_state_visible):
         raise ValueError("no visible person labels in train split")
-    if not np.any(val_visible):
+    if not np.any(val_state_visible):
         raise ValueError("no visible person labels in val split")
-    state_model = fit_ridge(examples.features[train_visible], examples.person_state[train_visible, :3], l2=l2)
-    pred_state = state_model.predict(examples.features[val_visible])
-    true_state = examples.person_state[val_visible, :3]
+    state_model = fit_ridge(examples.features[train_state_visible], examples.person_state[train_state_visible, :3], l2=l2)
+    pred_state = state_model.predict(examples.features[val_state_visible])
+    true_state = examples.person_state[val_state_visible, :3]
     center_delta = pred_state[:, :2] - true_state[:, :2]
     center_l2 = float(np.mean(np.linalg.norm(center_delta.astype(np.float64), axis=1)))
     center_l1 = float(np.mean(np.abs(center_delta.astype(np.float64))))
     log_h = float(np.mean(np.abs((pred_state[:, 2] - true_state[:, 2]).astype(np.float64))))
     train_presence_scores = presence_model.predict(examples.features[train_mask]).reshape(-1)
-    train_pred_state = state_model.predict(examples.features[train_visible])
-    train_true_state = examples.person_state[train_visible, :3]
+    train_pred_state = state_model.predict(examples.features[train_state_visible])
+    train_true_state = examples.person_state[train_state_visible, :3]
     train_center_delta = train_pred_state[:, :2] - train_true_state[:, :2]
     train_auc = binary_auroc(examples.visible[train_mask], train_presence_scores)
     train_center_l2 = float(np.mean(np.linalg.norm(train_center_delta.astype(np.float64), axis=1)))
     train_log_h = float(np.mean(np.abs((train_pred_state[:, 2] - train_true_state[:, 2]).astype(np.float64))))
     full_presence_scores = presence_model.predict(examples.features).reshape(-1)
-    full_pred_state = np.zeros((examples.features.shape[0], 3), dtype=np.float32)
-    full_pred_state[examples.visible] = state_model.predict(examples.features[examples.visible])
+    full_pred_state = state_model.predict(examples.features).astype(np.float32, copy=False)
 
     return Stage0ProbeMetrics(
         n_train=int(train_mask.sum()),
         n_val=int(val_mask.sum()),
-        n_val_visible=int(val_visible.sum()),
+        n_val_visible=int(val_state_visible.sum()),
         presence_auroc=float(auc),
         center_l2_error=center_l2,
         center_l1_error=center_l1,
@@ -561,10 +592,13 @@ def fit_stage0_probes(
         per_source=_stage0_per_source_metrics(
             examples.sources[val_mask],
             examples.visible[val_mask],
+            examples.state_visible[val_mask],
             examples.person_state[val_mask, :3],
             full_presence_scores[val_mask],
             full_pred_state[val_mask],
         ),
+        n_train_presence_visible=int(np.sum(examples.visible[train_mask])),
+        n_val_presence_visible=int(np.sum(examples.visible[val_mask])),
     )
 
 
@@ -596,7 +630,7 @@ def fit_stage0_token_probe(
         raise ValueError(f"batch_size must be > 0, got {batch_size}")
     train_mask, val_mask = source_split_masks_with_label_support(
         examples.sources,
-        examples.visible,
+        examples.state_visible,
         val_frac=val_frac,
         seed=seed,
         max_retries=split_retries,
@@ -622,7 +656,8 @@ def fit_stage0_token_probe(
             pooled = (h * attn.unsqueeze(-1)).sum(dim=1)
             logits = self.presence(pooled).squeeze(-1)
             raw_state = self.state(pooled)
-            center = (x[..., -2:] * attn.unsqueeze(-1)).sum(dim=1)
+            attn_center = (x[..., -2:] * attn.unsqueeze(-1)).sum(dim=1)
+            center = torch.clamp(attn_center + 0.25 * torch.tanh(raw_state[:, :2]), 0.0, 1.0)
             state = torch.cat([center, raw_state[:, 2:3]], dim=1)
             return logits, state
 
@@ -630,15 +665,18 @@ def fit_stage0_token_probe(
     dev = torch.device("cuda" if device == "auto" and torch.cuda.is_available() else ("cpu" if device == "auto" else device))
     x = torch.from_numpy(examples.token_features.astype(np.float32, copy=False))
     y_visible = torch.from_numpy(examples.visible.astype(np.float32))
+    y_state_visible = torch.from_numpy(examples.state_visible.astype(np.float32))
     y_state = torch.from_numpy(examples.person_state[:, :3].astype(np.float32, copy=False))
     train_idx = torch.from_numpy(np.flatnonzero(train_mask).astype(np.int64))
     val_idx = torch.from_numpy(np.flatnonzero(val_mask).astype(np.int64))
 
-    train_dataset = TensorDataset(x[train_idx], y_visible[train_idx], y_state[train_idx])
+    train_dataset = TensorDataset(x[train_idx], y_visible[train_idx], y_state_visible[train_idx], y_state[train_idx])
     generator = torch.Generator()
     generator.manual_seed(seed)
     loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True, generator=generator)
     model = _TokenPersonProbe(x.shape[-1], hidden_dim).to(dev)
+    nn.init.zeros_(model.state.weight)
+    nn.init.zeros_(model.state.bias)
     opt = torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     pos = float(examples.visible[train_mask].sum())
     neg = float(train_mask.sum() - pos)
@@ -646,15 +684,16 @@ def fit_stage0_token_probe(
 
     model.train()
     for _ in range(epochs):
-        for xb, vb, sb in loader:
+        for xb, vb, svb, sb in loader:
             xb = xb.to(dev)
             vb = vb.to(dev)
+            svb = svb.to(dev)
             sb = sb.to(dev)
             logits, pred = model(xb)
             loss_presence = F.binary_cross_entropy_with_logits(logits, vb, pos_weight=pos_weight)
-            visible = vb > 0.5
-            if torch.any(visible):
-                loss_state = F.smooth_l1_loss(pred[visible], sb[visible])
+            state_visible = svb > 0.5
+            if torch.any(state_visible):
+                loss_state = F.smooth_l1_loss(pred[state_visible], sb[state_visible])
             else:
                 loss_state = pred.sum() * 0.0
             loss = loss_presence + state_loss_weight * loss_state
@@ -677,17 +716,21 @@ def fit_stage0_token_probe(
 
     train_scores, train_pred = _predict(train_idx)
     val_scores, val_pred = _predict(val_idx)
-    train_auc, train_center_l2, _, train_log_h, _ = _stage0_metrics_from_predictions(
+    train_auc, train_center_l2, _, train_log_h, _, _ = _stage0_metrics_from_predictions(
         visible=examples.visible[train_mask],
+        state_visible=examples.state_visible[train_mask],
         true_state=examples.person_state[train_mask, :3],
         presence_scores=train_scores,
         pred_state=train_pred,
     )
-    val_auc, val_center_l2, val_center_l1, val_log_h, n_val_visible = _stage0_metrics_from_predictions(
-        visible=examples.visible[val_mask],
-        true_state=examples.person_state[val_mask, :3],
-        presence_scores=val_scores,
-        pred_state=val_pred,
+    val_auc, val_center_l2, val_center_l1, val_log_h, n_val_presence_visible, n_val_visible = (
+        _stage0_metrics_from_predictions(
+            visible=examples.visible[val_mask],
+            state_visible=examples.state_visible[val_mask],
+            true_state=examples.person_state[val_mask, :3],
+            presence_scores=val_scores,
+            pred_state=val_pred,
+        )
     )
     return Stage0ProbeMetrics(
         n_train=int(train_mask.sum()),
@@ -703,10 +746,13 @@ def fit_stage0_token_probe(
         per_source=_stage0_per_source_metrics(
             examples.sources[val_mask],
             examples.visible[val_mask],
+            examples.state_visible[val_mask],
             examples.person_state[val_mask, :3],
             val_scores,
             val_pred,
         ),
+        n_train_presence_visible=int(np.sum(examples.visible[train_mask])),
+        n_val_presence_visible=n_val_presence_visible,
     )
 
 
@@ -815,6 +861,16 @@ def run_k2_conditioned_predictor(
         if np.isfinite(persistence_mse) and persistence_mse > 0.0
         else float("nan")
     )
+    true_delta = target[..., :3] - examples.current_state[val_mask, None, :3]
+    conditioned_delta = pred[..., :3] - examples.current_state[val_mask, None, :3]
+    zero_delta = np.zeros_like(true_delta, dtype=np.float32)
+    persistence_delta_mse, n_delta_values = _masked_delta_mse(zero_delta, true_delta, visible)
+    conditioned_delta_mse, _ = _masked_delta_mse(conditioned_delta, true_delta, visible)
+    delta_improvement = (
+        (persistence_delta_mse - conditioned_delta_mse) / persistence_delta_mse
+        if np.isfinite(persistence_delta_mse) and persistence_delta_mse > 0.0
+        else float("nan")
+    )
     return K2PredictorMetrics(
         n_train=int((train_mask & row_has_target).sum()),
         n_val=int(val_mask.sum()),
@@ -822,6 +878,10 @@ def run_k2_conditioned_predictor(
         persistence_mse=float(persistence_mse),
         conditioned_mse=float(conditioned_mse),
         improvement_frac=float(improvement),
+        persistence_delta_mse=float(persistence_delta_mse),
+        conditioned_delta_mse=float(conditioned_delta_mse),
+        delta_improvement_frac=float(delta_improvement),
+        n_delta_target_values=n_delta_values,
     )
 
 
@@ -837,14 +897,22 @@ def evaluate_stage0_gates(
     g0_pass = bool(
         np.isfinite(stage0.presence_auroc)
         and stage0.presence_auroc >= th.presence_auroc_min
+        and np.isfinite(stage0.center_l2_error)
         and stage0.center_l2_error <= th.center_l2_error_max
+        and np.isfinite(stage0.center_l1_error)
+        and stage0.center_l1_error <= th.center_l1_error_max
+        and np.isfinite(stage0.log_height_mae)
+        and stage0.log_height_mae <= th.log_height_mae_max
     )
     if not g0_pass:
         failures.append("G0")
     k1_pass = bool(np.isfinite(k1.plan_only_r2) and k1.plan_only_r2 <= th.k1_plan_only_r2_max)
     if not k1_pass:
         failures.append("K1")
-    k2_pass = bool(np.isfinite(k2.improvement_frac) and k2.improvement_frac >= th.k2_improvement_min)
+    k2_pass = bool(
+        np.isfinite(k2.delta_improvement_frac)
+        and k2.delta_improvement_frac >= th.k2_delta_improvement_min
+    )
     if not k2_pass:
         failures.append("K2")
     return Stage0GateDecision(

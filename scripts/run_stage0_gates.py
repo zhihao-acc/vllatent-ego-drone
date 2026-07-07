@@ -10,6 +10,7 @@ from pathlib import Path
 from vllatent.data.sports_loader import SportsTrainingDataset
 from vllatent.schemas import HISTORY
 from vllatent.train.person_probes import (
+    Stage0GateThresholds,
     collect_frame_probe_examples,
     collect_token_probe_examples,
     collect_window_probe_examples,
@@ -106,7 +107,8 @@ def main(argv: list[str] | None = None) -> int:
         seed=args.seed,
         l2=args.ridge_l2,
     )
-    decision = evaluate_stage0_gates(stage0, k1, k2)
+    thresholds = Stage0GateThresholds()
+    decision = evaluate_stage0_gates(stage0, k1, k2, thresholds)
 
     report = {
         "cache_dir": str(cache_dir),
@@ -128,6 +130,7 @@ def main(argv: list[str] | None = None) -> int:
         "stage0": dataclasses.asdict(stage0),
         "k1": dataclasses.asdict(k1),
         "k2": dataclasses.asdict(k2),
+        "thresholds": dataclasses.asdict(thresholds),
         "decision": dataclasses.asdict(decision),
     }
     text = json.dumps(report, indent=2, sort_keys=True)

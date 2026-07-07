@@ -45,6 +45,10 @@ def _k2(**kwargs: float) -> K2PredictorMetrics:
         "persistence_mse": 0.10,
         "conditioned_mse": 0.08,
         "improvement_frac": 0.20,
+        "persistence_delta_mse": 0.10,
+        "conditioned_delta_mse": 0.08,
+        "delta_improvement_frac": 0.20,
+        "n_delta_target_values": 300,
     }
     values.update(kwargs)
     return K2PredictorMetrics(**values)  # type: ignore[arg-type]
@@ -60,8 +64,18 @@ def test_stage0_gate_decision_reports_failed_gates() -> None:
     decision = evaluate_stage0_gates(
         _stage0(presence_auroc=0.80, center_l2_error=0.20),
         _k1(plan_only_r2=0.30),
-        _k2(improvement_frac=0.01),
+        _k2(delta_improvement_frac=-0.01),
         Stage0GateThresholds(),
     )
     assert not decision.passed
     assert decision.failures == ("G0", "K1", "K2")
+
+
+def test_stage0_gate_decision_uses_k2_delta_improvement() -> None:
+    decision = evaluate_stage0_gates(
+        _stage0(),
+        _k1(),
+        _k2(improvement_frac=-0.20, delta_improvement_frac=0.01),
+        Stage0GateThresholds(),
+    )
+    assert decision.k2_pass

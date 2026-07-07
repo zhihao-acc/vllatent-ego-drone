@@ -125,11 +125,11 @@ def _passes_human_trackability_gate(person_state_valid: np.ndarray, *, history: 
     state_valid = np.asarray(person_state_valid).astype(np.bool_)
     if state_valid.size < history + horizon + 1:
         return False
-    for t in range(max(0, state_valid.size - horizon)):
-        hist = state_valid[max(0, t - history + 1) : t + 1]
+    for t in range(history - 1, state_valid.size - horizon):
+        hist = state_valid[t - history + 1 : t + 1]
         fut = state_valid[t + 1 : t + 1 + horizon]
-        hist_ok = hist.size > 0 and float(np.mean(hist)) >= (2.0 / 3.0)
-        fut_ok = fut.size > 0 and float(np.mean(fut)) >= 0.5
+        hist_ok = hist.size == history and float(np.mean(hist)) >= (2.0 / 3.0)
+        fut_ok = fut.size == horizon and float(np.mean(fut)) >= 0.5
         if hist_ok and fut_ok:
             return True
     return False

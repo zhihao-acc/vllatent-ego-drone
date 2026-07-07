@@ -244,6 +244,12 @@ class TestHumanTrackabilityGate:
         state_valid = np.ones(12, dtype=np.bool_)
         assert _passes_human_trackability_gate(state_valid, history=3, horizon=8)
 
+    def test_rejects_when_only_padded_start_history_would_pass(self) -> None:
+        state_valid = np.zeros(12, dtype=np.bool_)
+        state_valid[0] = True
+        state_valid[3:9] = True
+        assert not _passes_human_trackability_gate(state_valid, history=3, horizon=8)
+
     def test_rejects_segments_too_short_for_configured_horizon(self) -> None:
         state_valid = np.ones(8, dtype=np.bool_)
         assert not _passes_human_trackability_gate(state_valid, history=3, horizon=8)

@@ -214,3 +214,6 @@ def test_k2_conditioned_predictor_beats_persistence() -> None:
     assert metrics.persistence_mse > 0.0
     assert metrics.conditioned_mse < metrics.persistence_mse
     assert metrics.improvement_frac > 0.9
+    assert metrics.n_delta_target_values > 0
+    assert metrics.conditioned_delta_mse < metrics.persistence_delta_mse
+    assert metrics.delta_improvement_frac > 0.9
