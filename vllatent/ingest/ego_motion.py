@@ -138,7 +138,7 @@ def align_to_gps(
     """
     raise NotImplementedError(
         "GPS Sim(3) alignment deferred to custom GoPro+IMU data phase (B-3). "
-        "Use normalize_scale(mode='median_speed') for YouTube + CosFly data."
+        "Use normalize_scale(mode='median_speed') for YouTube sports video data."
     )
 
 

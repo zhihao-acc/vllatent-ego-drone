@@ -25,7 +25,7 @@ RGB 224² ─► [DINOv3 ViT-B/16*, FROZEN, CACHED] ─► z_t (196×D fp16)    
 ```
 
 Action is **continuous-4DoF** from MegaSaM ego-motion extraction (dx,dy,dz,dyaw). Frozen+cached
-encoder => **no EMA / no VICReg**. Training data = sports FPV video (YouTube + CosFly-Track + custom GoPro+IMU).
+encoder => **no EMA / no VICReg**. Training data = sports FPV video (YouTube + custom GoPro+IMU).
 
 ## Architecture — LOCKED vs OPEN
 
