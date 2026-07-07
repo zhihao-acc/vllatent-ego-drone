@@ -1,11 +1,11 @@
-# Ralph Rules - vllatent-ego-drone Phase B2
+# Ralph Rules - vllatent-ego-drone Phase B-3
 
-These are the Codex-local Ralph-loop rules for the active Phase B queue. They
-supersede the older B1 latent-world-model loop.
+These are the Codex-local Ralph-loop rules for the active Phase B-3 queue. They
+supersede the B2 scale-free action-imitation loop and make B2.12/H20 inactive.
 
 ## Completion Promise
 
-Default promise: `B-2 SCALE-FREE B1/WAM CHECKPOINT READY FOR USER-GATED H20 TRAINING`.
+Default promise: `B3 HUMAN-CONDITIONED WORLD MODEL READY FOR USER-GATED H20 TRAINING`.
 Default backstop: `--max-iterations 10`.
 
 Stop when the promise is satisfied, the backstop is reached, a repeated blocker
@@ -17,104 +17,102 @@ Every iteration starts by reading:
 
 1. `DEV_LOG.md` - current step status and latest user-verified facts.
 2. This file - protocol and gates.
-3. `plans/phase-b-sports-training.md`, especially the Phase B-2 section.
-4. Relevant code/tests only after the active B2 step is identified.
+3. `plans/phase-b3-human-conditioned-world-model.md` - authoritative active B3 plan.
+4. `plans/phase-b-sports-training.md` only for historical B1/B2 evidence when needed.
+5. Relevant code/tests only after the active B3 step is identified.
 
 ## Current Queue Discipline
 
-- B1.22e is closed as diagnostic-complete / model-incomplete.
-- B1.23 and B1.24 are superseded until a useful B2 B1/WAM checkpoint exists.
-- Do not launch another B1 latent H20 run.
-- Do not activate game pretraining to chase the B1 DINO-latent persistence metric.
-- B2.1-B2.5 direct-policy diagnostics are complete; B2.5 failed the local
-  source-split gate and must not produce an H20 command.
-- The next active queue is:
-  - `B2.6` diagnosis/replan docs activation,
-  - `B2.7` repair scale-free supervision and align loss with metrics,
-  - `B2.8` add past-only action/camera-history conditioning,
-  - `B2.9` rerun repaired direct-policy diagnostic,
-  - `B2.10` implement control-relevant B1/WAM predictor + action head,
-  - `B2.11` local B1-arch training-policy verification,
-  - `B2.11a` controlled no-cand06 source-balanced WAM diagnostic,
-  - `B2.11b` stale WorldVLN cleanup pass with a reviewed path list (done 2026-07-06),
-  - `B2.11c` frozen-anchor WAM residual fix (done 2026-07-06),
-  - `B2.12` USER gate before any H20 command.
+- B1 latent-only world modeling is closed as diagnostic-complete / model-incomplete.
+- B2 action imitation is closed as evidence. B2.11c is useful as a partial
+  translation/speed prior, but it is not the B3 endpoint.
+- Do not continue to B2.12 or provide a B2b H20 command.
+- The active queue is:
+  - `B3.0` write/approve Phase B-3 plan and align guidance (done 2026-07-07),
+  - `B3.1` reviewed cleanup of obsolete B1/B2 runnable paths (done 2026-07-07),
+  - `B3.2` person-track cache backfill and data screens,
+  - `B3.3` 6-D plan-token contract and T configurability,
+  - `B3.4` Stage-0 probes plus K1/K2,
+  - `B3.5` depth-6 per-step 6-D conditioned world model,
+  - `B3.6` Stage-1 local gates G1a-G1d,
+  - `B3.7` USER-GATED H20 depth-6 run,
+  - `B3.8` planner-facing CEM/MPPI hindsight-replay evaluation.
 
 ## Iteration Protocol
 
-1. Identify the lowest actionable B2.x step from `DEV_LOG.md`.
-2. Review its DoD and test command in the plan.
+1. Identify the lowest actionable B3.x step from `DEV_LOG.md`.
+2. Review its DoD and test command in the B3 plan.
 3. Make one bounded improvement or run one bounded verification.
 4. Run the narrowest useful check listed for that step.
 5. Record verified facts in `DEV_LOG.md`.
-6. Commit with specific paths only, using `feat(phaseB): B2.x - ...` for code
-   steps, `test(phaseB): B2.x - ...` for RED tests, or `docs(phaseB): ...` for
-   plan/rule updates.
+6. Commit only when the user asks, using specific paths only. Never `git add -A`
+   or `git add .`.
 7. Stop at USER gates, after an unfixable test failure, or when the completion
    promise is satisfied.
 
-## B2 Quality Gates
+## B3 Quality Gates
 
-- Future action sequence is the target, never an input.
-- Action-like model inputs must be past-observed only. B2.8 may add past
-  scale-free action/camera trajectory history; future labels must not affect it.
-- Youtube/MegaSaM translation scale is not metric truth. B2a targets must be
-  invariant to positive rescaling of all translation deltas.
-- B2.5 diagnosed speed-ratio outliers and a loss/metric mismatch. Fix the
-  supervision/loss contract before model-capacity or H20 escalation.
-- Metric speed is supplied at inference by onboard odometry/controller scale.
-- Controller conversion must clamp speed strictly below `7.5 m/s`.
-- The H20 target artifact is a stronger B1-architecture WAM checkpoint:
-  latent/world predictor plus action head, accepted by action-margin improvement.
-- Do not add PI-Prober, NoMaD-style diffusion, language cross-attention, game
-  data, or real metric waypoint training until the corrected B1/WAM local gate
-  passes or fails with a recorded diagnosis.
-- After the B2.11 blocker, run B2.11a before model changes: same no-cand06,
-  source-balanced recipe as the repaired B2.9 direct diagnostic, but
-  `--model-kind world_action`. Treat any cleanup of stale WorldVLN artifacts as
-  a separate B2.11b step with an explicit reviewed path list.
-- B2.11c is the passed local WAM fix: frozen repaired-direct anchor plus WAM
-  residual reached +13.10% vs inertia and beat the repaired direct diagnostic
-  (+12.17%) on the no-cand06 source-balanced split. The next step is B2.12,
-  still USER-GATED.
-- Scene/source split remains mandatory. Do not split sub-clips from one source
-  video across train/val.
-- Pure tier stays pure: no torch/transformers/timm/airsim in
-  `vllatent.{schemas,actions,frames,config,manifest,audit}` or any new pure
-  target-transform module.
-- No blobs: never commit `runs/`, weights, `.npz`, videos, raw frames, or QC
-  artifact directories.
+- `PLAN_TOKEN_DIM = 6`; fields are
+  `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio, yaw_rate_norm, valid]`.
+- Candidate future camera/drone plan is an input. Future person/world labels are
+  never inputs.
+- Target labels include future latents, person state `(cx, cy, log_h, visibility)`,
+  masks, confidences, and optional inverse-dynamics labels.
+- Person-track cache keys are optional and backward-compatible:
+  `person_bbox (N,4)`, `person_visible (N,)`, `person_conf (N,)`, plus detector
+  provenance in manifests/backfill logs.
+- Translation conditioning remains scale-free and invariant to positive rescaling.
+- Yaw-rate normalization is finite and clipped. Metric speed is controller-side,
+  clamped strictly below `7.5 m/s`.
+- Source split remains mandatory by source video, not subclip.
+- The B3 predictor uses depth 6, D=768, H=3, T=8 first. Do not call it `~28M`;
+  log exact counts after B3.5.
+- No diffusion, language, game data, SAM2, PI-Prober, metric waypoint training,
+  or EGO-Planner integration before deterministic B3 gates pass.
+- H20/SSH/docker/long jobs remain user-gated. Codex prepares one command only at
+  B3.7 if B3.6 passes.
 
-## B2 Verification Checklist
+## B3 Verification Checklist
 
-A healthy B2 local handoff should report:
+A healthy B3 local handoff should report:
 
-- scale-free target shape/dtype and finite behavior;
-- translation-scale invariance test results;
-- explicit no-future-action-input/leakage tests;
-- target outlier diagnostics, especially speed-ratio/reference-speed masks;
-- loss/metric alignment on normalized path-shape geometry;
-- overfit-tiny direct diagnostic and B1/WAM result vs best dumb baseline;
-- local source-split aggregate action score, direct-policy comparison, and
-  per-source metrics;
-- whether the corrected B1/WAM gate beat the best baseline by at least 10%;
+- plan-token shape/dtype/field semantics and scale-invariance results;
+- yaw-rate finite/clipped behavior and `valid` mask composition;
+- old-cache fallback plus new person-label cache loading;
+- G0 real-latent probe center error and presence AUROC;
+- K1 camera/person causality readout;
+- K2 tiny conditioned predictor versus person-state persistence;
+- depth-6 model parameter count and forward shapes at T=8;
+- plan-causality and plan-sensitivity tests;
+- G1a/G1b/G1c/G1d/K3/K4/K5-lite/K6 gate readouts before any H20 command;
 - exact next USER gate if H20 is justified.
+
+## Stop/Pass Gates
+
+| Gate | Pass | On Fail |
+|---|---|---|
+| G0 | real-latent probes work on held-out sources | fix labels/probes |
+| K1 | plan-only camera-compensated person motion is near chance | rework causal separation or abort |
+| K2 | tiny conditioned predictor beats persistence by `>=10%` | abort dense WM path |
+| G1a | conditioned predictor beats person-weighted latent persistence `>=10%` and null-plan `>=5%` | objective/conditioning bug hunt |
+| G1b | rollout beats persistence at every k<=8 | shorten/reweight before scaling |
+| G1c/K4 | probe transfer passes and gameability check passes | calibrate probes or state-head primary |
+| G1d/K3/K5-lite | true 6-D plan beats shuffled/flipped plans on `>=70%` windows | strengthen conditioning before capacity/data |
+| K6 | source-count ablation improves with more sources | expand data before more H20/model scaling |
 
 ## User-Gated Paste Blocks
 
-Do not provide a B2b H20 paste block until B2.11 passes and B2.12 is reached.
+Do not provide an H20 paste block until B3.6 passes and B3.7 is reached.
 
-At B2.12, provide one command only, derived from the verified local recipe, and
-ask the user to paste:
+At B3.7, provide exactly one command and ask the user to paste:
 
-- tail of `val_action_metrics.jsonl`;
-- tail of train metrics if enabled;
-- `source_action_metrics.jsonl`;
+- tail of metrics JSONL;
+- source metrics;
+- G1 gate readouts;
 - steps/sec and GPU memory;
-- confirmation that predictor/action-head `ckpt_best.pt`, config snapshot, and
-  metrics files exist.
+- confirmation that checkpoint, config snapshot, and metrics files exist.
 
-Artifacts are pulled out-of-band with rsync and never committed.
+Artifacts are pulled out-of-band and never committed.
 
 ## Deterministic Stop
 

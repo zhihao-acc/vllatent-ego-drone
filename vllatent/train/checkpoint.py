@@ -82,8 +82,8 @@ def save_checkpoint(
 
     The checkpoint dict contains: ``model_state_dict``, ``optimizer_state_dict``,
     ``epoch``, ``global_step``, ``config`` (plain dict), ``metrics``, optionally
-    ``scheduler_state_dict``, and optionally ``val_metrics`` (the per-horizon val
-    cosine / persistence / margin dict from ``vllatent.train.evaluate``).
+    ``scheduler_state_dict``, and optionally ``val_metrics`` from the active
+    trainer/evaluator.
     """
     import torch as _torch
 

@@ -2,54 +2,58 @@
 
 Read this before working in this repo. It is the Codex-facing companion to
 `CLAUDE.md`; when they differ, prefer `DEV_LOG.md` and
-`plans/phase-b-sports-training.md` for current execution state.
+`plans/phase-b3-human-conditioned-world-model.md` for current execution state.
 
 ## Project Snapshot
 
-`vllatent` is a compact world-action model for a sports-following drone
+`vllatent` is a compact latent world model for a sports-following drone
 (skiing primary). Phase B-1 is closed as diagnostic-complete / model-incomplete:
 raw future-DINO latent prediction did not beat the persistence baseline on the
-real held-out action-video cache. B2.1-B2.5 built a direct scale-free action
-policy as a diagnostic probe; the local source-split gate failed, exposing a
-speed-label/loss mismatch and a strong repeat-last inertia baseline. The active
-Phase B-2 deliverable is now a **scale-free, control-relevant B1/WAM checkpoint**:
+real held-out action-video cache. Phase B-2 proved useful scale-free camera-motion
+signal but drifted toward imitating the YouTube camera operator. The active
+Phase B-3 deliverable is now a **human-conditioned, action-conditioned latent
+world model**:
 
 ```text
-RGB 224^2 -> frozen cached DINOv3 ViT-B/16 -> z_t / history latents
-                                      + past scale-free action/camera history + dt
-                            [latent/world predictor + action head]
-                                      -> future action sequence
+observed human/camera history + candidate future 6-D camera/drone plan
+    -> future person/world latents + person-state trajectory
 ```
 
-The future action sequence is the **target**, never an input. Youtube/MegaSaM
-translation scale is not trusted; B-2 trains on scale-free path shape and leaves
-metric scale to onboard odometry/controller logic at inference. Commanded speed
-must be clamped below `7.5 m/s`.
+B2.11c remains evidence and a partial translation/speed proposal prior. B2.12/H20
+is inactive. Youtube/MegaSaM translation scale is not trusted; B3 uses scale-free
+translation plan tokens and leaves metric speed to onboard odometry/controller
+logic at inference. Commanded speed must be clamped strictly below `7.5 m/s`.
 
 ## Required Read Order
 
 1. `DEV_LOG.md` - current step status and latest user-verified facts.
 2. `.codex/ralph-rules.md` - Codex Ralph-loop protocol and stop gates.
-3. `plans/phase-b-sports-training.md` - authoritative Phase B plan, especially Phase B-2.
-4. `CLAUDE.md` - broader project invariants and historical context.
+3. `plans/phase-b3-human-conditioned-world-model.md` - authoritative active Phase B-3 plan.
+4. `plans/phase-b-sports-training.md` - historical Phase B/B2 evidence, especially B2.9-B2.11c.
+5. `CLAUDE.md` - broader project invariants and historical context.
 
 For project-memory context, use the vault in the order named by `CLAUDE.md`.
 Repo state is authoritative for code; vault notes are authoritative for why.
 
-## Current B-2 Guardrails
+## Current B-3 Guardrails
 
 - Frozen DINOv3 ViT-B/16, D=768, cached fp16 latents.
-- Predict future scale-free action sequence from observation/history and previous
-  observed motion. Do not condition on future actions.
-- B2.5 direct-policy local gate failed. Do not proceed to H20 from that result.
-  The next AUTO work is B2.7 supervision/loss repair, then B2.8 past-only
-  action/camera-history conditioning, then a B1/WAM-style local gate.
-- The target H20 artifact is a stronger B1-architecture checkpoint: latent/world
-  predictor plus action head, accepted by action-margin improvement, not raw
-  DINO-cosine persistence.
-- Do not add PI-Prober, diffusion, language cross-attention, game data, or real
-  metric waypoint training before the corrected B1/WAM local gate passes or
-  fails with a recorded diagnosis.
+- Depth-6 predictor, H=3, T=8 first. Do not call this model `~28M`; log exact
+  parameter counts after B3.5, with expected order about 57M predictor params.
+- Candidate future 6-D plan is an input:
+  `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio, yaw_rate_norm, valid]`.
+- Future person/world targets are labels only: target latents, person state
+  `(cx, cy, log_h, visibility)`, masks, and confidences must not enter model
+  `forward`.
+- Add optional cache keys `person_bbox (N,4)`, `person_visible (N,)`, and
+  `person_conf (N,)` with detector/tracker provenance. Old caches must still
+  load with invisible-person defaults.
+- B3.1 cleanup is done. The next AUTO step is B3.2: person-track cache backfill
+  implementation and data screens. Full cache backfill remains user-gated.
+- Do not continue to B2.12/H20. H20 becomes eligible only at B3.7 after B3.6
+  local gates justify one serious depth-6 run.
+- Do not add diffusion, language, game data, SAM2, PI-Prober, metric waypoint
+  training, or EGO-Planner integration before deterministic B3 gates pass.
 - Scene split by **source video**, not sub-clip (`stem.split("_")[0]`).
 - Youtube/MegaSaM translation magnitude is diagnostics only, not metric truth.
 - Real metric scale is supplied by onboard odometry/controller at inference.

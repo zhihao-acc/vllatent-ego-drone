@@ -1,8 +1,7 @@
-"""AdamW parameter-group construction (TORCH tier) — B1.22a.
+"""AdamW parameter-group construction (TORCH tier).
 
 Standard transformer weight-decay recipe: matrices (``ndim >= 2``) get decoupled
-weight decay; biases, norm scales, and positional/temporal embeddings do not. Used
-by ``train_sports.py`` for both full-model and ``--latent-only`` (predictor-only) runs.
+weight decay; biases, norm scales, and positional/temporal embeddings do not.
 
 torch is imported lazily so this module imports on a torch-free box.
 """
@@ -23,8 +22,8 @@ def build_param_groups(
     - **no-decay** (``0.0``): biases, LayerNorm scales/shifts (``p.ndim < 2``), and any
       parameter whose name contains ``embed`` (the temporal/positional embedding).
 
-    Empty groups are omitted. Only ``requires_grad`` params are included, so passing
-    ``model.predictor`` for ``--latent-only`` naturally yields predictor-only groups.
+    Empty groups are omitted. Only ``requires_grad`` params are included, so frozen
+    submodules naturally drop out of the optimizer.
     """
     decay: list[torch.nn.Parameter] = []
     no_decay: list[torch.nn.Parameter] = []

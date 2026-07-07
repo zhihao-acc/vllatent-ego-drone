@@ -121,13 +121,12 @@ class DistillConfig:
 
 @dataclass(frozen=True)
 class TrainConfig:
-    """SWEPT training-run knobs for the B-1 latent run (PURE tier — validated, no torch).
+    """SWEPT training-run knobs retained for reusable local trainers.
 
-    The single source of truth for the training hyper-parameters the B-1 run sweeps:
-    optimizer, schedule, AMP precision, scene-split, eval/early-stop, and the game-domain
-    down-weight. ``train_sports.py`` builds this from CLI args (fail-fast on a bad knob) and
-    snapshots it next to the run. The model *structure* lives in ``PredictorConfig``; this is
-    the run recipe. **No Stage-2/3 / head / freeze knobs — that is Phase B-2.**
+    The single source of truth for optimizer, schedule, AMP precision, source-split,
+    eval/early-stop, and domain weighting. B3-specific trainers may build this from
+    CLI args and snapshot it next to the run. Model structure lives in
+    ``PredictorConfig``; this remains the run recipe rather than the architecture.
     """
 
     latent_only: bool = False         # B-1: train the predictor only on L_latent (skip head/L_wp)

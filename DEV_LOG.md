@@ -1,7 +1,7 @@
 # DEV_LOG — vllatent-ego-drone
 
 Append-only, **newest entry on top**. Read this first each iteration to find the current position,
-then re-read the relevant step in `plans/phase-a-data-and-io-contract.md`. Project-level *why* lives in
+then re-read the relevant step in `plans/phase-b3-human-conditioned-world-model.md`. Project-level *why* lives in
 the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + step status.
 
 ## Step status table
@@ -87,15 +87,80 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B2.8 — Past-only action/camera-history conditioning | done | 2026-07-05 | Added causal action-history/path tensors through loader/collate/trainer and optional direct-policy conditioning; future-delta leakage test covers history inputs |
 | B2.9 — Re-run repaired direct-policy diagnostic | done | 2026-07-05 | After user rejected cand06 as failed data and local cache removal, source-balanced repaired direct policy reached +12.17% vs repeat-last and 8/10 sources improved; B2.10 is the next AUTO step |
 | B2.10 — Control-relevant B1/WAM architecture | done | 2026-07-05 | Added B1-style `WorldActionModel`: observed latents + past scale-free action/path history -> latent rollout -> scale-free action head; no future labels/latents in forward |
-| B2.11 — Local B1-arch training-policy verification | done | 2026-07-06 | Unblocked by B2.11c: frozen-direct-anchor WAM residual clears no-cand06 local gate at +13.10% vs inertia, beating repaired direct +12.17%; B2.12 remains USER-GATED |
+| B2.11 — Local B1-arch training-policy verification | done | 2026-07-06 | Unblocked by B2.11c as B2 evidence: frozen-direct-anchor WAM residual clears no-cand06 local gate at +13.10% vs inertia, beating repaired direct +12.17%; B2 H20 later superseded by B3 |
 | B2.11a — Controlled WAM source-balanced diagnostic | done | 2026-07-06 | B2.9-style no-cand06 WAM run passed inertia (+10.96%, 9/10 sources) but still missed repaired direct diagnostic (+12.17%); B2.11 remains blocked and no H20 |
 | B2.11b — Stale WorldVLN cleanup pass | done | 2026-07-06 | Removed reviewed stale A5/WorldVLN files, broken cache inspect path, demo artifacts, unused teacher/oracle pure seams, and local ignored `data/` + empty `_archived/`; active scan + narrow tests + blob guard green; B2.11 still blocked/no H20 |
 | B2.11c — Frozen-anchor WAM residual fix | done | 2026-07-06 | Landed diagnosis-backed fix: WAM can load/freeze repaired direct checkpoint as an eval-mode residual anchor, uses attentive world pooling/head context, optional latent auxiliary labels, true past-only linear scoring; local anchored residual run beats direct |
-| B2.12 — B1-arch H20 USER gate | pending | — | USER-GATED; provide one command only if B2.11 passes |
-| B2.13 — H20 scale-free B1-arch WAM run | pending | — | USER-GATED; target artifact is stronger B1-architecture checkpoint |
-| B2.14 — B2b readout + Jetson decision | pending | — | Readout before another paid run; Jetson only after useful checkpoint |
+| B2.12 — B1-arch H20 USER gate | superseded | 2026-07-07 | Superseded by Phase B-3; do not provide B2 H20 command |
+| B2.13 — H20 scale-free B1-arch WAM run | superseded | 2026-07-07 | Superseded by Phase B-3; no B2 action-imitation H20 run |
+| B2.14 — B2b readout + Jetson decision | superseded | 2026-07-07 | Superseded by B3 gates; Orin/Jetson later only after useful B3 checkpoint |
+| B3.0 — Write/approve Phase B-3 plan | done | 2026-07-07 | `plans/phase-b3-human-conditioned-world-model.md` created; active guidance aligned; B2.12/H20 inactive |
+| B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
+| B3.2 — Person-track cache backfill and data screens | pending | — | Code AUTO; full 908-clip backfill USER-gated |
+| B3.3 — 6-D plan-token contract and T configurability | pending | — | AUTO; `PLAN_TOKEN_DIM=6`, yaw, valid mask, T=8 through loader/collate/model |
+| B3.4 — Stage-0 probes plus K1/K2 | pending | — | AUTO/local; G0 probes, K1 causality, K2 tiny predictor gate |
+| B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
+| B3.6 — Stage-1 local depth-6 gate | pending | — | AUTO/local; stop on OOM/blocker; report G1a-G1d and K6 |
+| B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
+| B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `superseded`.
+
+---
+
+## 2026-07-07 — B3.1 reviewed cleanup of obsolete B1/B2 runnable paths
+
+**Status:** B3.1 is done. Next AUTO step is B3.2 person-track cache backfill and data screens.
+Full 908-clip backfill remains user-gated.
+
+**Removed from reviewed B3.1 list.** Deleted obsolete B1/B2 runnable paths:
+`scripts/train_sports.py`, `vllatent/model/sports_model.py`, `vllatent/train/evaluate.py`,
+`tests/test_model.py`, `tests/test_evaluate.py`, `tests/test_train_sports_residual.py`,
+`scripts/train_sports_b2.py`, `vllatent/model/world_action_model.py`,
+`tests/test_train_sports_b2.py`, and `tests/test_world_action_model.py`.
+
+**Preserved for B3.** Kept source splitting/cache loading in `vllatent/data/sports_loader.py`,
+collation helpers, DINO encoding, ingest/VO/yaw extraction, checkpointing, optimizer/loss helpers,
+scale-free utilities, and the B2 action-policy/action-metric files that seed 6-D prior and
+inverse-dynamics diagnostics.
+
+**Entry points.** Removed the stale `vjepa-smoke` Makefile help/target because `vllatent.verify`
+was already removed. Kept DINO and text smoke targets.
+
+**Verification.** Active-reference scan found no live references to the removed modules/scripts or
+the missing verifier path outside historical logs/plans. Passed:
+`/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_smoke.py tests/test_config.py tests/test_sports_loader.py tests/test_collate.py tests/test_scale_free_targets.py tests/test_predictor.py tests/test_losses.py tests/test_checkpoint.py`
+-> `157 passed`. `bash scripts/check_no_blobs.sh` -> OK. `git diff --check` passed.
+
+---
+
+## 2026-07-07 — B3.0 Phase B-3 human-conditioned world-model plan activated
+
+**Status:** B3.0 is done. Phase B-3 is now the active plan. B2.12/B2.13/B2.14 are superseded and no
+B2 action-imitation H20 command is active.
+
+**Plan.** Added `plans/phase-b3-human-conditioned-world-model.md`. The new objective is:
+
+```text
+observed human/camera history + candidate future 6-D camera/drone plan
+    -> future person/world latents + person-state trajectory
+```
+
+Locked defaults: DINOv3 ViT-B/16 latents, `D=768`, depth-6 predictor, `H=3`, `T=8` first,
+`PLAN_TOKEN_DIM=6`, yaw-rate conditioning, source split by source video, scale-free translation,
+and controller-side metric speed clamped strictly below `7.5 m/s`. The plan explicitly says not to
+call the B3 depth-6 model `~28M`; exact parameter counts must be logged after B3.5, expected order
+about 57M predictor parameters.
+
+**Guidance updates.** Updated `AGENTS.md`, `.codex/ralph-rules.md`, and `README.md` to point at the
+B3 plan and to make B2.12/H20 inactive. Historical B1/B2 plans/reports/logs remain records.
+
+**Next AUTO step:** B3.1 reviewed cleanup of irrelevant B1/B2 runnable paths. Use the reviewed
+preserve/remove list in the B3 plan, fix stale entry points, run the listed narrow tests, and append
+removed paths/reasons here. Do not delete historical plans or reports without explicit user approval.
+
+**Verification.** B3.0 grep check passed:
+`rg -n "Phase B-3|B3.1|candidate future|PLAN_TOKEN_DIM|G0|K1|K2|B2.12" plans/phase-b3-human-conditioned-world-model.md AGENTS.md .codex/ralph-rules.md README.md DEV_LOG.md`.
 
 ---
 
