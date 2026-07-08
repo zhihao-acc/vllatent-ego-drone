@@ -101,11 +101,68 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.4 — Stage-0 probes plus K1/K2 | replanned | 2026-07-07 | Old 0.95 AUROC probe retired as a hard blocker; use it as a bug detector only |
 | B3.4a — YOLO-standard data cleanup and expansion prep | in_progress | 2026-07-07 | Add human-positive filter before auto clipping, then prepare ski-first user-gated expansion |
 | B3.5 — Depth-6 per-step conditioned world model | done | 2026-07-08 | AUTO code surface done under user override while B3.4a ingest remains open; exact wrapper params `58,931,722` |
-| B3.6 — Stage-1 local depth-6 gate | pending | — | AUTO/local; stop on OOM/blocker; report G1a-G1d and K6 |
+| B3.6 — Stage-1 local depth-6 gate | blocked | 2026-07-08 | Local depth-6 BF16 fits, but G1 latent gates fail even on tiny overfit; no H20 command because OOM is not the blocker |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `superseded`.
+
+---
+
+## 2026-07-08 — B3.6 local depth-6 gate and OOM audit
+
+**Status:** B3.6 is blocked on the Stage-1 latent gate, not on OOM. Do not move
+to B3.7/H20 from this result. The active cache was changing while the user-gated
+ski ingest ran (`214` to `217` usable clips during the B3.6 checks), so these are
+diagnostic existing-data results, not a frozen post-B3.4a screen.
+
+**OOM audit.** Local GPU is an RTX 5060 Ti with `16,311 MiB` total memory and
+BF16 support under `torch 2.12.0+cu130`. Depth-6 B3 batch probes:
+- Synthetic batch=1 forward/loss/backward/AdamW BF16 passed with peak allocated
+  `1.185 GiB`.
+- Actual `SportsTrainingDataset` batch=1 passed with peak allocated `1.190 GiB`
+  on `212` clips / `24` sources / `5,574` windows.
+- Actual batch=2 and batch=4 passed; batch=4 peak was `3.255 GiB`.
+- Actual batch=8 produced a real CUDA OOM under current GPU load. Since batch=1
+  and batch=4 fit, H20 is not justified by OOM.
+
+**Implemented.** Added `scripts/train_sports_b3.py` and
+`vllatent.train.world_model_metrics` for B3 local Stage-1 checks: source split by
+source video, tiny-overfit mode, BF16 depth-6 local training, G1a persistence/null
+plan comparison, G1b per-step rollout comparison, and G1d shuffled/flipped-plan
+preference rates.
+
+**Runs.**
+- Tiny overfit, batch=4, 20 steps, default loss weights:
+  training loss improved `36.2%`, peak CUDA `3.275 GiB`; G1 still failed
+  (`improvement_vs_persistence=-23.8%`).
+- Source-split gate, batch=4, 80 steps, default loss weights:
+  training loss improved `32.1%`, peak CUDA `3.275 GiB`; G1 failed
+  (`improvement_vs_persistence=-9.6%`, `improvement_vs_null=-1.38%`,
+  true beats shuffled `35.9%`, true beats flipped `45.3%`).
+- Source-split gate, batch=4, 160 steps, latent-focused weights
+  (`lambda_person_state=0.1`, `lambda_inverse_plan=0.01`):
+  training loss improved `45.0%`, but G1 still failed
+  (`model_loss=0.163196`, `persistence_loss=0.162633`,
+  `improvement_vs_persistence=-0.37%`, `improvement_vs_null=0.006%`,
+  true beats shuffled `39.1%`, true beats flipped `42.2%`).
+- Tiny overfit, batch=2, 400 steps, latent-focused weights:
+  training loss improved `62.7%`, but the evaluated latent rollout still failed
+  even on the same 16-window slice (`improvement_vs_persistence=-2.37%`; all
+  per-step rollout comparisons lost to persistence).
+
+**Interpretation.** The current B3 model/loss path can optimize its scalar
+training objective locally, but it does not yet improve person-weighted DINO
+latent rollout over persistence. This points to an objective/conditioning target
+problem, or to needing the cleaned post-B3.4a expanded data, not to a local-memory
+problem. Do not send H20 until G1a/G1b/G1d can pass locally or the gate is
+explicitly replanned.
+
+**Verification.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_train_sports_b3.py tests/test_world_model_metrics.py tests/test_human_world_model.py`
+  passed (`16 passed`).
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m ruff check scripts/train_sports_b3.py vllatent/train/world_model_metrics.py tests/test_train_sports_b3.py tests/test_world_model_metrics.py`
+  passed.
 
 ---
 

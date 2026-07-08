@@ -129,7 +129,7 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.4 | replanned | AUTO/local | Old 0.95 AUROC probe retired as a hard blocker; use it only as a bug detector |
 | B3.4a | in_progress | AUTO local + USER-gated expansion | YOLO-standard cache cleanup, human-positive pre-clipping filter, and ski-first data expansion prep |
 | B3.5 | done | AUTO, verified 2026-07-08 | Depth-6 per-step conditioned world model code surface; B3.4a data gate still blocks B3.6 |
-| B3.6 | pending | AUTO/local, stop on OOM/blocker | Stage-1 local gates G1a-G1d |
+| B3.6 | blocked | AUTO/local, verified 2026-07-08 | Local depth-6 fits; G1 latent gates fail on existing active cache |
 | B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
 | B3.8 | pending | AUTO local, Orin later USER-gated | CEM/MPPI hindsight-replay planner eval |
 
@@ -425,6 +425,16 @@ term retained for world tokens. They are not new DINO class tokens.
 
 Run depth-6 with the smallest viable local batch. If batch=1 OOMs, stop and
 request an H20 gate instead of reducing depth as the serious B3 model.
+
+2026-07-08 status on existing active cache: local OOM is not the blocker. BF16
+batch=1 and batch=4 depth-6 training steps fit on the RTX 5060 Ti; batch=8 OOMed
+under current GPU load. B3.6 is blocked because the trained model does not beat
+person-weighted DINO latent persistence: source-split latent-focused 160-step
+run had `model_loss=0.163196` versus `persistence_loss=0.162633`, all per-step
+rollout comparisons lost to persistence, and true-plan preference stayed below
+chance. A 400-step tiny-overfit latent-focused run also remained worse than
+persistence on its own 16-window slice. This is an objective/data/conditioning
+blocker; do not proceed to B3.7/H20 from these results.
 
 - DoD: tiny overfit works; G1a/G1b/G1c/G1d pass locally or a precise blocker is
   recorded; K6 source-count trend is reported before paid scaling.
