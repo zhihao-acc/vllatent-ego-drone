@@ -32,6 +32,36 @@ def _log(msg: str) -> None:
     print(f"[youtube-pilot] {msg}", file=sys.stderr)
 
 
+def _find_existing_video(raw_dir: Path, clip_id: str) -> Path | None:
+    """Return the best existing video file for a clip, ignoring yt-dlp audio streams."""
+    candidates = list(raw_dir.glob(f"{clip_id}.*"))
+    exact_video_exts = {".mp4", ".mkv", ".avi", ".mov"}
+    webm_audio_formats = {".f249.webm", ".f250.webm", ".f251.webm"}
+
+    exact = sorted(
+        p for p in candidates
+        if p.stem == clip_id and p.suffix in {*exact_video_exts, ".webm"}
+    )
+    if exact:
+        return exact[0]
+
+    split_mp4 = sorted(
+        p for p in candidates
+        if p.suffix in exact_video_exts and ".f140." not in p.name
+    )
+    if split_mp4:
+        return split_mp4[0]
+
+    split_webm = sorted(
+        p for p in candidates
+        if p.suffix == ".webm" and not any(p.name.endswith(audio_suffix) for audio_suffix in webm_audio_formats)
+    )
+    if split_webm:
+        return split_webm[0]
+
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="YouTube pilot ingest (B1.7)")
     parser.add_argument("--clips", default="configs/sports_clips.yaml", help="Clips YAML")
@@ -87,10 +117,9 @@ def main(argv: list[str] | None = None) -> int:
 
         # --- Step 1: Download with SponsorBlock ---
         if not args.skip_download:
-            existing = list(raw_dir.glob(f"{clip_id}.*"))
-            video_exts = {".mp4", ".mkv", ".webm", ".avi", ".mov"}
-            if any(p.suffix in video_exts for p in existing):
-                _log("  already downloaded, skipping")
+            existing_video = _find_existing_video(raw_dir, clip_id)
+            if existing_video is not None:
+                _log(f"  already downloaded, skipping ({existing_video.name})")
             else:
                 _log("  downloading (SponsorBlock enabled)...")
                 try:
@@ -110,10 +139,8 @@ def main(argv: list[str] | None = None) -> int:
         # --- Step 2: Quick content filter (sample frames from video) ---
         clip_frames_dir = frames_dir / clip_id
         if not clip_frames_dir.exists() or not list(clip_frames_dir.glob("*.jpg")):
-            candidates = list(raw_dir.glob(f"{clip_id}.*"))
-            video_exts = {".mp4", ".mkv", ".webm", ".avi", ".mov"}
-            videos = [p for p in candidates if p.suffix in video_exts]
-            if not videos:
+            video_path = _find_existing_video(raw_dir, clip_id)
+            if video_path is None:
                 _log(f"  SKIP: no video file for {clip_id}")
                 results_summary.append({"clip_id": clip_id, "status": "no_video"})
                 continue
@@ -121,7 +148,7 @@ def main(argv: list[str] | None = None) -> int:
             try:
                 from vllatent.ingest.preprocess import extract_frames
                 extract_frames(
-                    videos[0], str(clip_frames_dir),
+                    video_path, str(clip_frames_dir),
                     target_fps=cfg.target_fps,
                     resolution_hw=(cfg.resolution_h, cfg.resolution_w),
                 )

@@ -16,6 +16,8 @@
 # Output: copies reconstructions/{clip_id}/ to {out_dir}/ for our ingest pipeline.
 set -euo pipefail
 
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 CLIP_ID=""
 FRAMES_DIR=""
 MEGASAM_DIR=""
@@ -100,7 +102,6 @@ echo "[megasam] Step 1 done."
 # Step 2: UniDepth (metric depth + FoV)
 echo ""
 echo "[megasam] === Step 2/3: UniDepth ==="
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 UNIDEPTH_WRAPPER="${SCRIPT_DIR}/megasam_shims/run_unidepth.py"
 export PYTHONPATH="${PYTHONPATH:-}:${MEGASAM_DIR}/UniDepth"
 CUDA_VISIBLE_DEVICES="$GPU" conda run -n "$CONDA_ENV" \

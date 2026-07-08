@@ -147,6 +147,45 @@ detector before considering B3.6.
 
 ---
 
+## 2026-07-08 — B3.4a MegaSaM ingest compatibility repair
+
+**Status:** B3.4a ski expansion remains USER-gated; do not start B3.5. The
+local MegaSaM path is repaired and verified on one real B3.4a subclip.
+
+**Diagnosis.** The `mega_sam` env had already been adapted for PyTorch
+`2.12.1+cu130`, but the 2026-07-07 `conda install -n mega_sam -c conda-forge
+imageio imageio-ffmpeg` changed the mixed conda/pip environment enough to expose
+NumPy/Torch ABI bridge failures. The breakpoints were not a wrong MegaSaM entry
+point: the intended path is still `scripts/run_megasam_pipeline.sh` ->
+`scripts/megasam_shims/run_unidepth.py` -> `nystrom_shim.py` ->
+`UniDepth/scripts/demo_mega-sam.py`.
+
+**Fixed.** Restored compatibility by avoiding fragile Torch/NumPy zero-copy
+handoffs in MegaSaM scripts: Depth-Anything image/depth conversions, UniDepth RGB
+and FoV/depth output conversion, Droid alpha/output-array conversion, and
+camera-tracking reconstruction save conversion now use scalar `.item()` or copied
+NumPy arrays. Also fixed `scripts/run_megasam_pipeline.sh` so `SCRIPT_DIR` is
+resolved before `cd "$MEGASAM_DIR"`, and `scripts/ingest_youtube_pilot.py` now
+chooses existing split yt-dlp video streams instead of audio-only `.f251.webm`
+when retrying with `--skip-download`.
+
+**Verification.**
+- `bash scripts/run_megasam_pipeline.sh --clip-id ski61_fpv03_c000 --frames-dir ingest_data/frames/ski61_fpv03_c000 --megasam-dir /home/zh/CODE/MegaSaM --gpu 0 --encoder vitl --out-dir ingest_data/frames/ski61_fpv03_c000_megasam --conda-env mega_sam`
+  passed: Step 1 Depth-Anything, Step 2 UniDepth, and Step 3 camera tracking
+  completed; copied `poses.npy`, `motion_prob.npy`, `intrinsics.npy`, and
+  `ski61_fpv03_c000_droid.npz`.
+- `parse_megasam_output("ingest_data/frames/ski61_fpv03_c000_megasam")` returned
+  `poses (21,4,4)`, `intrinsics (3,3)`, and real confidence `(21,)` in
+  `[0.984552, 0.996433]`.
+- `py_compile` passed for edited Python scripts; `bash -n
+  scripts/run_megasam_pipeline.sh` passed.
+
+**Next USER gate.** Retry the ski-300 ingest with `--skip-download` and then run
+the B3.4a T=8 screen. Keep B3.4a open until the user pastes the ingest summary
+and post-expansion screen totals.
+
+---
+
 ## 2026-07-07 — B3.4a YOLO-standard cleanup and human-positive filter
 
 **Status:** B3.4a is locally implemented through the cache-clean and pipeline
