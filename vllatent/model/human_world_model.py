@@ -82,6 +82,8 @@ class PlanConditionedLatentPredictor(nn.Module):
         n_temporal = history + 1 + horizon
         self.temporal_embed = nn.Parameter(torch.zeros(1, n_temporal, 1, dim))
         nn.init.trunc_normal_(self.temporal_embed, std=0.02)
+        self.patch_query_embed = nn.Parameter(torch.zeros(1, 1, patch_tokens, dim))
+        nn.init.trunc_normal_(self.patch_query_embed, std=0.02)
 
         self.output_norm = nn.LayerNorm(dim)
         self.residual_out = nn.Linear(dim, dim)
@@ -101,14 +103,13 @@ class PlanConditionedLatentPredictor(nn.Module):
     def _maybe_drop_plans(self, planned_actions: torch.Tensor) -> torch.Tensor:
         if not self.training or self.action_dropout_p <= 0.0:
             return planned_actions
-        keep_prob = 1.0 - self.action_dropout_p
         keep = torch.rand(
             planned_actions.shape[0],
             planned_actions.shape[1],
             1,
             device=planned_actions.device,
-        ) < keep_prob
-        return planned_actions * keep.to(dtype=planned_actions.dtype) / keep_prob
+        ) >= self.action_dropout_p
+        return planned_actions * keep.to(dtype=planned_actions.dtype)
 
     def _validate_inputs(
         self,
@@ -157,16 +158,12 @@ class PlanConditionedLatentPredictor(nn.Module):
         history_valid = history_mask.to(device=device, dtype=torch.bool)
         history = history * history_valid[:, :, None, None].to(dtype=history.dtype)
 
-        horizon_tokens = torch.zeros(
-            batch_size,
-            self.horizon,
-            self.n_patches,
-            self.dim,
-            device=device,
-            dtype=dtype,
-        )
         step_embed = self.plan_step_embed(plan) + self.dt_step_embed(dt)
-        horizon_tokens = horizon_tokens + step_embed[:, :, None, :]
+        horizon_tokens = (
+            current[:, None, :, :]
+            + self.patch_query_embed
+            + step_embed[:, :, None, :]
+        )
 
         all_frames = torch.cat([history, current.unsqueeze(1), horizon_tokens], dim=1)
         n_frames = all_frames.shape[1]

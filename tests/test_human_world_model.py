@@ -88,6 +88,35 @@ class TestPlanConditionedLatentPredictor:
         train_b = model(history, z_t, mask, plan, dt)
         assert not torch.allclose(train_a, train_b, atol=1e-7)
 
+    def test_action_dropout_does_not_scale_plan_valid_field(self) -> None:
+        model = PlanConditionedLatentPredictor(dim=32, depth=1, heads=4, horizon=8, action_dropout_p=0.5)
+        model.train()
+        plan = torch.ones(16, 8, PLAN_TOKEN_DIM)
+        torch.manual_seed(0)
+        dropped = model._maybe_drop_plans(plan)
+        assert torch.all((dropped[..., 5] == 0.0) | (dropped[..., 5] == 1.0))
+        assert torch.any(dropped[..., 5] == 0.0)
+
+    def test_residual_delta_is_patch_local(self) -> None:
+        model = PlanConditionedLatentPredictor(dim=32, depth=1, heads=4, horizon=8, dropout=0.0)
+        model.eval()
+        history, z_t, mask, plan, dt = _inputs(batch_size=1, dim=32, horizon=8)
+        with torch.no_grad():
+            out = model(history, z_t, mask, plan, dt)
+        delta = out - z_t.unsqueeze(1)
+        assert delta.std(dim=2).mean().item() > 1e-7
+
+    def test_zero_inputs_still_have_patch_local_residual_delta(self) -> None:
+        model = PlanConditionedLatentPredictor(dim=32, depth=1, heads=4, horizon=8, dropout=0.0)
+        model.eval()
+        history, z_t, mask, plan, dt = _inputs(batch_size=1, dim=32, horizon=8)
+        history.zero_()
+        z_t.zero_()
+        plan.zero_()
+        with torch.no_grad():
+            out = model(history, z_t, mask, plan, dt)
+        assert out.std(dim=2).mean().item() > 1e-7
+
 
 @pytest.mark.torch
 class TestHumanWorldModel:
@@ -117,4 +146,4 @@ class TestHumanWorldModel:
         model = HumanWorldModel(dim=768, depth=6, heads=12, horizon=8)
         n_params = count_parameters(model)
         assert 50_000_000 < n_params < 70_000_000
-        assert n_params == 58_931_722
+        assert n_params == 59_082_250

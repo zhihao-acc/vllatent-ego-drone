@@ -100,8 +100,8 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
 | B3.4 — Stage-0 probes plus K1/K2 | replanned | 2026-07-07 | Old 0.95 AUROC probe retired as a hard blocker; use it as a bug detector only |
 | B3.4a — YOLO-standard data cleanup and expansion prep | in_progress | 2026-07-07 | Add human-positive filter before auto clipping, then prepare ski-first user-gated expansion |
-| B3.5 — Depth-6 per-step conditioned world model | done | 2026-07-08 | AUTO code surface done under user override while B3.4a ingest remains open; exact wrapper params `58,931,722` |
-| B3.6 — Stage-1 local depth-6 gate | blocked | 2026-07-08 | Local depth-6 BF16 fits, but G1 latent gates fail even on tiny overfit; no H20 command because OOM is not the blocker |
+| B3.5 — Depth-6 per-step conditioned world model | done | 2026-07-08 | Patch-local future queries fixed; detector-visible person-state visibility target; exact wrapper params `59,082,250` |
+| B3.6 — Stage-1 local depth-6 gate | pending | — | Harness repaired; rerun only after B3.4a strict person-valid-window data cleanup |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
@@ -109,12 +109,61 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `supers
 
 ---
 
+## 2026-07-08 — B3.5/B3.6 replan and fixes from review findings
+
+**Status:** Findings 1, 4, and 5 are fixed locally. Findings 2 and 3 are
+explicitly deferred until the user-gated 300-clip expansion lands. Do not rerun
+B3.6 as a final gate until the old ~40 B3.4a clips are merged into the expanded
+set, old and new clips are re-ingested/YOLO-filtered, and training/evaluation can
+consume strict person-valid windows first.
+
+**Multi-agent design result.** A read-only research agent and review agent both
+confirmed finding 1: the initial B3 future tokens were patch-symmetric. The
+accepted design is to initialize each future token as current patch identity plus
+a learned patch query embedding plus per-step plan/dt embedding, then keep
+residual output as `z_t + delta`.
+
+**Fixed.**
+- `PlanConditionedLatentPredictor` future tokens now use patch-local queries:
+  `current[:,None,:,:] + patch_query_embed + step_embed[:, :, None, :]`.
+- Plan dropout now zeros dropped plan tokens instead of inverted-scaling semantic
+  fields such as `valid`.
+- `SportsTrainingDataset` builds `person_state_target[...,3]` from
+  detector-visible `target_person_visible`; center/log-height regression and
+  foreground patch weighting still use strict `target_person_state_valid`.
+- `scripts/train_sports_b3.py --overfit-tiny` evaluates the exact same limited
+  train indices and reports early/late loss-window means instead of first versus
+  last minibatch only.
+
+**Parameter count.** Depth-6, D=768, H=3, T=8 B3 wrapper is now `59,082,250`
+parameters after adding the learned `(1,1,196,768)` patch query.
+
+**Deferred.** After the 300-clip expansion lands: merge the current ~40 B3.4a ski
+clips into the expanded set, rerun ingest/YOLO filtering over the old ~40 clips
+and new clips, then patch training/evaluation to use strict person-valid windows
+first. Multi-subject ambiguity guards are deferred until after that strict-window
+filter is in place.
+
+**Verification.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_human_world_model.py tests/test_train_sports_b3.py tests/test_world_model_losses.py tests/test_sports_loader.py`
+  passed (`70 passed`).
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m ruff check vllatent/model/human_world_model.py scripts/train_sports_b3.py vllatent/data/sports_loader.py tests/test_human_world_model.py tests/test_train_sports_b3.py tests/test_world_model_losses.py tests/test_sports_loader.py`
+  passed.
+- Minimal harness smoke
+  `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python scripts/train_sports_b3.py --cache-dir ingest_data/latent_cache --run-dir reports/b3_stage1_smoke_patch_local --device cuda --batch-size 1 --max-steps 1 --eval-batches 1 --train-max-samples 2 --val-max-samples 2 --overfit-tiny --seed 13`
+  passed; it reported `params=59082250`, `overfit_eval_same_indices=true`,
+  and peak CUDA `1.188 GiB`. This was a smoke test only, not a B3.6 gate rerun.
+
+---
+
 ## 2026-07-08 — B3.6 local depth-6 gate and OOM audit
 
-**Status:** B3.6 is blocked on the Stage-1 latent gate, not on OOM. Do not move
-to B3.7/H20 from this result. The active cache was changing while the user-gated
-ski ingest ran (`214` to `217` usable clips during the B3.6 checks), so these are
-diagnostic existing-data results, not a frozen post-B3.4a screen.
+**Status:** This is retained as pre-fix evidence only. It proved local depth-6 is
+not OOM-bound, but it is not the final B3.6 gate because the B3.5 forward pass
+was later found to have patch-symmetric future tokens. Do not move to B3.7/H20
+from this result. The active cache was changing while the user-gated ski ingest
+ran (`214` to `217` usable clips during the B3.6 checks), so these are diagnostic
+existing-data results, not a frozen post-B3.4a screen.
 
 **OOM audit.** Local GPU is an RTX 5060 Ti with `16,311 MiB` total memory and
 BF16 support under `torch 2.12.0+cu130`. Depth-6 B3 batch probes:
@@ -151,11 +200,11 @@ preference rates.
   even on the same 16-window slice (`improvement_vs_persistence=-2.37%`; all
   per-step rollout comparisons lost to persistence).
 
-**Interpretation.** The current B3 model/loss path can optimize its scalar
-training objective locally, but it does not yet improve person-weighted DINO
-latent rollout over persistence. This points to an objective/conditioning target
-problem, or to needing the cleaned post-B3.4a expanded data, not to a local-memory
-problem. Do not send H20 until G1a/G1b/G1d can pass locally or the gate is
+**Interpretation.** Pre-fix result: the model/loss path could optimize its scalar
+training objective locally, but did not improve person-weighted DINO latent
+rollout over persistence. Finding 1 now explains one direct cause: future
+residual deltas were patch-symmetric. Do not send H20 until G1a/G1b/G1d can pass
+locally after the patch-local fix and strict-window data cleanup, or the gate is
 explicitly replanned.
 
 **Verification.**
@@ -187,8 +236,9 @@ background term, plus masked person-state and inverse-plan losses. Future
 latents/person labels/confidences/masks are accepted by loss functions only, not
 by model `forward`.
 
-**Parameter count.** Depth-6, D=768, H=3, T=8 B3 wrapper:
+**Pre-rework parameter count.** Depth-6, D=768, H=3, T=8 B3 wrapper:
 `58,931,722` parameters. Plan-conditioned predictor submodule: `58,532,352`.
+Superseded by the patch-local query rework above.
 
 **Verification.**
 - `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_human_world_model.py tests/test_world_model_losses.py tests/test_predictor.py`

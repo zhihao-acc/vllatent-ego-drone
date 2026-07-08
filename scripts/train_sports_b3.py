@@ -73,6 +73,33 @@ def limit_indices(indices: list[int], max_samples: int | None, *, seed: int) -> 
     return sorted(limited[:max_samples])
 
 
+def select_train_val_indices(
+    split: SplitIndices,
+    *,
+    train_max_samples: int | None,
+    val_max_samples: int | None,
+    overfit_tiny: bool,
+    seed: int,
+) -> tuple[list[int], list[int]]:
+    """Select train/val windows, with overfit-tiny evaluating the exact train slice."""
+    train_indices = limit_indices(split.train, train_max_samples, seed=seed)
+    if overfit_tiny:
+        return train_indices, list(train_indices)
+    return train_indices, limit_indices(split.val, val_max_samples, seed=seed + 1)
+
+
+def loss_window_improvement(losses: list[float], *, window: int = 5) -> tuple[float | None, float | None, float | None]:
+    """Compare mean early and late training losses for tiny-overfit reporting."""
+    if window < 1:
+        raise ValueError(f"window must be >= 1, got {window}")
+    if len(losses) < 2:
+        return None, None, None
+    n = min(window, len(losses))
+    initial = float(np.mean(losses[:n]))
+    final = float(np.mean(losses[-n:]))
+    return initial, final, (initial - final) / max(initial, 1e-8)
+
+
 def make_loader(
     dataset: SportsTrainingDataset,
     indices: list[int],
@@ -267,9 +294,13 @@ def main(argv: list[str] | None = None) -> int:
 
     dataset = SportsTrainingDataset(args.cache_dir, history=args.history, horizon=args.horizon, augment=False)
     split = source_split_indices(dataset.sample_sources, val_frac=args.val_frac, seed=args.seed)
-    train_indices = limit_indices(split.train, args.train_max_samples, seed=args.seed)
-    val_base = split.train if args.overfit_tiny else split.val
-    val_indices = limit_indices(val_base, args.val_max_samples, seed=args.seed + 1)
+    train_indices, val_indices = select_train_val_indices(
+        split,
+        train_max_samples=args.train_max_samples,
+        val_max_samples=args.val_max_samples,
+        overfit_tiny=args.overfit_tiny,
+        seed=args.seed,
+    )
 
     train_loader = make_loader(
         dataset,
@@ -309,6 +340,7 @@ def main(argv: list[str] | None = None) -> int:
     peak_gib = None
     if device.type == "cuda":
         peak_gib = float(torch.cuda.max_memory_allocated() / 1024**3)
+    initial_loss_mean, final_loss_mean, loss_improvement = loss_window_improvement(train_losses)
 
     report = {
         "mode": "overfit_tiny" if args.overfit_tiny else "source_split_gate",
@@ -340,11 +372,11 @@ def main(argv: list[str] | None = None) -> int:
             "steps_per_second": steps_per_second,
             "initial_loss": train_losses[0] if train_losses else None,
             "final_loss": train_losses[-1] if train_losses else None,
-            "tiny_overfit_loss_improvement": (
-                (train_losses[0] - train_losses[-1]) / max(train_losses[0], 1e-8)
-                if len(train_losses) >= 2
-                else None
-            ),
+            "initial_loss_mean": initial_loss_mean,
+            "final_loss_mean": final_loss_mean,
+            "loss_window_improvement": loss_improvement,
+            "tiny_overfit_loss_improvement": loss_improvement if args.overfit_tiny else None,
+            "overfit_eval_same_indices": bool(args.overfit_tiny and val_indices == train_indices),
             "peak_cuda_allocated_gib": peak_gib,
         },
         "stage1": metrics,

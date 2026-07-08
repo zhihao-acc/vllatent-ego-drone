@@ -32,6 +32,8 @@ def _make_clip_npz(
     domain: str | None = None,
     deltas_override: np.ndarray | None = None,
     include_person: bool = False,
+    person_visible_override: np.ndarray | None = None,
+    person_state_valid_override: np.ndarray | None = None,
 ) -> None:
     """Write a synthetic sports .npz clip."""
     rng = np.random.default_rng(0)
@@ -53,8 +55,14 @@ def _make_clip_npz(
             np.array([[0.5, 0.4, 0.2, 0.25]], dtype=np.float32),
             (n_frames, 1),
         )
-        extra["person_visible"] = np.ones(n_frames, dtype=bool)
+        extra["person_visible"] = (
+            np.ones(n_frames, dtype=bool)
+            if person_visible_override is None
+            else person_visible_override.astype(bool)
+        )
         extra["person_conf"] = np.full(n_frames, 0.75, dtype=np.float32)
+        if person_state_valid_override is not None:
+            extra["person_state_valid"] = person_state_valid_override.astype(bool)
     np.savez(
         str(path),
         latents=latents,
@@ -250,6 +258,19 @@ class TestSportsTrainingDataset:
         assert np.all(sample.target_person_state_valid)
         np.testing.assert_allclose(sample.target_person_bbox[0], [0.5, 0.4, 0.2, 0.25], atol=1e-6)
         assert sample.person_state_target[0, 2] == pytest.approx(np.log(0.25))
+
+    def test_person_state_visibility_uses_detector_visible_not_state_valid(self, tmp_path: Path) -> None:
+        _make_clip_npz(
+            tmp_path / "clip01.npz",
+            n_frames=20,
+            include_person=True,
+            person_visible_override=np.ones(20, dtype=bool),
+            person_state_valid_override=np.zeros(20, dtype=bool),
+        )
+        sample = SportsTrainingDataset(tmp_path)[3]
+        assert np.all(sample.target_person_visible)
+        assert not np.any(sample.target_person_state_valid)
+        assert np.all(sample.person_state_target[:, 3] == 1.0)
 
     def test_block_causal_mask_at_start(self, tmp_path: Path) -> None:
         _make_clip_npz(tmp_path / "clip01.npz", n_frames=20)

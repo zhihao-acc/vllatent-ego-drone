@@ -453,7 +453,7 @@ class SportsTrainingDataset:
                 [target_person_conf, np.zeros(pad_n, dtype=np.float32)],
                 axis=0,
             )
-        person_state_target = person_state_from_bbox(target_person_bbox, target_person_state_valid)
+        person_state_target = person_state_from_bbox(target_person_bbox, target_person_visible)
 
         target_v = np.zeros((self._horizon, DOF), dtype=np.float32)
         target_velocity_like = np.zeros((self._horizon, DOF), dtype=np.float32)

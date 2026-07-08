@@ -128,8 +128,8 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
 | B3.4 | replanned | AUTO/local | Old 0.95 AUROC probe retired as a hard blocker; use it only as a bug detector |
 | B3.4a | in_progress | AUTO local + USER-gated expansion | YOLO-standard cache cleanup, human-positive pre-clipping filter, and ski-first data expansion prep |
-| B3.5 | done | AUTO, verified 2026-07-08 | Depth-6 per-step conditioned world model code surface; B3.4a data gate still blocks B3.6 |
-| B3.6 | blocked | AUTO/local, verified 2026-07-08 | Local depth-6 fits; G1 latent gates fail on existing active cache |
+| B3.5 | done | AUTO, verified 2026-07-08 | Patch-local future queries and detector-visible person-state target semantics |
+| B3.6 | pending | AUTO/local, data-gated | Harness repaired; rerun local gates after B3.4a strict person-window data cleanup |
 | B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
 | B3.8 | pending | AUTO local, Orin later USER-gated | CEM/MPPI hindsight-replay planner eval |
 
@@ -395,6 +395,13 @@ cache before starting B3.5.
 - Test:
   `$PY -m pytest -q tests/test_content_filter.py tests/test_ingest_pipeline.py tests/test_person_tracking.py`
 - Deps: B3.4 replan. Blocks B3.5.
+- 2026-07-08 follow-up replan: after the user-gated 300-clip expansion lands,
+  merge the current ~40 B3.4a ski clips into the expanded candidate set, rerun
+  ingest/YOLO filtering over the old ~40 clips as well as new clips, then patch
+  training/evaluation to consume strict person-valid windows first. Multi-subject
+  ambiguity guards (`selected_track_id`, second-best track evidence, ambiguity
+  margin/window rejection) are deferred until after this strict-window training
+  filter is in place.
 
 ### B3.5 - Per-Step 6-D Conditioning In Depth-6 Predictor
 
@@ -402,21 +409,30 @@ Implement the B3 human world model with per-step plan FiLM/additive embeddings,
 action dropout `p=0.2`, per-step `dt`, residual latent output, person-state head,
 person-weighted latent loss, and inverse-dynamics 6-D auxiliary head.
 
-2026-07-08 status: implemented as the B3 torch-tier `HumanWorldModel` and
+2026-07-08 initial status: implemented as the B3 torch-tier `HumanWorldModel` and
 `PlanConditionedLatentPredictor` path. The model `forward` accepts only observed
 history/current latents, `history_mask`, `planned_actions (B,T,6)`, and
 `dt_seconds (B,T)`; future latents, person labels, confidences, and masks enter
-only the loss functions. The depth-6, D=768, H=3, T=8 B3 wrapper has exactly
-`58,931,722` parameters; the plan-conditioned predictor submodule has
-`58,532,352`.
+only the loss functions.
 
 YOLO/ByteTrack person labels are converted into bounded soft weights over the
 DINO `14x14` patch grid in `vllatent.train.world_model_losses`, with a background
 term retained for world tokens. They are not new DINO class tokens.
 
+2026-07-08 rework: fixed future-token patch symmetry. Future tokens are now
+patch-local queries initialized from current patch latents plus a learned
+`(1,1,196,D)` patch query embedding and per-step plan/dt embeddings. Residual
+output remains `z_t + delta`, and future labels remain absent from `forward`.
+Plan dropout now zeros dropped plan tokens instead of inverted-scaling the
+semantic `valid` field above `1`. Person-state target semantics are split:
+visibility target comes from detector-visible `person_visible`, while
+center/log-height regression and foreground patch weighting remain masked by
+strict `person_state_valid`. The depth-6, D=768, H=3, T=8 B3 wrapper now has
+exactly `59,082,250` parameters.
+
 - DoD: forward shapes pass for `T=8`; plan causality and plan sensitivity tests
-  pass; target latents/person labels are not accepted by `forward`; exact parameter
-  count is logged.
+  pass; residual deltas are patch-local rather than symmetric; target latents/person
+  labels are not accepted by `forward`; exact parameter count is logged.
 - Test:
   `$PY -m pytest -q tests/test_human_world_model.py tests/test_predictor.py tests/test_world_model_losses.py`
 - Deps: B3.3/B3.4a. Blocks B3.6.
@@ -426,7 +442,7 @@ term retained for world tokens. They are not new DINO class tokens.
 Run depth-6 with the smallest viable local batch. If batch=1 OOMs, stop and
 request an H20 gate instead of reducing depth as the serious B3 model.
 
-2026-07-08 status on existing active cache: local OOM is not the blocker. BF16
+2026-07-08 initial status on existing active cache: local OOM is not the blocker. BF16
 batch=1 and batch=4 depth-6 training steps fit on the RTX 5060 Ti; batch=8 OOMed
 under current GPU load. B3.6 is blocked because the trained model does not beat
 person-weighted DINO latent persistence: source-split latent-focused 160-step
@@ -435,6 +451,13 @@ rollout comparisons lost to persistence, and true-plan preference stayed below
 chance. A 400-step tiny-overfit latent-focused run also remained worse than
 persistence on its own 16-window slice. This is an objective/data/conditioning
 blocker; do not proceed to B3.7/H20 from these results.
+
+2026-07-08 rework: the initial B3.6 conclusion is retained as pre-fix evidence,
+but it is not the final B3.6 gate because B3.5 had patch-symmetric future tokens.
+The B3.6 harness now evaluates `--overfit-tiny` on the exact same limited
+training indices and reports early/late loss-window means instead of only first
+versus last minibatch. Rerun B3.6 after the user-gated B3.4a expansion lands and
+strict person-valid-window training/evaluation filtering is implemented.
 
 - DoD: tiny overfit works; G1a/G1b/G1c/G1d pass locally or a precise blocker is
   recorded; K6 source-count trend is reported before paid scaling.

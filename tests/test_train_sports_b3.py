@@ -3,7 +3,12 @@ from __future__ import annotations
 
 import pytest
 
-from scripts.train_sports_b3 import limit_indices, source_split_indices
+from scripts.train_sports_b3 import (
+    limit_indices,
+    loss_window_improvement,
+    select_train_val_indices,
+    source_split_indices,
+)
 
 
 def test_source_split_indices_splits_by_source() -> None:
@@ -30,3 +35,40 @@ def test_limit_indices_is_deterministic() -> None:
     assert a == b
     assert len(a) == 5
     assert set(a).issubset(indices)
+
+
+def test_overfit_tiny_validation_reuses_exact_train_indices() -> None:
+    split = source_split_indices(["a", "a", "b", "b", "c", "c", "d", "d"], val_frac=0.25, seed=0)
+    train_indices, val_indices = select_train_val_indices(
+        split,
+        train_max_samples=3,
+        val_max_samples=3,
+        overfit_tiny=True,
+        seed=5,
+    )
+    assert val_indices == train_indices
+
+
+def test_non_overfit_validation_stays_source_disjoint() -> None:
+    sources = ["a", "a", "b", "b", "c", "c", "d", "d"]
+    split = source_split_indices(sources, val_frac=0.25, seed=0)
+    train_indices, val_indices = select_train_val_indices(
+        split,
+        train_max_samples=None,
+        val_max_samples=None,
+        overfit_tiny=False,
+        seed=5,
+    )
+    assert {sources[i] for i in train_indices}.isdisjoint({sources[i] for i in val_indices})
+
+
+def test_loss_window_improvement_uses_window_means() -> None:
+    initial, final, improvement = loss_window_improvement([10.0, 6.0, 4.0, 2.0], window=2)
+    assert initial == pytest.approx(8.0)
+    assert final == pytest.approx(3.0)
+    assert improvement == pytest.approx(0.625)
+
+
+def test_loss_window_improvement_handles_short_runs() -> None:
+    assert loss_window_improvement([]) == (None, None, None)
+    assert loss_window_improvement([1.0]) == (None, None, None)

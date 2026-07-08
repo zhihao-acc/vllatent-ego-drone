@@ -85,6 +85,22 @@ class TestWorldModelLosses:
         loss.backward()
         assert pred.grad is not None
 
+    def test_person_state_loss_uses_visible_target_when_state_invalid(self) -> None:
+        target, valid, conf = _state(batch_size=1)
+        valid[:] = False
+        low_vis = target.clone()
+        high_vis = target.clone()
+        low_vis[..., 3] = -2.0
+        high_vis[..., 3] = 2.0
+        assert person_state_loss(high_vis, target, valid, conf) < person_state_loss(low_vis, target, valid, conf)
+
+        shifted = high_vis.clone()
+        shifted[..., :3] = 100.0
+        assert person_state_loss(shifted, target, valid, conf).item() == pytest.approx(
+            person_state_loss(high_vis, target, valid, conf).item(),
+            abs=1e-7,
+        )
+
     def test_inverse_plan_loss_masks_invalid_steps(self) -> None:
         pred = torch.zeros(1, 8, PLAN_TOKEN_DIM, requires_grad=True)
         target = torch.ones_like(pred)
