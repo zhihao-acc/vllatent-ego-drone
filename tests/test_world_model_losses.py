@@ -1,0 +1,125 @@
+"""Tests for B3 human world-model losses."""
+from __future__ import annotations
+
+import pytest
+
+torch = pytest.importorskip("torch")
+
+from vllatent.plan_tokens import PLAN_TOKEN_DIM  # noqa: E402
+from vllatent.schemas import PATCH_TOKENS  # noqa: E402
+from vllatent.train.world_model_losses import (  # noqa: E402
+    WorldModelLossOutput,
+    human_world_model_loss,
+    inverse_plan_loss,
+    person_patch_weights,
+    person_state_loss,
+    person_weighted_latent_loss,
+)
+
+
+def _state(batch_size: int = 2, horizon: int = 8):
+    state = torch.zeros(batch_size, horizon, 4)
+    state[..., 0] = 0.5
+    state[..., 1] = 0.5
+    state[..., 2] = torch.log(torch.full((batch_size, horizon), 0.25))
+    state[..., 3] = 1.0
+    valid = torch.ones(batch_size, horizon, dtype=torch.bool)
+    conf = torch.full((batch_size, horizon), 0.75)
+    return state, valid, conf
+
+
+@pytest.mark.torch
+class TestPersonPatchWeights:
+    def test_weights_shape_and_bounds(self) -> None:
+        state, valid, conf = _state()
+        weights = person_patch_weights(state, valid, conf)
+        assert weights.shape == (2, 8, PATCH_TOKENS)
+        assert torch.all(weights >= 0.0)
+        assert torch.all(weights <= 1.0)
+
+    def test_invalid_rows_are_zero(self) -> None:
+        state, valid, conf = _state(batch_size=1)
+        valid[:, 3:] = False
+        weights = person_patch_weights(state, valid, conf)
+        assert torch.any(weights[:, :3] > 0.0)
+        assert torch.allclose(weights[:, 3:], torch.zeros_like(weights[:, 3:]))
+
+    def test_center_weights_exceed_corner_weights(self) -> None:
+        state, valid, conf = _state(batch_size=1)
+        weights = person_patch_weights(state, valid, conf)
+        center_idx = 7 * 14 + 7
+        corner_idx = 0
+        assert torch.all(weights[..., center_idx] > weights[..., corner_idx])
+
+
+@pytest.mark.torch
+class TestWorldModelLosses:
+    def test_person_weighted_latent_loss_uses_background_when_no_valid_person(self) -> None:
+        pred = torch.randn(2, 8, PATCH_TOKENS, 16, requires_grad=True)
+        target = torch.randn(2, 8, PATCH_TOKENS, 16)
+        state, valid, conf = _state()
+        valid[:] = False
+        loss = person_weighted_latent_loss(pred, target, state, valid, conf)
+        assert loss.shape == ()
+        assert loss.item() > 0.0
+        loss.backward()
+        assert pred.grad is not None
+
+    def test_person_weight_changes_latent_loss(self) -> None:
+        pred = torch.zeros(1, 8, PATCH_TOKENS, 4)
+        target = torch.zeros_like(pred)
+        state, valid, conf = _state(batch_size=1)
+        center_idx = 7 * 14 + 7
+        target[:, :, center_idx] = 10.0
+        base = person_weighted_latent_loss(pred, target, state, valid, conf, person_weight=0.0)
+        weighted = person_weighted_latent_loss(pred, target, state, valid, conf, person_weight=4.0)
+        assert weighted > base
+
+    def test_person_state_loss_masks_center_but_trains_visibility(self) -> None:
+        target, valid, conf = _state(batch_size=1)
+        pred = target.clone().requires_grad_(True)
+        valid[:] = False
+        pred.data[..., 3] = -2.0
+        loss = person_state_loss(pred, target, valid, conf)
+        assert loss.item() > 0.0
+        loss.backward()
+        assert pred.grad is not None
+
+    def test_inverse_plan_loss_masks_invalid_steps(self) -> None:
+        pred = torch.zeros(1, 8, PLAN_TOKEN_DIM, requires_grad=True)
+        target = torch.ones_like(pred)
+        mask = torch.zeros(1, 8, dtype=torch.bool)
+        assert inverse_plan_loss(pred, target, mask).item() == pytest.approx(0.0, abs=1e-7)
+        mask[:, :2] = True
+        loss = inverse_plan_loss(pred, target, mask)
+        assert loss.item() > 0.0
+        loss.backward()
+        assert pred.grad is not None
+
+    def test_combined_loss_returns_components(self) -> None:
+        pred_lat = torch.randn(2, 8, PATCH_TOKENS, 16, requires_grad=True)
+        target_lat = torch.randn(2, 8, PATCH_TOKENS, 16)
+        pred_state = torch.randn(2, 8, 4, requires_grad=True)
+        state, valid, conf = _state()
+        pred_plan = torch.randn(2, 8, PLAN_TOKEN_DIM, requires_grad=True)
+        plan = torch.randn(2, 8, PLAN_TOKEN_DIM)
+        plan_valid = torch.ones(2, 8, dtype=torch.bool)
+
+        out = human_world_model_loss(
+            predicted_latents=pred_lat,
+            target_latents=target_lat,
+            predicted_person_state=pred_state,
+            person_state_target=state,
+            person_state_valid=valid,
+            predicted_plan=pred_plan,
+            planned_actions=plan,
+            planned_actions_valid_mask=plan_valid,
+            person_conf=conf,
+        )
+
+        assert isinstance(out, WorldModelLossOutput)
+        assert out.total.shape == ()
+        assert out.latent.shape == ()
+        assert out.person_state.shape == ()
+        assert out.inverse_plan.shape == ()
+        assert -1.0 <= out.latent_cosine.item() <= 1.0

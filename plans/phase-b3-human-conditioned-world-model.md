@@ -128,7 +128,7 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
 | B3.4 | replanned | AUTO/local | Old 0.95 AUROC probe retired as a hard blocker; use it only as a bug detector |
 | B3.4a | in_progress | AUTO local + USER-gated expansion | YOLO-standard cache cleanup, human-positive pre-clipping filter, and ski-first data expansion prep |
-| B3.5 | pending | AUTO | Depth-6 per-step conditioned world model |
+| B3.5 | done | AUTO, verified 2026-07-08 | Depth-6 per-step conditioned world model code surface; B3.4a data gate still blocks B3.6 |
 | B3.6 | pending | AUTO/local, stop on OOM/blocker | Stage-1 local gates G1a-G1d |
 | B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
 | B3.8 | pending | AUTO local, Orin later USER-gated | CEM/MPPI hindsight-replay planner eval |
@@ -401,6 +401,18 @@ cache before starting B3.5.
 Implement the B3 human world model with per-step plan FiLM/additive embeddings,
 action dropout `p=0.2`, per-step `dt`, residual latent output, person-state head,
 person-weighted latent loss, and inverse-dynamics 6-D auxiliary head.
+
+2026-07-08 status: implemented as the B3 torch-tier `HumanWorldModel` and
+`PlanConditionedLatentPredictor` path. The model `forward` accepts only observed
+history/current latents, `history_mask`, `planned_actions (B,T,6)`, and
+`dt_seconds (B,T)`; future latents, person labels, confidences, and masks enter
+only the loss functions. The depth-6, D=768, H=3, T=8 B3 wrapper has exactly
+`58,931,722` parameters; the plan-conditioned predictor submodule has
+`58,532,352`.
+
+YOLO/ByteTrack person labels are converted into bounded soft weights over the
+DINO `14x14` patch grid in `vllatent.train.world_model_losses`, with a background
+term retained for world tokens. They are not new DINO class tokens.
 
 - DoD: forward shapes pass for `T=8`; plan causality and plan sensitivity tests
   pass; target latents/person labels are not accepted by `forward`; exact parameter

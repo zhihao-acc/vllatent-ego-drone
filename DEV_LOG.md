@@ -100,12 +100,50 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
 | B3.4 — Stage-0 probes plus K1/K2 | replanned | 2026-07-07 | Old 0.95 AUROC probe retired as a hard blocker; use it as a bug detector only |
 | B3.4a — YOLO-standard data cleanup and expansion prep | in_progress | 2026-07-07 | Add human-positive filter before auto clipping, then prepare ski-first user-gated expansion |
-| B3.5 — Depth-6 per-step conditioned world model | pending | — | AUTO; per-step 6-D plan conditioning, person-state head, inverse-dynamics aux |
+| B3.5 — Depth-6 per-step conditioned world model | done | 2026-07-08 | AUTO code surface done under user override while B3.4a ingest remains open; exact wrapper params `58,931,722` |
 | B3.6 — Stage-1 local depth-6 gate | pending | — | AUTO/local; stop on OOM/blocker; report G1a-G1d and K6 |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `superseded`.
+
+---
+
+## 2026-07-08 — B3.5 human-conditioned world model code surface
+
+**Status:** B3.5 implementation is verified, but B3.4a remains open while the
+user-gated ski-300 ingest is still running. Do not start B3.6 until the ingest
+log is reviewed, expanded cache screening is recorded, and B3.4a status is
+closed or explicitly replanned.
+
+**Implemented.** Added the B3 torch-tier `HumanWorldModel` path:
+`PlanConditionedLatentPredictor` consumes observed history/current DINO latents,
+`history_mask`, `planned_actions (B,T,6)`, and `dt_seconds (B,T)`. It uses
+per-step plan FiLM plus additive plan embeddings, per-step dt FiLM/embeddings,
+action dropout `p=0.2`, block-causal future tokens, and residual latent output.
+The wrapper adds a person-state head `(cx, cy, log_h, visibility_logit)` and
+inverse-dynamics auxiliary head `(B,T,6)`.
+
+**Losses.** Added `vllatent.train.world_model_losses`: YOLO/ByteTrack labels
+become bounded soft foreground weights over the DINO `14x14` token grid with a
+background term, plus masked person-state and inverse-plan losses. Future
+latents/person labels/confidences/masks are accepted by loss functions only, not
+by model `forward`.
+
+**Parameter count.** Depth-6, D=768, H=3, T=8 B3 wrapper:
+`58,931,722` parameters. Plan-conditioned predictor submodule: `58,532,352`.
+
+**Verification.**
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m pytest -q tests/test_human_world_model.py tests/test_world_model_losses.py tests/test_predictor.py`
+  passed (`31 passed`).
+- `/home/zh/miniconda3/envs/vllatent-ego-drone/bin/python -m ruff check vllatent/model/human_world_model.py vllatent/train/world_model_losses.py tests/test_human_world_model.py tests/test_world_model_losses.py`
+  passed.
+
+**Next.** Wait for the user-gated ski-300 ingest to land. First inspect
+`reports/user_gate_logs/b34a_ski_ingest.log`; if it still shows missing
+`ffmpeg` extraction failures, stop with repair/re-run instructions. If new cache
+clips landed, run the B3.4a expanded screen and Stage-0 diagnostic only as a bug
+detector before considering B3.6.
 
 ---
 
