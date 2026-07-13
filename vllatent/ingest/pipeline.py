@@ -29,7 +29,7 @@ from vllatent.schemas import (
     PATCH_TOKENS,
 )
 
-MIN_SEGMENT_FRAMES = HISTORY + HORIZON + 1
+MIN_SEGMENT_FRAMES = HISTORY + HORIZON
 
 
 @dataclass(frozen=True)
@@ -57,6 +57,10 @@ def _build_clip_npz(
     person_visible: np.ndarray | None = None,
     person_state_valid: np.ndarray | None = None,
     person_conf: np.ndarray | None = None,
+    person_selected_track_id: int = -1,
+    person_second_best_track_id: int = -1,
+    person_subject_ambiguity_margin: float = 1.0,
+    person_subject_is_ambiguous: bool = False,
 ) -> dict[str, np.ndarray]:
     """Validate and return the arrays dict for a single segment's .npz."""
     from vllatent.ingest.person_tracking import (
@@ -105,6 +109,10 @@ def _build_clip_npz(
             person_state_valid=np.asarray(person_state_valid).astype(np.bool_),
         )
         person_state_valid = np.asarray(person_state_valid).astype(np.bool_) & computed_state_valid
+    if person_subject_is_ambiguous:
+        person_state_valid[:] = False
+    if not np.isfinite(person_subject_ambiguity_margin):
+        raise ValueError("person_subject_ambiguity_margin must be finite")
 
     return {
         "latents": latents.astype(LATENT_DTYPE),
@@ -117,22 +125,22 @@ def _build_clip_npz(
         "person_state_valid": person_state_valid.astype(np.bool_),
         "person_conf": person_conf.astype(np.float32),
         "person_bbox_space": np.array("encoder_crop"),
+        "person_selected_track_id": np.array(person_selected_track_id, dtype=np.int64),
+        "person_second_best_track_id": np.array(person_second_best_track_id, dtype=np.int64),
+        "person_subject_ambiguity_margin": np.array(person_subject_ambiguity_margin, dtype=np.float32),
+        "person_subject_is_ambiguous": np.array(person_subject_is_ambiguous, dtype=np.bool_),
     }
 
 
 def _passes_human_trackability_gate(person_state_valid: np.ndarray, *, history: int, horizon: int) -> bool:
     """Return whether a segment has at least one usable B3 person-state window."""
-    state_valid = np.asarray(person_state_valid).astype(np.bool_)
-    if state_valid.size < history + horizon + 1:
-        return False
-    for t in range(history - 1, state_valid.size - horizon):
-        hist = state_valid[t - history + 1 : t + 1]
-        fut = state_valid[t + 1 : t + 1 + horizon]
-        hist_ok = hist.size == history and float(np.mean(hist)) >= (2.0 / 3.0)
-        fut_ok = fut.size == horizon and float(np.mean(fut)) >= 0.5
-        if hist_ok and fut_ok:
-            return True
-    return False
+    from vllatent.ingest.person_tracking import strict_person_window_mask
+
+    return bool(np.any(strict_person_window_mask(
+        person_state_valid,
+        history=history,
+        horizon=horizon,
+    )))
 
 
 def _write_clip_npz(
@@ -240,6 +248,10 @@ def _process_segment(
         person_visible=person_tracks.person_visible[:n],
         person_state_valid=person_tracks.person_state_valid[:n],
         person_conf=person_tracks.person_conf[:n],
+        person_selected_track_id=person_tracks.selected_track_id,
+        person_second_best_track_id=person_tracks.second_best_track_id,
+        person_subject_ambiguity_margin=person_tracks.subject_ambiguity_margin,
+        person_subject_is_ambiguous=person_tracks.subject_is_ambiguous,
     )
 
     latent_rel = f"{segment_id}.npz"

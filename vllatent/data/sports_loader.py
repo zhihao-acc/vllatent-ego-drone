@@ -37,6 +37,7 @@ from vllatent.ingest.person_tracking import (
     PERSON_BBOX_DIM,
     person_state_from_bbox,
     person_tracks_from_cache,
+    strict_person_window_mask,
 )
 from vllatent.plan_tokens import plan_tokens_from_deltas
 from vllatent.scale_free_targets import (
@@ -303,6 +304,7 @@ class SportsTrainingDataset:
         norm_stats: NormStats | None = None,
         history: int = HISTORY,
         horizon: int = HORIZON,
+        strict_person_windows: bool = False,
     ) -> None:
         if history <= 0:
             raise ValueError(f"history must be > 0, got {history}")
@@ -313,6 +315,7 @@ class SportsTrainingDataset:
         self._rng = np.random.default_rng(42)
         self._history = int(history)
         self._horizon = int(horizon)
+        self._strict_person_windows = bool(strict_person_windows)
 
         npz_paths = self._discover_clips(clip_ids)
         if not npz_paths:
@@ -329,7 +332,7 @@ class SportsTrainingDataset:
         for p in npz_paths:
             clip = _load_clip(p)
             n_frames = clip["latents"].shape[0]
-            if n_frames < self._history + self._horizon + 1:
+            if n_frames < self._history + self._horizon:
                 continue
 
             ts = clip["timestamps"]
@@ -346,7 +349,7 @@ class SportsTrainingDataset:
             self._clip_person_tracks.append(person_tracks_from_cache(clip))
 
         if not self._clips:
-            raise ValueError("No clips with enough frames (need >= H+T+1)")
+            raise ValueError("No clips with enough frames (need >= H+T)")
 
         if norm_stats is not None:
             self._norm_stats = norm_stats
@@ -359,10 +362,23 @@ class SportsTrainingDataset:
         for clip_idx, clip in enumerate(self._clips):
             n = clip["latents"].shape[0]
             src = clip_source(self._clip_ids[clip_idx])
-            for t in range(n - self._horizon):
+            if self._strict_person_windows:
+                eligible = strict_person_window_mask(
+                    self._clip_person_tracks[clip_idx].person_state_valid,
+                    history=self._history,
+                    horizon=self._horizon,
+                )
+                anchors = np.flatnonzero(eligible)
+            else:
+                anchors = range(n - self._horizon)
+            for t in anchors:
                 self._samples.append((clip_idx, t))
                 self.sample_domains.append(self._clip_domains[clip_idx])
                 self.sample_sources.append(src)
+        if not self._samples:
+            if self._strict_person_windows:
+                raise ValueError("No strict person-valid windows found in cache")
+            raise ValueError("No training windows found in cache")
 
     def _discover_clips(self, clip_ids: list[str] | None) -> list[Path]:
         if clip_ids is not None:
@@ -386,6 +402,10 @@ class SportsTrainingDataset:
     def horizon(self) -> int:
         return self._horizon
 
+    @property
+    def strict_person_windows(self) -> bool:
+        return self._strict_person_windows
+
     def __len__(self) -> int:
         return len(self._samples)
 
@@ -399,7 +419,17 @@ class SportsTrainingDataset:
         if self._augment:
             n = clip["latents"].shape[0]
             jitter = self._rng.integers(-1, 2)
-            t = max(0, min(t + jitter, n - self._horizon - 1))
+            candidate_t = max(0, min(t + jitter, n - self._horizon - 1))
+            if not self._strict_person_windows:
+                t = candidate_t
+            else:
+                eligible = strict_person_window_mask(
+                    self._clip_person_tracks[clip_idx].person_state_valid,
+                    history=self._history,
+                    horizon=self._horizon,
+                )
+                if bool(eligible[candidate_t]):
+                    t = candidate_t
 
         latents = clip["latents"]
         z_t = latents[t]

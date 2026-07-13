@@ -28,7 +28,7 @@ def _clip_ids(cache_dir: Path, limit: int | None) -> list[str] | None:
     return [p.stem for p in sorted(cache_dir.glob("*.npz"))[:limit]]
 
 
-def main(argv: list[str] | None = None) -> int:
+def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-dir", required=True, help="Directory containing .npz latent caches")
     parser.add_argument("--horizon", type=int, default=8)
@@ -47,8 +47,18 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--token-batch-size", type=int, default=256)
     parser.add_argument("--token-lr", type=float, default=1e-3)
     parser.add_argument("--token-device", default="auto")
+    parser.add_argument(
+        "--strict-person-windows",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require full person_state_valid history and future for K1/K2 windows",
+    )
     parser.add_argument("--out", default=None, help="Optional JSON report path")
-    args = parser.parse_args(argv)
+    return parser.parse_args(argv)
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv)
 
     cache_dir = Path(args.cache_dir)
     clip_ids = _clip_ids(cache_dir, args.limit_clips)
@@ -89,6 +99,7 @@ def main(argv: list[str] | None = None) -> int:
         clip_ids=clip_ids,
         history=args.history,
         horizon=args.horizon,
+        strict_person_windows=args.strict_person_windows,
     )
     window_examples = collect_window_probe_examples(
         dataset,
@@ -114,6 +125,7 @@ def main(argv: list[str] | None = None) -> int:
         "cache_dir": str(cache_dir),
         "horizon": args.horizon,
         "history": args.history,
+        "strict_person_windows": args.strict_person_windows,
         "val_frac": args.val_frac,
         "seed": args.seed,
         "limit_clips": args.limit_clips,

@@ -98,14 +98,115 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.1 — Reviewed cleanup of irrelevant B1/B2 runnable code | done | 2026-07-07 | Removed obsolete B1/B2 runnable paths from reviewed list; fixed stale Makefile verifier target; active-reference scan and B3.1 tests passed |
 | B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; invalid/tiny visible boxes are sanitized; latest strict T=8 screen has 778 clips / 28 sources / 14,900 windows / 2,676 full-history person-valid |
 | B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
-| B3.4 — Stage-0 probes plus K1/K2 | replanned | 2026-07-07 | Old 0.95 AUROC probe retired as a hard blocker; use it as a bug detector only |
-| B3.4a — YOLO-standard data cleanup and expansion prep | in_progress | 2026-07-07 | Add human-positive filter before auto clipping, then prepare ski-first user-gated expansion |
+| B3.4 — Stage-0 probes plus K1/K2 | done | 2026-07-12 | Strict-window refire passed G0/K1/K2 on 1,100 clips; old 0.95 AUROC remains retired as a hard blocker |
+| B3.4a — YOLO-standard data cleanup and expansion prep | in_progress | 2026-07-12 | Strict cache is screened; legacy cache still lacks second-track ambiguity provenance |
 | B3.5 — Depth-6 per-step conditioned world model | done | 2026-07-08 | Patch-local future queries fixed; detector-visible person-state visibility target; exact wrapper params `59,082,250` |
-| B3.6 — Stage-1 local depth-6 gate | pending | — | Harness repaired; rerun only after B3.4a strict person-valid-window data cleanup |
+| B3.6 — Stage-1 local depth-6 gate | blocked | 2026-07-12 | Strict G1b passes, but held-out G1a/G1d fail because learned plan dependence remains near zero |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `superseded`.
+
+---
+
+## 2026-07-12 — B3.6 strict local gate blocked on plan dependence
+
+**Status:** B3.6 does not pass. The strict cache and patch-local B3.5 model now
+learn stable rollout improvements, but the source-held-out model does not use the
+true plan strongly enough to pass G1a or G1d. B3.7/H20 is not eligible.
+
+**Loader contract repair.** The strict screen correctly accepts an exact
+`H+T`-frame clip, but `SportsTrainingDataset` and future ingest still required
+`H+T+1`. Fixed that off-by-one in the loader and `MIN_SEGMENT_FRAMES`; the final
+training view is now all `1,100` clips / `100` sources / `12,499` strict windows.
+
+**Tiny overfit.** Batch `2`, `16` exact train/eval windows, `400` steps, seed
+`0`: training loss improved `42.20%`; model beat persistence by `14.34%`; G1b
+passed at every `k<=8`. It still missed plan gates: only `1.83%` better than
+null, true beat shuffled on `68.75%` and flipped on `100%` of windows. Report:
+`reports/b3_stage1_overfit_strict_b34a_local/metrics.json`.
+
+**Source-held-out gate.** Batch `4`, `1,024` train windows, `512` validation
+windows from disjoint sources, seed `0`:
+- At `800` steps with inverse-plan weight `0.01`, model beat persistence by
+  `3.38%` and G1b passed, but was `0.44%` worse than null; true beat shuffled on
+  `42.58%` and flipped on `54.10%` of windows.
+- The approved-recipe inverse-plan weight `0.5` made the result worse: model was
+  `5.16%` worse than persistence and `4.60%` worse than null; G1b also failed.
+  This confirms that reconstructing the injected plan from already
+  plan-conditioned predicted latents is not a useful conditioning constraint.
+- At `2,400` steps with weight `0.01`, model beat persistence by `3.61%` and G1b
+  again passed at all eight steps, but was `0.83%` worse than null; true beat
+  shuffled on `42.58%` and flipped on `59.77%`. The 3x budget did not improve
+  plan separation, ruling out the 800-step result as simple undertraining.
+
+Reports:
+`reports/b3_stage1_source_gate_strict_b34a_local/metrics.json`,
+`reports/b3_stage1_source_gate_strict_b34a_inverse05_local/metrics.json`, and
+`reports/b3_stage1_source_gate_strict_b34a_2400_local/metrics.json`.
+
+**Gate decision.** G1a fails (`>=10%` persistence and `>=5%` null required),
+G1b passes under the better objective, and G1d fails (`>=70%` shuffled and
+flipped required). K6 scaling and B3.7 are ineligible while G1a/G1d fail. The
+next iteration must be an objective/conditioning replan, not more capacity,
+paid scaling, or a broad hyperparameter sweep.
+
+**Verification.** B3.6 model/metric tests passed (`24 passed`); the loader,
+ingest, model, metric, and harness regression set passed (`100 passed`); Ruff and
+`git diff --check` passed. No dataset files changed during B3.6.
+
+---
+
+## 2026-07-12 — B3.4 strict-window G0/K1/K2 pass
+
+**Status:** B3.4 is done as a Stage-0 bug/data diagnostic. The strict-window
+refire passed G0, K1, and K2. Stop here before B3.6 until the remaining legacy
+multi-subject ambiguity limitation is explicitly dispositioned.
+
+**Active cache.** The retained training cache has `1,100` NPZ clips from `100`
+sources, `37,171` DINO-encoded frames, and `12,499` exact `H=3,T=8`
+full-history/full-future `person_state_valid` windows. The strict screen reports
+zero clips without a strict window and zero duplicate-frame runs. A read-only
+full-cache audit found no shape, dtype, finite-value, or required latent/motion
+array errors. All `1,100` clips contain YOLO/ByteTrack bbox, visibility, and
+confidence labels. Of these, `949` store `person_state_valid`; the older `151`
+derive it conservatively at load time.
+
+**Data-loss record.** During disk cleanup, all extracted pixel frames and
+MegaSaM working/reconstruction outputs were removed, as were `423` NPZ clips
+that had zero strict windows. Raw sources `280` through `358` were removed;
+about `12 GiB` of earlier raw video remains. The deletion exceeded the intended
+scope. Do not perform further dataset deletion. The retained NPZ cache remains
+trainable, but pixel-level re-encoding and retrospective label repair require
+frame regeneration.
+
+**Strict-window wiring.** `scripts/train_sports_b3.py` defaults to strict person
+windows. `scripts/run_stage0_gates.py` now does the same for K1/K2 and records
+`strict_person_windows` in its report. G0 remains frame-level by design: presence
+uses `person_visible`, while center/log-height metrics use only
+`person_state_valid` frames.
+
+**Verified strict refire.** Report:
+`reports/stage0_gates_T8_token_b34a_expanded.json`.
+- G0: presence AUROC `0.691211`, center L2 `0.116126`, center L1 `0.073116`,
+  log-height MAE `0.167056`.
+- K1: plan-only R2 `-0.004226`, plan-only MSE `0.019393` versus zero MSE
+  `0.019311`; `9,600` train and `2,897` validation windows.
+- K2: conditioned delta MSE `0.017484` versus persistence `0.019311`, a
+  `9.463%` improvement.
+- Combined decision: `g0_pass=true`, `k1_pass=true`, `k2_pass=true`,
+  `passed=true`.
+
+**Residual limitation.** All `1,100` retained NPZs predate selected-track ID,
+second-best-track ID, and ambiguity-margin storage. Their multi-subject ambiguity
+status is therefore unknown and cannot be reconstructed from cached selected
+boxes alone. Future ingest/backfill code now stores this provenance and rejects
+concurrently plausible subjects, but applying it retroactively requires
+regenerated frames.
+
+**Verification.** Focused Stage-0/person/loader/ingest/B3 tests passed (`120
+passed`); Ruff and `git diff --check` passed. No dataset or generated report was
+committed.
 
 ---
 

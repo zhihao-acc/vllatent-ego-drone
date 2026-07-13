@@ -500,6 +500,52 @@ class TestDomainPlumbing:
         assert ds.sample_sources.count("cand05") == 20 - HORIZON
 
 
+class TestStrictPersonWindows:
+    def test_accepts_exact_history_plus_horizon_frames(self, tmp_path: Path) -> None:
+        _make_clip_npz(
+            tmp_path / "ski03_fpv00_c000.npz",
+            n_frames=HISTORY + HORIZON,
+            include_person=True,
+        )
+
+        ds = SportsTrainingDataset(tmp_path, strict_person_windows=True)
+
+        assert len(ds) == 1
+        assert ds._samples == [(0, HISTORY - 1)]
+
+    def test_requires_full_history_and_full_future(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "ski03_fpv00_c000.npz", n_frames=20, include_person=True)
+
+        ds = SportsTrainingDataset(tmp_path, strict_person_windows=True)
+
+        assert len(ds) == 20 - HISTORY - HORIZON + 1
+        assert [t for _, t in ds._samples] == list(range(HISTORY - 1, 20 - HORIZON))
+        for sample in (ds[0], ds[len(ds) - 1]):
+            assert np.all(sample.history_mask)
+            assert np.all(sample.history_person_state_valid)
+            assert np.all(sample.target_person_state_valid)
+
+    def test_excludes_every_window_touching_an_invalid_person_frame(self, tmp_path: Path) -> None:
+        state_valid = np.ones(20, dtype=np.bool_)
+        state_valid[5] = False
+        _make_clip_npz(
+            tmp_path / "ski03_fpv00_c000.npz",
+            n_frames=20,
+            include_person=True,
+            person_state_valid_override=state_valid,
+        )
+
+        ds = SportsTrainingDataset(tmp_path, strict_person_windows=True)
+
+        assert [t for _, t in ds._samples] == list(range(8, 20 - HORIZON))
+
+    def test_rejects_cache_without_any_strict_person_window(self, tmp_path: Path) -> None:
+        _make_clip_npz(tmp_path / "ski03_fpv00_c000.npz", n_frames=20)
+
+        with pytest.raises(ValueError, match="strict person-valid windows"):
+            SportsTrainingDataset(tmp_path, strict_person_windows=True)
+
+
 class TestImportPurity:
     def test_no_torch_at_module_level(self) -> None:
         import ast

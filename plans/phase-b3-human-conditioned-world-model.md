@@ -126,10 +126,10 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.1 | done | AUTO, verified 2026-07-07 | Cleanup obsolete B1/B2 runnable paths |
 | B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill, bad-source deletion, and data screens |
 | B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
-| B3.4 | replanned | AUTO/local | Old 0.95 AUROC probe retired as a hard blocker; use it only as a bug detector |
+| B3.4 | done | AUTO/local, verified 2026-07-12 | Strict-window G0/K1/K2 diagnostic passed |
 | B3.4a | in_progress | AUTO local + USER-gated expansion | YOLO-standard cache cleanup, human-positive pre-clipping filter, and ski-first data expansion prep |
 | B3.5 | done | AUTO, verified 2026-07-08 | Patch-local future queries and detector-visible person-state target semantics |
-| B3.6 | pending | AUTO/local, data-gated | Harness repaired; rerun local gates after B3.4a strict person-window data cleanup |
+| B3.6 | blocked | AUTO/local, verified 2026-07-12 | G1b passes; held-out G1a/G1d fail on weak plan dependence |
 | B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
 | B3.8 | pending | AUTO local, Orin later USER-gated | CEM/MPPI hindsight-replay planner eval |
 
@@ -371,7 +371,15 @@ Run K1 causality and K2 tiny conditioned person-state predictor versus persisten
   token probes and stricter label-quality/source-volume filters did not produce
   an honest `0.95` held-out AUROC on the current cache, so the next work is
   upstream label/data replacement rather than AUROC tuning.
-- Deps: B3.2/B3.3. Blocks B3.5/B3.6.
+- Strict-window refire 2026-07-12: `scripts/run_stage0_gates.py` now defaults
+  K1/K2 to full `H=3,T=8` `person_state_valid` windows and records that setting.
+  On the retained 1,100-clip / 100-source cache, G0 passed with presence AUROC
+  `0.6912`, center L2 `0.1161`, center L1 `0.0731`, and log-height MAE `0.1671`;
+  K1 passed with plan-only R2 `-0.00423`; K2 passed with `9.46%` delta-MSE
+  improvement over persistence. Combined decision passed. This completes B3.4
+  as a bug/data diagnostic; it does not claim that legacy multi-subject
+  ambiguity was audited.
+- Deps: B3.2/B3.3. Blocks B3.6.
 
 ### B3.4a - YOLO-Standard Data Cleanup And Expansion Prep
 
@@ -458,6 +466,19 @@ The B3.6 harness now evaluates `--overfit-tiny` on the exact same limited
 training indices and reports early/late loss-window means instead of only first
 versus last minibatch. Rerun B3.6 after the user-gated B3.4a expansion lands and
 strict person-valid-window training/evaluation filtering is implemented.
+
+2026-07-12 strict rerun: repaired the `H+T+1` loader/ingest off-by-one so all
+1,100 clips and 12,499 strict windows enter training. Tiny overfit now beats
+persistence by `14.34%` and G1b passes at every step, but it remains only `1.83%`
+better than null and misses shuffled-plan preference at `68.75%`. On a fixed
+source-disjoint 1,024-train/512-validation split, the 800-step model beats
+persistence by only `3.38%`, is `0.44%` worse than null, and beats shuffled/
+flipped plans on `42.58%`/`54.10%`. Raising inverse-plan weight from `0.01` to
+the research-recipe `0.5` worsens all gates. Extending the better objective to
+2,400 steps leaves plan separation flat (`3.61%` over persistence, `0.83%`
+worse than null, `42.58%`/`59.77%` shuffled/flipped), while G1b still passes at
+all eight steps. B3.6 is blocked on objective/conditioning; B3.7/H20 is not
+eligible.
 
 - DoD: tiny overfit works; G1a/G1b/G1c/G1d pass locally or a precise blocker is
   recorded; K6 source-count trend is reported before paid scaling.

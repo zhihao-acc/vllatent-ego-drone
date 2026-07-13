@@ -82,6 +82,84 @@ def test_select_subject_marks_zero_area_crop_box_invisible() -> None:
     np.testing.assert_allclose(result.person_bbox, np.zeros((2, 4), dtype=np.float32))
 
 
+def test_select_subject_rejects_concurrently_plausible_second_track() -> None:
+    detections = []
+    for frame_idx in range(5):
+        detections.extend(
+            [
+                TrackedDetection(
+                    frame_idx, 11, np.array([35, 35, 55, 65], dtype=np.float32), 0.85
+                ),
+                TrackedDetection(
+                    frame_idx, 22, np.array([45, 35, 65, 65], dtype=np.float32), 0.84
+                ),
+            ]
+        )
+
+    result = select_subject_track(detections, n_frames=5, image_hw=(100, 100))
+
+    assert result.selected_track_id in {11, 22}
+    assert result.second_best_track_id in {11, 22}
+    assert result.selected_track_id != result.second_best_track_id
+    assert result.subject_is_ambiguous
+    assert result.subject_ambiguity_margin < 0.2
+    assert not np.any(result.person_state_valid)
+
+
+def test_select_subject_keeps_clear_track_when_runner_up_is_short() -> None:
+    detections = [
+        TrackedDetection(i, 11, np.array([35, 35, 55, 65], dtype=np.float32), 0.85)
+        for i in range(5)
+    ]
+    detections.append(TrackedDetection(0, 22, np.array([45, 35, 65, 65], dtype=np.float32), 0.84))
+
+    result = select_subject_track(detections, n_frames=5, image_hw=(100, 100))
+
+    assert result.selected_track_id == 11
+    assert result.second_best_track_id == 22
+    assert not result.subject_is_ambiguous
+    assert result.subject_ambiguity_margin > 0.2
+    assert np.all(result.person_state_valid)
+
+
+def test_select_subject_does_not_confuse_non_overlapping_track_fragments_with_two_subjects() -> None:
+    detections = [
+        TrackedDetection(i, 11, np.array([35, 35, 55, 65], dtype=np.float32), 0.85)
+        for i in range(3)
+    ]
+    detections.extend(
+        TrackedDetection(i, 22, np.array([45, 35, 65, 65], dtype=np.float32), 0.84)
+        for i in range(3, 6)
+    )
+
+    result = select_subject_track(detections, n_frames=6, image_hw=(100, 100))
+
+    assert not result.subject_is_ambiguous
+    assert result.provenance["second_best_covisible_frames"] == 0
+
+
+def test_select_subject_checks_all_covisible_runners_up() -> None:
+    detections = [
+        TrackedDetection(i, 11, np.array([35, 35, 55, 65], dtype=np.float32), 0.85)
+        for i in range(6)
+    ]
+    detections.extend(
+        TrackedDetection(i, 22, np.array([40, 35, 60, 65], dtype=np.float32), 0.84)
+        for i in range(6, 11)
+    )
+    detections.extend(
+        TrackedDetection(i, 33, np.array([45, 35, 65, 65], dtype=np.float32), 0.84)
+        for i in range(5)
+    )
+
+    result = select_subject_track(detections, n_frames=11, image_hw=(100, 100))
+
+    assert result.selected_track_id == 11
+    assert result.second_best_track_id == 33
+    assert result.subject_is_ambiguous
+    assert not np.any(result.person_state_valid)
+
+
 def test_encoder_crop_bbox_conversion_for_wide_frame() -> None:
     # 1280x720 crops to x=[280,1000], y=[0,720] before DINO resize.
     bbox = xyxy_to_encoder_crop_cxcywh(np.array([280, 180, 1000, 540], dtype=np.float32), (720, 1280))
@@ -177,10 +255,10 @@ def test_accel_outlier_flags_from_deltas_flags_spike() -> None:
     assert np.any(flags)
 
 
-def test_screen_clip_arrays_counts_person_valid_windows() -> None:
-    latents = np.ones((10, 2, 2), dtype=np.float32)
-    deltas = np.ones((9, 4), dtype=np.float32)
-    visible = np.array([False, True, True, True, True, True, False, False, False, False])
+def test_screen_clip_arrays_counts_only_full_valid_windows() -> None:
+    latents = np.ones((7, 2, 2), dtype=np.float32)
+    deltas = np.ones((6, 4), dtype=np.float32)
+    visible = np.ones(7, dtype=np.bool_)
     report = screen_clip_arrays(
         latents=latents,
         deltas=deltas,
@@ -188,10 +266,26 @@ def test_screen_clip_arrays_counts_person_valid_windows() -> None:
         history=3,
         horizon=4,
     )
-    assert report.n_frames == 10
-    assert report.n_windows == 6
-    assert report.person_visible_frames == 5
-    assert report.person_valid_windows >= 1
+    assert report.n_frames == 7
+    assert report.n_windows == 3
+    assert report.person_visible_frames == 7
+    assert report.person_valid_windows == 1
+
+
+def test_screen_clip_arrays_rejects_partial_future_validity() -> None:
+    latents = np.ones((7, 2, 2), dtype=np.float32)
+    deltas = np.ones((6, 4), dtype=np.float32)
+    state_valid = np.ones(7, dtype=np.bool_)
+    state_valid[-1] = False
+    report = screen_clip_arrays(
+        latents=latents,
+        deltas=deltas,
+        person_visible=np.ones(7, dtype=np.bool_),
+        person_state_valid=state_valid,
+        history=3,
+        horizon=4,
+    )
+    assert report.person_valid_windows == 0
 
 
 def test_screen_cache_dir_reports_clip_window_source_counts(tmp_path: Path) -> None:
@@ -210,13 +304,23 @@ def test_screen_cache_dir_reports_clip_window_source_counts(tmp_path: Path) -> N
         person_bbox=bbox,
         person_visible=visible,
         person_conf=conf,
+        person_selected_track_id=np.array(11, dtype=np.int64),
+        person_second_best_track_id=np.array(22, dtype=np.int64),
+        person_subject_ambiguity_margin=np.array(0.4, dtype=np.float32),
+        person_subject_is_ambiguous=np.array(False, dtype=np.bool_),
     )
     report = screen_cache_dir(tmp_path, history=3, horizon=4)
     assert report["totals"]["clips"] == 1
     assert report["totals"]["windows"] == 6
     assert report["totals"]["sources"] == 1
+    assert report["totals"]["subject_ambiguity_known_clips"] == 1
+    assert report["totals"]["subject_ambiguity_unknown_clips"] == 0
+    assert report["totals"]["subject_ambiguous_clips"] == 0
     assert report["sources"]["ski03"]["clips"] == 1
     assert report["clips"][0]["clip_id"] == "ski03_fpv00_c000"
+    assert report["clips"][0]["subject_ambiguity_known"]
+    assert report["clips"][0]["selected_track_id"] == 11
+    assert report["clips"][0]["second_best_track_id"] == 22
 
 
 def test_screen_cache_dir_reports_person_label_qc(tmp_path: Path) -> None:
@@ -242,8 +346,10 @@ def test_screen_cache_dir_reports_person_label_qc(tmp_path: Path) -> None:
     assert report["totals"]["person_invalid_visible_frames"] == 1
     assert report["totals"]["person_tiny_visible_frames"] == 1
     assert report["totals"]["person_edge_visible_frames"] == 1
+    assert report["totals"]["subject_ambiguity_unknown_clips"] == 1
     assert "person_label_qc" in report["clips"][0]
     assert "person_invalid_labels" in report["clips"][0]["flags"]
+    assert "subject_ambiguity_unknown" in report["clips"][0]["flags"]
 
 
 def test_backfill_writes_encoder_crop_bbox_space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:

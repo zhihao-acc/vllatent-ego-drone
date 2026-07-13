@@ -272,6 +272,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--lambda-inverse-plan", type=float, default=0.01)
     parser.add_argument("--history", type=int, default=HISTORY)
     parser.add_argument("--horizon", type=int, default=8)
+    parser.add_argument(
+        "--strict-person-windows",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Require full person_state_valid history and future supervision",
+    )
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--no-amp", action="store_true")
     parser.add_argument("--overfit-tiny", action="store_true", help="Use the train subset for validation")
@@ -292,7 +298,13 @@ def main(argv: list[str] | None = None) -> int:
     if device.type == "cuda" and not torch.cuda.is_available():
         raise RuntimeError("CUDA requested but torch.cuda.is_available() is false")
 
-    dataset = SportsTrainingDataset(args.cache_dir, history=args.history, horizon=args.horizon, augment=False)
+    dataset = SportsTrainingDataset(
+        args.cache_dir,
+        history=args.history,
+        horizon=args.horizon,
+        augment=False,
+        strict_person_windows=args.strict_person_windows,
+    )
     split = source_split_indices(dataset.sample_sources, val_frac=args.val_frac, seed=args.seed)
     train_indices, val_indices = select_train_val_indices(
         split,
@@ -349,6 +361,7 @@ def main(argv: list[str] | None = None) -> int:
             "clips": len(dataset._clip_ids),
             "sources": len(set(dataset.sample_sources)),
             "windows": len(dataset),
+            "strict_person_windows": dataset.strict_person_windows,
             "train_windows": len(train_indices),
             "val_windows": len(val_indices),
             "train_sources": split.train_sources,

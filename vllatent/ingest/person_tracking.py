@@ -16,6 +16,10 @@ PERSON_BBOX_KEY = "person_bbox"
 PERSON_VISIBLE_KEY = "person_visible"
 PERSON_STATE_VALID_KEY = "person_state_valid"
 PERSON_CONF_KEY = "person_conf"
+PERSON_SELECTED_TRACK_ID_KEY = "person_selected_track_id"
+PERSON_SECOND_BEST_TRACK_ID_KEY = "person_second_best_track_id"
+PERSON_SUBJECT_AMBIGUITY_MARGIN_KEY = "person_subject_ambiguity_margin"
+PERSON_SUBJECT_IS_AMBIGUOUS_KEY = "person_subject_is_ambiguous"
 PERSON_BBOX_SPACE_KEY = "person_bbox_space"
 PERSON_BBOX_SPACE_ENCODER_CROP = "encoder_crop"
 PERSON_BBOX_SPACE_RAW_FRAME = "raw_frame"
@@ -30,6 +34,9 @@ PERSON_TRACKABLE_MIN_RUN = 3
 PERSON_TRACK_CLASSES = ("person", "skier", "snowboarder")
 PERSON_TRACKER_ID = "yolov8s-worldv2.pt+bytetrack"
 PERSON_TRACK_CONFIDENCE = 0.15
+PERSON_SUBJECT_AMBIGUITY_MARGIN_MIN = 0.20
+PERSON_SUBJECT_MIN_COVISIBLE_FRAMES = 3
+PERSON_SUBJECT_MIN_COVISIBLE_RATIO = 0.25
 
 
 @dataclass(frozen=True)
@@ -51,6 +58,10 @@ class PersonTrackResult:
     person_state_valid: np.ndarray
     person_conf: np.ndarray
     provenance: dict[str, Any]
+    selected_track_id: int = -1
+    second_best_track_id: int = -1
+    subject_ambiguity_margin: float = 1.0
+    subject_is_ambiguous: bool = False
 
 
 @dataclass(frozen=True)
@@ -215,6 +226,32 @@ def person_trackable_mask(
     return _keep_runs(trackable, min_run=min_run)
 
 
+def strict_person_window_mask(
+    person_state_valid: np.ndarray,
+    *,
+    history: int,
+    horizon: int,
+) -> np.ndarray:
+    """Return anchor-frame mask requiring full valid person history and future."""
+    if history <= 0:
+        raise ValueError(f"history must be > 0, got {history}")
+    if horizon <= 0:
+        raise ValueError(f"horizon must be > 0, got {horizon}")
+    state_valid = np.asarray(person_state_valid).astype(np.bool_)
+    n_windows = max(0, state_valid.size - horizon)
+    valid_windows = np.zeros(n_windows, dtype=np.bool_)
+    for t in range(history - 1, n_windows):
+        hist = state_valid[t - history + 1 : t + 1]
+        fut = state_valid[t + 1 : t + 1 + horizon]
+        valid_windows[t] = bool(
+            hist.size == history
+            and fut.size == horizon
+            and np.all(hist)
+            and np.all(fut)
+        )
+    return valid_windows
+
+
 def sanitize_person_track_arrays(
     *,
     person_bbox: np.ndarray,
@@ -270,6 +307,21 @@ def person_tracks_from_cache(clip: dict[str, np.ndarray]) -> PersonTrackResult:
         state_valid &= person_trackable_mask(bbox, visible)
     else:
         state_valid = person_trackable_mask(bbox, visible)
+    ambiguity_known = all(
+        key in clip
+        for key in (
+            PERSON_SELECTED_TRACK_ID_KEY,
+            PERSON_SECOND_BEST_TRACK_ID_KEY,
+            PERSON_SUBJECT_AMBIGUITY_MARGIN_KEY,
+            PERSON_SUBJECT_IS_AMBIGUOUS_KEY,
+        )
+    )
+    selected_track_id = int(np.asarray(clip.get(PERSON_SELECTED_TRACK_ID_KEY, -1)).item())
+    second_best_track_id = int(np.asarray(clip.get(PERSON_SECOND_BEST_TRACK_ID_KEY, -1)).item())
+    ambiguity_margin = float(np.asarray(clip.get(PERSON_SUBJECT_AMBIGUITY_MARGIN_KEY, 1.0)).item())
+    subject_is_ambiguous = bool(np.asarray(clip.get(PERSON_SUBJECT_IS_AMBIGUOUS_KEY, False)).item())
+    if subject_is_ambiguous:
+        state_valid[:] = False
     return PersonTrackResult(
         person_bbox=bbox,
         person_visible=visible,
@@ -280,7 +332,12 @@ def person_tracks_from_cache(clip: dict[str, np.ndarray]) -> PersonTrackResult:
             "sanitized_invisible_frames": raw_visible - int(np.sum(visible)),
             "computed_state_valid_frames": int(np.sum(state_valid)),
             "state_valid_source": "cache" if PERSON_STATE_VALID_KEY in clip else "computed",
+            "subject_ambiguity_known": ambiguity_known,
         },
+        selected_track_id=selected_track_id,
+        second_best_track_id=second_best_track_id,
+        subject_ambiguity_margin=ambiguity_margin,
+        subject_is_ambiguous=subject_is_ambiguous,
     )
 
 
@@ -339,7 +396,7 @@ def select_subject_track(
     n_frames: int,
     image_hw: tuple[int, int],
 ) -> PersonTrackResult:
-    """Select the longest track, breaking ties by centrality and size."""
+    """Select the strongest track and reject concurrently plausible runners-up."""
     if n_frames <= 0:
         raise ValueError("n_frames must be positive")
     if not detections:
@@ -352,19 +409,94 @@ def select_subject_track(
     if not by_track:
         return empty_person_tracks(n_frames)
 
-    def _score(items: list[TrackedDetection]) -> tuple[int, float, float]:
+    def _evidence(items: list[TrackedDetection]) -> dict[str, Any]:
         boxes = np.stack([xyxy_to_encoder_crop_cxcywh(d.xyxy, image_hw) for d in items])
         valid = valid_encoder_crop_bbox_mask(boxes)
         if not np.any(valid):
-            return (0, float("-inf"), 0.0)
-        boxes = boxes[valid]
-        centers = boxes[:, :2]
+            return {
+                "valid_frames": 0,
+                "frame_ids": set(),
+                "centrality": float("-inf"),
+                "area": 0.0,
+                "confidence": 0.0,
+            }
+        valid_boxes = boxes[valid]
+        valid_items = [item for item, keep in zip(items, valid, strict=False) if bool(keep)]
+        centers = valid_boxes[:, :2]
         centrality = -float(np.mean(np.sum((centers - 0.5) ** 2, axis=1)))
-        area = float(np.mean(boxes[:, 2] * boxes[:, 3]))
-        return (int(np.sum(valid)), centrality, area)
+        area = float(np.mean(valid_boxes[:, 2] * valid_boxes[:, 3]))
+        confidence = float(np.mean([item.confidence for item in valid_items]))
+        return {
+            "valid_frames": int(np.sum(valid)),
+            "frame_ids": {item.frame_idx for item in valid_items},
+            "centrality": centrality,
+            "area": area,
+            "confidence": confidence,
+        }
 
-    selected_id, selected = max(by_track.items(), key=lambda kv: _score(kv[1]))
-    _ = selected_id
+    evidence = {track_id: _evidence(items) for track_id, items in by_track.items()}
+
+    def _score(track_id: int) -> tuple[int, float, float]:
+        item = evidence[track_id]
+        return (item["valid_frames"], item["centrality"], item["area"])
+
+    ranked_ids = sorted(by_track, key=_score, reverse=True)
+    selected_id = ranked_ids[0]
+    selected = by_track[selected_id]
+    top = evidence[selected_id]
+
+    def _runner_up_evidence(track_id: int) -> tuple[float, int, float]:
+        second = evidence[track_id]
+        top_count = int(top["valid_frames"])
+        second_count = int(second["valid_frames"])
+        overlap = len(top["frame_ids"] & second["frame_ids"])
+        overlap_ratio = overlap / max(1, min(top_count, second_count))
+        duration_similarity = min(1.0, second_count / max(1, top_count))
+        centrality_similarity = 1.0 - min(
+            1.0,
+            abs(float(top["centrality"]) - float(second["centrality"])) / 0.5,
+        )
+        max_area = max(float(top["area"]), float(second["area"]), 1e-8)
+        area_similarity = min(float(top["area"]), float(second["area"])) / max_area
+        confidence_similarity = 1.0 - min(
+            1.0,
+            abs(float(top["confidence"]) - float(second["confidence"])),
+        )
+        plausibility_similarity = (
+            0.70 * duration_similarity
+            + 0.15 * centrality_similarity
+            + 0.10 * area_similarity
+            + 0.05 * confidence_similarity
+        )
+        margin = float(np.clip(1.0 - plausibility_similarity, 0.0, 1.0))
+        return margin, overlap, overlap_ratio
+
+    runner_up_evidence = {
+        track_id: _runner_up_evidence(track_id) for track_id in ranked_ids[1:]
+    }
+    covisible_ids = [
+        track_id
+        for track_id in ranked_ids[1:]
+        if runner_up_evidence[track_id][1] >= PERSON_SUBJECT_MIN_COVISIBLE_FRAMES
+        and runner_up_evidence[track_id][2] >= PERSON_SUBJECT_MIN_COVISIBLE_RATIO
+    ]
+    if covisible_ids:
+        second_best_id = min(covisible_ids, key=lambda track_id: runner_up_evidence[track_id][0])
+    else:
+        second_best_id = ranked_ids[1] if len(ranked_ids) > 1 else -1
+
+    ambiguity_margin = 1.0
+    covisible_frames = 0
+    covisible_ratio = 0.0
+    if second_best_id >= 0:
+        ambiguity_margin, covisible_frames, covisible_ratio = runner_up_evidence[second_best_id]
+
+    subject_is_ambiguous = bool(
+        second_best_id >= 0
+        and covisible_frames >= PERSON_SUBJECT_MIN_COVISIBLE_FRAMES
+        and covisible_ratio >= PERSON_SUBJECT_MIN_COVISIBLE_RATIO
+        and ambiguity_margin < PERSON_SUBJECT_AMBIGUITY_MARGIN_MIN
+    )
 
     bbox = np.zeros((n_frames, PERSON_BBOX_DIM), dtype=np.float32)
     visible = np.zeros(n_frames, dtype=np.bool_)
@@ -377,18 +509,33 @@ def select_subject_track(
         visible[det.frame_idx] = True
         conf[det.frame_idx] = np.float32(det.confidence)
 
+    state_valid = person_trackable_mask(bbox, visible)
+    if subject_is_ambiguous:
+        state_valid[:] = False
+
     return PersonTrackResult(
         person_bbox=bbox,
         person_visible=visible,
-        person_state_valid=person_trackable_mask(bbox, visible),
+        person_state_valid=state_valid,
         person_conf=conf,
         provenance={
             "detector": PERSON_TRACKER_ID,
             "tracker": "bytetrack",
             "classes": list(PERSON_TRACK_CLASSES),
             "bbox_space": PERSON_BBOX_SPACE_ENCODER_CROP,
-            "selection": "longest_then_central_then_largest",
+            "selection": "longest_then_central_then_largest; strongest_covisible_runner_up",
+            "selected_track_id": selected_id,
+            "second_best_track_id": second_best_id,
+            "subject_ambiguity_margin": ambiguity_margin,
+            "subject_is_ambiguous": subject_is_ambiguous,
+            "second_best_covisible_frames": covisible_frames,
+            "second_best_covisible_ratio": covisible_ratio,
+            "ambiguity_margin_min": PERSON_SUBJECT_AMBIGUITY_MARGIN_MIN,
         },
+        selected_track_id=selected_id,
+        second_best_track_id=second_best_id,
+        subject_ambiguity_margin=ambiguity_margin,
+        subject_is_ambiguous=subject_is_ambiguous,
     )
 
 
@@ -465,6 +612,10 @@ def track_persons_from_paths(
             "classes": list(classes),
             "bbox_space": PERSON_BBOX_SPACE_ENCODER_CROP,
         },
+        selected_track_id=result.selected_track_id,
+        second_best_track_id=result.second_best_track_id,
+        subject_ambiguity_margin=result.subject_ambiguity_margin,
+        subject_is_ambiguous=result.subject_is_ambiguous,
     )
 
 
@@ -560,16 +711,13 @@ def screen_clip_arrays(
     time_remap = time_remap_flags_from_deltas(deltas)
     accel = accel_outlier_flags_from_deltas(deltas)
     n_windows = max(0, n_frames - horizon)
-    person_valid_windows = 0
     visible = np.asarray(person_visible).astype(np.bool_)
     state_valid = visible if person_state_valid is None else np.asarray(person_state_valid).astype(np.bool_)
-    for t in range(n_windows):
-        hist = state_valid[max(0, t - history + 1) : t + 1]
-        fut = state_valid[t + 1 : t + 1 + horizon]
-        hist_ok = hist.size > 0 and float(np.mean(hist)) >= (2.0 / 3.0)
-        fut_ok = fut.size > 0 and float(np.mean(fut)) >= 0.5
-        if hist_ok and fut_ok:
-            person_valid_windows += 1
+    person_valid_windows = int(np.sum(strict_person_window_mask(
+        state_valid,
+        history=history,
+        horizon=horizon,
+    )))
     return ScreenReport(
         n_frames=n_frames,
         n_windows=n_windows,
@@ -685,6 +833,9 @@ def screen_cache_dir(
         "person_tiny_visible_frames": 0,
         "person_edge_visible_frames": 0,
         "person_flicker_transitions": 0,
+        "subject_ambiguity_known_clips": 0,
+        "subject_ambiguity_unknown_clips": 0,
+        "subject_ambiguous_clips": 0,
     }
 
     for path in paths:
@@ -706,12 +857,24 @@ def screen_cache_dir(
         source = path.stem.split("_")[0]
         source_entry = sources.setdefault(
             source,
-            {"clips": 0, "windows": 0, "person_valid_windows": 0, "person_trackable_frames": 0},
+            {
+                "clips": 0,
+                "windows": 0,
+                "person_valid_windows": 0,
+                "person_trackable_frames": 0,
+                "subject_ambiguity_known_clips": 0,
+                "subject_ambiguity_unknown_clips": 0,
+                "subject_ambiguous_clips": 0,
+            },
         )
+        ambiguity_known = bool(tracks.provenance.get("subject_ambiguity_known", False))
         source_entry["clips"] += 1
         source_entry["windows"] += report.n_windows
         source_entry["person_valid_windows"] += report.person_valid_windows
         source_entry["person_trackable_frames"] += report.person_trackable_frames
+        source_entry["subject_ambiguity_known_clips"] += int(ambiguity_known)
+        source_entry["subject_ambiguity_unknown_clips"] += int(not ambiguity_known)
+        source_entry["subject_ambiguous_clips"] += int(tracks.subject_is_ambiguous)
         for src_key, qc_key in (
             ("person_invalid_visible_frames", "invalid_visible_frames"),
             ("person_degenerate_visible_frames", "degenerate_visible_frames"),
@@ -734,6 +897,10 @@ def screen_cache_dir(
             flags.append("person_invalid_labels")
         if int(qc.get("edge_visible_frames", 0)):
             flags.append("person_edge_labels")
+        if not ambiguity_known:
+            flags.append("subject_ambiguity_unknown")
+        if tracks.subject_is_ambiguous:
+            flags.append("subject_ambiguous")
 
         clip_record = {
             "clip_id": path.stem,
@@ -743,6 +910,11 @@ def screen_cache_dir(
             "person_valid_windows": report.person_valid_windows,
             "person_visible_frames": report.person_visible_frames,
             "person_trackable_frames": report.person_trackable_frames,
+            "subject_ambiguity_known": ambiguity_known,
+            "selected_track_id": tracks.selected_track_id,
+            "second_best_track_id": tracks.second_best_track_id,
+            "subject_ambiguity_margin": tracks.subject_ambiguity_margin,
+            "subject_is_ambiguous": tracks.subject_is_ambiguous,
             "duplicate_frame_runs": report.duplicate_frame_runs,
             "time_remap_flags": report.time_remap_flags,
             "accel_outlier_frames": report.accel_outlier_frames,
@@ -766,6 +938,9 @@ def screen_cache_dir(
         totals["person_tiny_visible_frames"] += int(qc.get("tiny_visible_frames", 0))
         totals["person_edge_visible_frames"] += int(qc.get("edge_visible_frames", 0))
         totals["person_flicker_transitions"] += int(qc.get("flicker_transitions", 0))
+        totals["subject_ambiguity_known_clips"] += int(ambiguity_known)
+        totals["subject_ambiguity_unknown_clips"] += int(not ambiguity_known)
+        totals["subject_ambiguous_clips"] += int(tracks.subject_is_ambiguous)
 
     totals["sources"] = len(sources)
     return {
@@ -788,6 +963,11 @@ __all__ = [
     "PERSON_TRACK_CLASSES",
     "PERSON_TRACKER_ID",
     "PERSON_STATE_VALID_KEY",
+    "PERSON_SELECTED_TRACK_ID_KEY",
+    "PERSON_SECOND_BEST_TRACK_ID_KEY",
+    "PERSON_SUBJECT_AMBIGUITY_MARGIN_KEY",
+    "PERSON_SUBJECT_AMBIGUITY_MARGIN_MIN",
+    "PERSON_SUBJECT_IS_AMBIGUOUS_KEY",
     "PERSON_TRACKABLE_MAX_CENTER_JUMP",
     "PERSON_TRACKABLE_MIN_AREA",
     "PERSON_TRACKABLE_MIN_AREA_PATCHES",
@@ -807,6 +987,7 @@ __all__ = [
     "screen_clip_arrays",
     "screen_cache_dir",
     "select_subject_track",
+    "strict_person_window_mask",
     "time_remap_flags_from_deltas",
     "track_persons_from_paths",
     "sanitize_person_track_arrays",

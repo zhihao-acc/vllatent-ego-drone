@@ -53,6 +53,23 @@ class TestBuildClipNpz:
         assert np.all(result["person_state_valid"])
         assert result["person_conf"][0] == pytest.approx(0.8)
 
+    def test_stores_subject_selection_provenance(self) -> None:
+        a = self._arrays(5)
+        a["person_bbox"] = np.tile(np.array([[0.5, 0.5, 0.2, 0.3]], dtype=np.float32), (5, 1))
+        a["person_visible"] = np.ones(5, dtype=bool)
+        a["person_conf"] = np.full(5, 0.8, dtype=np.float32)
+        a["person_selected_track_id"] = 11
+        a["person_second_best_track_id"] = 22
+        a["person_subject_ambiguity_margin"] = 0.42
+        a["person_subject_is_ambiguous"] = False
+
+        result = _build_clip_npz(**a)
+
+        assert int(result["person_selected_track_id"]) == 11
+        assert int(result["person_second_best_track_id"]) == 22
+        assert float(result["person_subject_ambiguity_margin"]) == pytest.approx(0.42)
+        assert not bool(result["person_subject_is_ambiguous"])
+
     def test_sanitizes_tiny_visible_person_tracks(self) -> None:
         a = self._arrays(5)
         a["person_bbox"] = np.tile(np.array([[0.5, 0.5, 0.01, 0.01]], dtype=np.float32), (5, 1))
@@ -236,7 +253,7 @@ class TestFindAcceptedSegments:
 class TestMinSegmentFrames:
     def test_value(self) -> None:
         from vllatent.schemas import HISTORY, HORIZON
-        assert MIN_SEGMENT_FRAMES == HISTORY + HORIZON + 1
+        assert MIN_SEGMENT_FRAMES == HISTORY + HORIZON
 
 
 class TestHumanTrackabilityGate:
@@ -257,4 +274,9 @@ class TestHumanTrackabilityGate:
     def test_rejects_sparse_future_trackability(self) -> None:
         state_valid = np.ones(12, dtype=np.bool_)
         state_valid[4:11] = False
+        assert not _passes_human_trackability_gate(state_valid, history=3, horizon=8)
+
+    def test_rejects_one_missing_future_frame(self) -> None:
+        state_valid = np.ones(12, dtype=np.bool_)
+        state_valid[10] = False
         assert not _passes_human_trackability_gate(state_valid, history=3, horizon=8)

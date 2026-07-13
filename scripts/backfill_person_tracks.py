@@ -18,7 +18,11 @@ from vllatent.ingest.person_tracking import (
     PERSON_BBOX_SPACE_ENCODER_CROP,
     PERSON_BBOX_SPACE_KEY,
     PERSON_CONF_KEY,
+    PERSON_SECOND_BEST_TRACK_ID_KEY,
+    PERSON_SELECTED_TRACK_ID_KEY,
     PERSON_STATE_VALID_KEY,
+    PERSON_SUBJECT_AMBIGUITY_MARGIN_KEY,
+    PERSON_SUBJECT_IS_AMBIGUOUS_KEY,
     PERSON_TRACK_CLASSES,
     PERSON_TRACKER_ID,
     PERSON_VISIBLE_KEY,
@@ -93,6 +97,12 @@ def backfill_one(
     arrays[PERSON_VISIBLE_KEY] = tracks.person_visible
     arrays[PERSON_STATE_VALID_KEY] = tracks.person_state_valid
     arrays[PERSON_CONF_KEY] = tracks.person_conf
+    arrays[PERSON_SELECTED_TRACK_ID_KEY] = np.array(tracks.selected_track_id, dtype=np.int64)
+    arrays[PERSON_SECOND_BEST_TRACK_ID_KEY] = np.array(tracks.second_best_track_id, dtype=np.int64)
+    arrays[PERSON_SUBJECT_AMBIGUITY_MARGIN_KEY] = np.array(
+        tracks.subject_ambiguity_margin, dtype=np.float32
+    )
+    arrays[PERSON_SUBJECT_IS_AMBIGUOUS_KEY] = np.array(tracks.subject_is_ambiguous, dtype=np.bool_)
     _write_npz(cache_path, arrays)
     record["status"] = "backfilled"
     record["person_visible_frames"] = int(np.sum(tracks.person_visible))

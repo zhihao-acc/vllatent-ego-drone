@@ -6,6 +6,7 @@ import pytest
 from scripts.train_sports_b3 import (
     limit_indices,
     loss_window_improvement,
+    parse_args,
     select_train_val_indices,
     source_split_indices,
 )
@@ -72,3 +73,8 @@ def test_loss_window_improvement_uses_window_means() -> None:
 def test_loss_window_improvement_handles_short_runs() -> None:
     assert loss_window_improvement([]) == (None, None, None)
     assert loss_window_improvement([1.0]) == (None, None, None)
+
+
+def test_b3_harness_defaults_to_strict_person_windows() -> None:
+    args = parse_args([])
+    assert args.strict_person_windows
