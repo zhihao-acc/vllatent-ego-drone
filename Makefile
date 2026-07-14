@@ -1,6 +1,6 @@
 # Makefile — vllatent-ego-drone. Default lane is PURE (numpy/pyyaml; no torch).
 # The torch/sports tier (vllatent.encode, vllatent.data, vllatent.model, vllatent.train)
-# is import-guarded and exercised via `make test-torch`.
+# is exercised in the torch-enabled environment via `make test-torch`.
 PY ?= python
 SHELL := /bin/bash
 
@@ -21,9 +21,9 @@ help:
 	@echo "  make test-torch   - torch-tier tests (needs the torch extra)"
 	@echo "  make encode-smoke - real-weight DINOv3 forward (downloads ~330MB non-gated timm weights; no token)"
 	@echo "  make text-smoke   - real-weight CLIP text tower -> (M,768) lang_tokens (downloads CLIP; no token)"
-	@echo "  make audit        - run the AerialVLN audit parser on the fixture episode (after step 5)"
+	@echo "  make audit        - run the AerialVLN audit parser on the fixture episode"
 	@echo "  make blob         - pre-commit blob guard"
-	@echo "  make ralph        - print the /ralph-loop launch command"
+	@echo "  make ralph        - print the active B3 Ralph-loop launch prompt"
 
 setup:
 	$(PY) -m pip install --upgrade pip
@@ -45,10 +45,10 @@ import-smoke:
 	$(PY) -c "import vllatent.schemas, vllatent.actions, vllatent.frames, vllatent.config, vllatent.manifest, vllatent.audit; print('pure import-smoke OK')"
 
 test:
-	$(PY) -m pytest -q -m "not torch and not sim" --ignore=tests/test_data_shapes.py
+	$(PY) -m pytest -q -m "not torch and not sim"
 
 test-torch:
-	$(PY) -m pytest -q -m torch --ignore=tests/test_data_shapes.py
+	$(PY) -m pytest -q -m torch
 
 test-ingest-pure:
 	$(PY) -m pytest -q tests/test_ingest_*.py -m "not torch and not sim and not tool"

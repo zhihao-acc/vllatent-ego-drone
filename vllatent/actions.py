@@ -1,4 +1,4 @@
-"""Discrete -> continuous 4-DoF action mapping (PURE tier) — Phase-A step 4.
+"""Discrete -> continuous 4-DoF action mapping (PURE tier).
 
 Transcribes the AerialVLN action set + step constants VERBATIM from
 ``third_party/AirVLN/airsim_plugin/airsim_settings.py`` and reproduces the
@@ -15,9 +15,10 @@ Public API:
   * ``action_to_delta(id) -> (4,) float32`` — the canonical body-frame quantized delta.
   * ``apply_delta(pose, id) -> pose``       — reproduces ``getPoseAfterMakeAction`` (world frame).
   * ``pose_pair_to_body_delta(a, b) -> (4,)`` — inverse: derive the body delta between two
-    NED poses (the Phase-A audit uses this to verify dataset poses vs the quantized deltas).
+    NED poses (the AerialVLN audit uses this to verify dataset poses vs the quantized deltas).
 
-See docs/io-contract.md + plans/phase-a-data-and-io-contract.md step 4.
+See ``docs/io-contract.md``. This module originated in the historical Phase-A
+data-contract work.
 """
 from __future__ import annotations
 
@@ -117,7 +118,7 @@ def pose_pair_to_body_delta(pose_before: Pose, pose_after: Pose) -> np.ndarray:
     """Derive the body-frame delta ``(dx, dy, dz, dyaw_deg)`` between two NED poses.
 
     Inverse of :func:`apply_delta`: rotate the world position difference into the BEFORE
-    pose's body frame (by -yaw) and wrap the yaw difference into (-180, 180]. The Phase-A
+    pose's body frame (by -yaw) and wrap the yaw difference into (-180, 180]. The AerialVLN
     audit compares this against :func:`action_to_delta` to confirm the dataset poses
     reproduce the quantized action deltas.
     """

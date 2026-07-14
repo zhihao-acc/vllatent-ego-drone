@@ -109,6 +109,28 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `supers
 
 ---
 
+## 2026-07-14 — Drift-prep repository and dataset cleanup
+
+**Status:** B3.6 remains blocked; no gate or training state changed.
+
+**Repository audit.** Reviewed all 136 tracked files, 31 nonignored untracked
+paths, and 11,602 ignored paths. Replaced stale Phase-A Claude/Ralph entrypoints
+with the canonical B3.6-blocked workflow, corrected active guidance and tier
+boundaries, removed the superseded duplicate `scripts/curate_clips.py`, and
+retained historical plans/reports and local provenance artifacts.
+
+**Authorized ignored cleanup.** Removed 10,820,042,994 bytes of rejected-cache,
+nonactive-source raw-media, active-source audio-residue, and stale pilot-summary
+data, plus regenerated tool caches. Retained all 1,100 active NPZ clips across
+100 sources and exactly one usable raw video plus metadata per active source.
+Weights, QC/E2E evidence, `.vscode`, and the additional untracked artifacts were
+retained. No active NPZ was deleted or rewritten; a full SHA audit found no
+exact duplicates, and recompression offered only about 8% savings.
+
+**Verification.** `724 passed, 7 skipped`; whole-tree Ruff, pure-tier mypy and
+import smoke, blob guard, shell syntax, and `git diff --check` passed. B3.7/H20
+remains ineligible.
+
 ## 2026-07-13 — B3.6 transition-verifier repair fails corrected tiny plan gates
 
 **Status:** B3.6 remains blocked and B3.7/H20 remains ineligible. The

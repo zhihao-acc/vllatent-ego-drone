@@ -1,7 +1,7 @@
 [project]
 name = "vllatent"
 version = "0.0.1"
-description = "Compact latent world-action model for aerial VLN — frozen DINOv3 + latent predictor + trust-horizon"
+description = "Human- and plan-conditioned latent world model for sports-following drones"
 requires-python = ">=3.10"
 # PURE-tier deps ONLY. The heavy training stack (torch/transformers/timm) is the
 # [torch] extra, installed on the dev box / H20 — never in default CI (which gates
@@ -27,8 +27,6 @@ include = ["vllatent*"]
 [tool.ruff]
 line-length = 120
 target-version = "py310"
-# _archived/ holds retired pre-pivot code kept for historical reference only — not linted.
-exclude = ["_archived"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "UP", "B"]

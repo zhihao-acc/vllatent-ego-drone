@@ -1,4 +1,4 @@
-"""AerialVLN-JSON AUDIT parser (PURE tier) — Phase-A step 5 (DoD item 2).
+"""AerialVLN-JSON audit parser (PURE tier).
 
 Reads an AerialVLN episode JSON and confirms it yields the
 ``(RGB obs, 4-DoF action/waypoint, next obs, language)`` tuples the loader needs.
@@ -28,7 +28,8 @@ What the audit does (foot-gun #1 + tuple/Δ verification):
 
 CLI:  python -m vllatent.audit --episode <episode.json> [--report <out.json|->]
 
-See docs/io-contract.md + plans/phase-a-data-and-io-contract.md step 5.
+See ``docs/io-contract.md``. This audit originated in the historical Phase-A
+data-contract work.
 """
 from __future__ import annotations
 
@@ -131,7 +132,7 @@ class DeltaMismatch:
 
 @dataclass(frozen=True)
 class AuditReport:
-    """The Phase-A audit result for one episode (DoD item 2)."""
+    """The AerialVLN audit result for one episode."""
 
     episode_id: str
     scene_id: int
@@ -349,7 +350,7 @@ def _iter_episodes(data: Any) -> list[dict[str, Any]]:
 
 
 def _main(argv: list[str] | None = None) -> int:
-    p = argparse.ArgumentParser(description="AerialVLN episode/slice audit (Phase-A steps 5 / A5.7)")
+    p = argparse.ArgumentParser(description="AerialVLN episode/slice audit")
     src = p.add_mutually_exclusive_group(required=True)
     src.add_argument("--episode", help="audit ONE file (episode or {'episodes':[...]}) -> per-episode reports")
     src.add_argument("--slice", dest="slice_path", help="audit a slice file -> aggregated AuditSummary (M3)")

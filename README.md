@@ -30,12 +30,15 @@ B2.12/H20 action-imitation training is inactive.
 B3 cache person labels keep detector visibility and supervision validity separate:
 `person_visible` means a sanitized detector box exists, while `person_state_valid`
 means the label passed the stricter followed-subject trackability gate. B3.4's
-old `0.95` AUROC probe is diagnostic only now. Active pre-B3.5 work is B3.4a:
-YOLO-standard cache cleanup, a human-positive content-filter signal before auto
-clipping, and ski-first data expansion prep.
+old `0.95` AUROC probe is diagnostic only now. B3.4/B3.4a and the depth-6 B3.5
+model are complete. B3.6 remains blocked after the review-backed real-transition-
+verifier repair: corrected tiny evaluation passes G1b but fails G1a's null-plan
+margin and G1d's aggregate counterfactual margins and yaw-geometry requirement.
+B3.7/H20 is therefore ineligible.
 
-> Architecture is **LOCKED** — see the vault `latent-pred-pipeline/arch-design-2026-06-08-latent-pred`.
-> Do not relitigate it; build around it. See `CLAUDE.md` for full agent context.
+The active contract and gate definitions live in
+`plans/phase-b3-human-conditioned-world-model.md`; `DEV_LOG.md` records the latest
+verified result. See `CLAUDE.md` for broader context and historical invariants.
 
 ## Layout
 
@@ -57,13 +60,14 @@ make import-smoke    # pure tier imports with numpy/pyyaml only
 make lint && make typecheck && make test
 ```
 
-The torch tier (`pip install -e ".[torch]"` -> `make test-torch`) runs on the dev box / H20.
+The torch tier (`pip install -e ".[torch]"` -> `make test-torch`) runs on the dev box. H20 is
+user-gated and currently ineligible while B3.6 is blocked.
 The old AirSim render-cache path is historical; Phase B trains on sports latent caches.
 
 ## Workflow
 
-Iterated under a **ralph loop** (`make ralph` prints the launch command). Each step is tracked in
-`DEV_LOG.md` against the active plan. Phase B-3 is the human-conditioned world-model pivot:
-local G0/K1/K2/G1 gates must pass before any H20 training command is prepared.
+Iterated under a **Ralph loop** using `.codex/ralph-rules.md`. Each step is tracked in `DEV_LOG.md`
+against the active B3 plan. G0/K1/K2 are completed diagnostics; the corrected G1 gates must pass
+before any H20 training command is prepared.
 
 Historical Phase-A AerialVLN artifacts are retained only where they still support pure contracts.

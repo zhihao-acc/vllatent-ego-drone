@@ -10,38 +10,35 @@ This file is loaded automatically by Claude Code. Read it before doing any work 
 > video only (YouTube + custom GoPro+IMU). See vault
 > `[[advisory-sports-following-drift-2026-06-18]]` for the authoritative direction.
 
-A **compact latent world-action model for sports-following drone**. One frozen perception backbone,
-a small latent predictor, and a waypoint head that produces continuous 4-DoF commands.
+A **human-conditioned, action-conditioned latent world model for sports-following drones**. The
+active B3 path predicts future DINO patch latents and person state from observed history plus a
+candidate future camera/drone plan.
 
 ```
-RGB 224² ─► [DINOv3 ViT-B/16*, FROZEN, CACHED] ─► z_t (196×D fp16)    *D=768 default; 384 if B1.11 gate
-                                                │  + continuous action (FiLM) + language (cross-attn, B-2)
-                                       [latent predictor, block-causal, D from PredictorConfig]
-                                                │  rollout (H=3 history, T=4 horizon)
-                          ┌─────────────────────┼──────────────────────────┐
-                          ▼                                                  ▼
-              4-DoF waypoint head                                    (Phase C) TrackVLA teacher
-              [D→256→128→4]
+observed DINOv3 latents (H=3, 196×768 fp16) + candidate 6-D plan (T=8) + dt
+                                      │
+                         [depth-6 patch-local predictor]
+                                      │
+                                      ▼
+               future DINO latents + (cx, cy, log_h, visibility)
 ```
 
-Action is **continuous-4DoF** from MegaSaM ego-motion extraction (dx,dy,dz,dyaw). Frozen+cached
-encoder => **no EMA / no VICReg**. Training data = sports FPV video (YouTube + custom GoPro+IMU).
+Plans use scale-free translation direction/speed-ratio plus normalized yaw rate and a validity bit.
+MegaSaM translation magnitude is diagnostic rather than metric truth. Frozen+cached encoder =>
+**no EMA / no VICReg**. Training data = sports FPV video (YouTube + custom GoPro+IMU).
 
-## Architecture — LOCKED vs OPEN
+## Active architecture and gate
 
-**LOCKED — do NOT relitigate. See vault `[[advisory-sports-following-drift-2026-06-18]]` (authoritative).**
-Encoder **DINOv3 ViT-B/16** is the working default (D=768, frozen+cached, RGB-only, 224², 196x768 fp16).
-**Encoder gate (B1.11):** if Orin NX benchmark shows ViT-B/16 TRT FP16 > 20ms, switch to ViT-S/16
-(D=384); otherwise keep ViT-B/16. No CosPress distillation training needed either way. ·
-predictor block-causal ViT (depth/heads from PredictorConfig, D=EMBED_DIM) · continuous-action FiLM ·
-frozen-text (CLIP text tower 512->D)→cross-attention language (B-2) · H=3 / T=4 · continuous
-4-DoF waypoint head · offline **TrackVLA** teacher = **Phase C** · **no EMA / no VICReg** (frozen cached encoder = fixed target).
-**WorldVLN teacher pipeline is RETIRED** (wrong task domain — language-conditioned navigation, not
-person-following). TrackVLA (CoRL 2025, visual tracking) replaces it. Action extraction = MegaSaM from
-real sports FPV video (not simulator oracle).
+The current contract is defined by `plans/phase-b3-human-conditioned-world-model.md`, with verified
+state in `DEV_LOG.md`. Locked B3 facts: frozen DINOv3 ViT-B/16 (`D=768`), depth 6, `H=3`, `T=8`,
+patch-local residual prediction, and six plan fields
+`[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio, yaw_rate_norm, valid]`. Future labels never
+enter model `forward`; language and metric waypoints are not active B3 inputs/outputs.
 
-**OPEN — keep the lean:** predictor depth/FiLM-vs-interleave (Phase B);
-TrackVLA teacher K + calibration (Phase C); closed-loop seam (Phase D).
+B3.6 is blocked: corrected tiny evaluation passes G1b but fails G1a's null-plan margin and G1d's
+counterfactual-margin/yaw-geometry requirements. Source-held-out scaling and B3.7/H20 remain
+ineligible. B1/B2 action-FiLM, language, waypoint-head, WorldVLN, and TrackVLA material is historical
+or deferred context, not the active model contract.
 
 ## The reused repo (reuse, do NOT fork) — Phase D only
 
@@ -57,13 +54,14 @@ native loader (`…/fly0-style-pipeline/third_party/AirVLN`) is **reuse/replay o
 
 | Tier | Modules | Imports | Runs |
 |---|---|---|---|
-| **PURE** | `schemas, actions, frames, config, manifest, audit` | numpy/pyyaml/stdlib | CI hard-gates |
-| **TORCH** | `encode/, data/` | + torch/transformers/timm (LAZY) | `make test-torch`, dev box / H20 |
-| **SIM** | `render/, cache` | + airsim (LAZY) | `fly0-m1` docker only |
+| **PURE** | `schemas, actions, frames, config, manifest, audit, ingest/quality, ingest/ego_motion` | numpy/pyyaml/stdlib | CI hard-gates |
+| **TORCH** | `encode/, data/, model/, train/`, remaining ingest tools | + torch/transformers/timm; optional tools stay lazy where absence is supported | `make test-torch`, dev box; H20 only after B3.6 |
+| **SIM** | historical reproduction only | + airsim | `fly0-m1` docker, user-gated |
 
-Guard rule: every `import torch` / `import airsim` lives **inside a function/method** (or behind a lazy
-guard) so a torch-free box imports any module without crashing. The pure tier must NEVER gain a
-torch/airsim/transformers/timm import — CI imports it with numpy/pyyaml only.
+Guard rule: the pure tier must NEVER gain a torch/airsim/transformers/timm import; CI imports it with
+numpy/pyyaml only. Torch-tier modules may import torch normally and are tested in the torch-enabled
+environment. Optional model/tool dependencies remain lazy where their absence must not break a
+supported entrypoint; AirSim is confined to historical, user-gated reproduction paths.
 
 ## Hardware / topology
 
@@ -94,40 +92,38 @@ skills, not in source comments.
 
 ## The plan & dev log
 
-- **`plans/phase-b-sports-training.md`** — the **authoritative Phase B plan** (sports-following pivot,
-  2026-06-19). Steps B1.1–B1.24, dependency graph, locked/open decisions.
-- `plans/phase-a-data-and-io-contract.md` — Phase-A steps (historical, complete).
-- `plans/phase-a5-replan-postpivot.md` — Phase-A5 re-plan (historical, **SUPERSEDED** by Phase B).
-- `DEV_LOG.md` at repo root tracks which step is in progress. **Read it first** to find the position,
-  then re-read the relevant plan step.
+- **`plans/phase-b3-human-conditioned-world-model.md`** — authoritative active B3 plan and gates.
+- `plans/phase-b-sports-training.md` — historical B1/B2 evidence.
+- `plans/phase-a5-replan-postpivot.md` — historical Phase-A5 re-plan.
+- `DEV_LOG.md` tracks current verified state. Read it first, then the active B3 step.
 
 ## Workflow
 
-This project runs as a **ralph loop** — see `.claude/ralph-rules.md` for the iteration protocol and
-quality gates. Each iteration: READ `DEV_LOG.md` → ralph-rules → plan; EXECUTE the lowest pending step
-(**pure-tier / fixtures-first**); TEST with the step command; RECORD in `DEV_LOG.md`; COMMIT
-`feat(phaseA): step N — …` (specific `git add`, never `-A`); STOP CHECK at `started_step + 3`.
+This project runs as a **Ralph loop** — `.codex/ralph-rules.md` is canonical and
+`.claude/ralph-rules.md` is a compatibility summary. Each iteration reads `DEV_LOG.md`, the rules,
+and the active B3 plan; makes one bounded evidence-supported change; tests; and records exact results.
+Commit only when the user asks, using explicit paths and never `git add -A` or `git add .`.
 **User-gated steps** (render / cache / H20 / docker / network) stay `in_progress` until the user pastes
 verification — **never auto-mark them done**.
 
 ## Load-bearing invariants (do not break)
 
-- **#1 foot-gun — coordinate frames.** Waypoint output is **AirSim-NED body, yaw-only**; remapped
-  NED→FLU→**world ENU** before any `WaypointHandoff`/`PoseStamped` (Phase D). **Never hand-roll a
-  parallel frame conversion** — re-derive against fly0's `geometry/frames.py` semantics and keep
-  `tests/test_frames.py` (no-flip: up→up, down→down, right→right-of-forward, forward→forward) green.
+- **Historical/deferred coordinate-frame seam.** B3 emits no metric waypoint. If the later Phase-D
+  controller revives the historical AirSim-NED body waypoint seam, remap NED→FLU→world ENU before
+  `WaypointHandoff`/`PoseStamped`; never hand-roll a parallel conversion. Keep `tests/test_frames.py`
+  (no-flip: up→up, down→down, right→right-of-forward, forward→forward) green.
 - **Cached latents are render-once.** For sports FPV data, frames are extracted from video and
   DINOv3-encoded → fp16 latents on disk. (Historical: AerialVLN rendered from sim at GT poses.)
   Phases B+ train on cached latents. Every cache build writes/updates the **provenance manifest**
   (encoder id+revision, dataset slice, BGR→RGB flag, render config hash).
 - **AirSim msgpack-RPC is single-threaded → wrap every `client.X()` in a Lock** (tornado IOLoop is not
   re-entrant).
-- **BGR→RGB + quaternion-order data foot-guns.** AirSim `Scene` is BGR; DINOv3 expects RGB — convert at
-  the render→encode boundary, record the flag. `start_rotation` is `[w,x,y,z]`; `reference_path` poses
-  are `[…,qx,qy,qz,qw]`; `airsim.Quaternionr` is xyzw — reorder to canonical xyzw and name the order at
-  every pose seam.
-- **World-frame ENU seam / no-flip is Phase D.** A–C produce continuous 4-DoF + the remap math + unit
-  tests; the live closed-loop seam (and the yaw-field extension) is Phase D.
+- **BGR→RGB + orientation-format data foot-guns.** AirSim `Scene` is BGR; DINOv3 expects RGB — convert
+  at the render→encode boundary and record the flag. Historical AerialVLN `start_rotation` is
+  quaternion `[w,x,y,z]`, while `reference_path` rows are six-wide
+  `[x,y,z,pitch,roll,yaw]`; `airsim.Quaternionr` is xyzw.
+- **World-frame ENU seam / no-flip is deferred to Phase D.** Historical pure modules retain the
+  remap math and tests; the active B3 model does not produce this 4-DoF command.
 - **Do NOT modify the sibling repos or their `third_party/`** — workarounds live in THIS repo. fly0 is
   reused (Phase D), never forked.
 - **Phases A–C are standalone — no sibling import** (no `_deps.py`; no fly0/navdreamer on `sys.path`).

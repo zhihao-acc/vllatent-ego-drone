@@ -1,10 +1,9 @@
 name: ci
 
-# Env-split honest CI: lint + types + the PURE-tier import-smoke / unit tests + the
-# blob guard. NO torch, NO transformers, NO timm, NO AirSim, NO GPU, NO weights, NO
-# siblings. The torch tier (vllatent.encode, vllatent.data) and sim tier
-# (vllatent.render, vllatent.cache) are import-guarded and exercised locally
-# (`make test-torch`) / inside fly0-m1 — never here.
+# Env-split honest CI: lint + types + the PURE-tier import smoke/unit tests + the
+# blob guard. NO torch, transformers, timm, AirSim, GPU, weights, or sibling repos.
+# Torch/model/training and simulator/integration tiers are exercised locally or
+# in explicitly user-gated environments, never in this job.
 
 on:
   push:
@@ -57,5 +56,5 @@ jobs:
       - name: Cache-manifest CLI round-trip
         run: python -m vllatent.manifest --emit-empty | python -m vllatent.manifest --validate -
 
-      - name: Pure unit tests (torch/sim-marked tests auto-skip)
+      - name: Pure unit tests (torch/sim-marked tests deselected)
         run: pytest -q -m "not torch and not sim"

@@ -50,7 +50,8 @@ class PredictorBlock(nn.Module):
 
     Uses F.scaled_dot_product_attention (flash/memory-efficient kernels)
     instead of nn.MultiheadAttention to avoid materializing the full
-    S×S attention matrix (1568×1568 at H=3,T=4,P=196).
+    S×S attention matrix, where S=(H+1+T)P (2352 tokens at the current
+    H=3, T=8, P=196 configuration).
     """
 
     def __init__(self, dim: int, heads: int, mlp_ratio: int, dropout: float) -> None:

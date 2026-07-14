@@ -1,10 +1,29 @@
-# I/O Contract — vllatent-ego-drone (Phase A)
+# Historical I/O Contract — vllatent-ego-drone Phase A
 
-> **⚠ PIVOT 2026-06-19 — SPORTS-FOLLOWING.** This document describes the Phase A AerialVLN I/O
-> contract. Retired A5 teacher references are **historical** — the sports pipeline uses MegaSaM VO
-> for ego-motion and TrackVLA (Phase C) as the teacher. AirSim render references apply to the
-> historical cache path only; sports data uses ``vllatent.ingest.pipeline``. The tensor shapes
-> (196×D, 4-DoF waypoint, H=3/T=4) and the seam dataclasses remain valid.
+> **Historical reference only.** Everything below the current-B3 note records the retired Phase-A
+> AerialVLN contract. Its T=4 rollout, language tokens, discrete actions, teacher seams, and direct
+> waypoint output are not the active B3 model contract. They remain documented for pure-tier
+> compatibility fixtures and possible historical reproduction. AirSim paths are inactive.
+
+## Current B3 boundary
+
+The active contract is defined by `plans/phase-b3-human-conditioned-world-model.md` and implemented by
+`SportsTrainingDataset`/`TrainingBatch` plus `HumanWorldModel`:
+
+```text
+observed latents (H=3) + history mask + candidate future plan (T=8, 6-D) + dt
+    -> future person-weighted DINO latents + person state (cx, cy, log_h, visibility)
+```
+
+The plan fields are
+`[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio, yaw_rate_norm, valid]`.
+Future latents, person labels, masks, and confidences are loss targets only and never enter model
+`forward`. The current model has no language input and emits no metric waypoint. B3.6 remains blocked,
+so B3.7/H20 is ineligible.
+
+---
+
+## Historical Phase-A contract
 
 > **What this is.** A *transcription* of the **LOCKED** I/O contract for in-repo reference. The
 > authoritative source is the vault design doc
@@ -13,7 +32,7 @@
 > re-derive or relitigate** the architecture — it pins the four seams + the loader tuple + the data
 > foot-guns so code in steps 3–10 has a single in-repo reference. Phase-A DoD item (1).
 
-## 0. Tensor I/O table (arch §4) — the seam definition
+### 0. Tensor I/O table (arch §4) — historical seam definition
 
 | Symbol | Shape / type | Frame / units | Source |
 |---|---|---|---|
@@ -33,13 +52,12 @@
 > `Waypoint.delta_4dof (4,)` f32, AirSim-NED body. The loader-input tuple is `StepSample` (§2).
 >
 > **Retired teacher distillation seam (A5.9).** The old teacher/cache path was invalidated by
-> the sports pivot. The active B2 target is scale-free future action supervision from sports
-> ego-motion; old teacher fields in pure schemas/manifests are compatibility records only, not a
+> the sports pivot. Teacher fields in pure schemas/manifests are compatibility records only, not a
 > runnable training path.
 
 ---
 
-## 1. The four locked seams
+### 1. The four historical Phase-A seams
 
 ### (a) Action representation — discrete codebook `0..7` → per-step FiLM
 
@@ -89,10 +107,10 @@
 
 ---
 
-## 2. Loader output tuple (arch §6 item 5)
+### 2. Historical loader output tuple (arch §6 item 5)
 
-Per step the active sports loader (`vllatent/data/sports_loader.py`) emits the `StepSample`
-(`vllatent/schemas.py`, step 3) plus sports targets:
+The retired Phase-A loader contract emitted `StepSample` (`vllatent/schemas.py`) plus its historical
+targets. The current sports loader emits `SportsSample` and is summarized in the current-B3 note above.
 
 ```
 (z_t, history_latents, history_mask, lang_tokens, lang_mask, action_id, z_next, delta_4dof, future_frame_rgb)
@@ -115,7 +133,7 @@ tuples.
 
 ---
 
-## 3. Frame & convention hazards (the load-bearing data foot-guns)
+### 3. Historical frame and convention hazards
 
 ### Foot-gun #1 — orientation formats (audit + render) — CONFIRMED against real data (step 5b)
 
@@ -158,7 +176,7 @@ flag in the cache manifest**. Wrong channel order silently poisons every cached 
 
 ---
 
-## 4. Licenses (relevant at publication / productization)
+### 4. Historical licenses
 
 - **AerialVLN dataset:** `CC BY-NC-SA 4.0` — **non-commercial**, share-alike. Recorded again in
   `DEV_LOG.md` at step 6 when the real slice is fetched.
@@ -167,9 +185,7 @@ flag in the cache manifest**. Wrong channel order silently poisons every cached 
 
 ---
 
-## 5. Source of truth
+### 5. Historical source of truth
 
-Vault `[[arch-design-2026-06-08-latent-pred]]` is **authoritative** for the locked architecture and
-I/O contract; `[[dev-decision-2026-06-07-latent-pred-pipeline]]` for phases/DoD. This repo is
-authoritative for **code state**. This file transcribes the contract; any change to the contract is a
-new vault decision entry, not an edit here.
+Vault `[[arch-design-2026-06-08-latent-pred]]` records the historical Phase-A architecture and I/O
+intent. For current code and B3 execution state, use the B3 plan, `DEV_LOG.md`, and the implementation.
