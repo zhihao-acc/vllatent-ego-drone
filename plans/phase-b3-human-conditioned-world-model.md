@@ -112,8 +112,12 @@ model `forward`.
 The B3 wrapper returns:
 
 - `predicted_latents (B,T,196,768)`;
-- `predicted_person_state (B,T,4)` as `(cx, cy, log_h, visibility_logit)`;
-- optional inverse-dynamics auxiliary `predicted_plan (B,T,6)`.
+- `predicted_person_state (B,T,4)` as `(cx, cy, log_h, visibility_logit)`.
+
+Cycle supervision is explicit rather than a `forward` output:
+`recover_plan(real_previous_latents, next_latents) -> (B,T,5)` recovers only
+the physical plan fields. This prevents accidental predicted-to-predicted plan
+reconstruction and keeps the semantic `valid` bit out of regression.
 
 `LatentPredictor` changes from global 4-D action FiLM to per-step 6-D plan
 conditioning plus per-step `dt`. The B3 path keeps residual latent output.
@@ -127,9 +131,9 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.2 | done | AUTO + user pasteback, verified 2026-07-07 | Person-track cache backfill, bad-source deletion, and data screens |
 | B3.3 | done | AUTO, verified 2026-07-07 | 6-D plan-token contract and T configurability |
 | B3.4 | done | AUTO/local, verified 2026-07-12 | Strict-window G0/K1/K2 diagnostic passed |
-| B3.4a | in_progress | AUTO local + USER-gated expansion | YOLO-standard cache cleanup, human-positive pre-clipping filter, and ski-first data expansion prep |
+| B3.4a | done | AUTO local + USER-gated future regeneration, verified 2026-07-12 | YOLO-standard cache/data path prepared; legacy ambiguity provenance is unrecoverable from retained NPZs |
 | B3.5 | done | AUTO, verified 2026-07-08 | Patch-local future queries and detector-visible person-state target semantics |
-| B3.6 | blocked | AUTO/local, verified 2026-07-12 | G1b passes; held-out G1a/G1d fail on weak plan dependence |
+| B3.6 | blocked | AUTO/local, verified 2026-07-13 | Corrected tiny G1b passes, but G1a/G1d fail; held-out rerun is ineligible |
 | B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
 | B3.8 | pending | AUTO local, Orin later USER-gated | CEM/MPPI hindsight-replay planner eval |
 
@@ -410,6 +414,12 @@ cache before starting B3.5.
   ambiguity guards (`selected_track_id`, second-best track evidence, ambiguity
   margin/window rejection) are deferred until after this strict-window training
   filter is in place.
+- 2026-07-12 local closeout: the retained cache has 1,100 clips / 100 sources /
+  12,499 exact strict `H=3,T=8` windows, and the strict data path is active.
+  Future ingest supports ambiguity rejection and exact configured `H+T` clips,
+  but second-track provenance cannot be reconstructed for the retained legacy
+  NPZs; that limitation requires user-gated frame regeneration rather than
+  further cache-only filtering.
 
 ### B3.5 - Per-Step 6-D Conditioning In Depth-6 Predictor
 
@@ -480,6 +490,47 @@ worse than null, `42.58%`/`59.77%` shuffled/flipped), while G1b still passes at
 all eight steps. B3.6 is blocked on objective/conditioning; B3.7/H20 is not
 eligible.
 
+2026-07-13 review-backed repair: replace the circular plan decoder with an
+action-blind verifier trained on real consecutive DINO transitions, freeze it,
+and apply cycle consistency to a real previous latent plus the predicted next
+latent. Regress only the five physical action fields. Whole-window plan dropout
+now returns its keep mask and dropped plans are excluded from the auxiliary.
+Model `forward` exposes no predicted-plan tensor or hidden plan dropout; the
+transition pair and keep mask must be supplied explicitly.
+The exact wrapper has `59,280,137` parameters, including `397,829` verifier
+parameters. Component/per-field losses and shared-predictor gradient
+norms/cosine are logged.
+
+G1d now uses three fixed global different-clip derangements, no fixed points,
+minimum physical-plan RMS distance `0.10`, a strict per-window majority across
+negatives, window-weighted aggregate losses, required `5%` shuffled/flipped
+margins, source-cluster bootstrap intervals for paired margins, boundary-aware
+Wilson intervals over source-majority outcomes, a minimum five-source coverage
+floor, and a yaw-only person-center geometry check. Overlapping windows are
+clustered by source rather than treated as independent. Serious capped runs use source-balanced
+selection and report represented rather than nominal sources. Future ingest
+accepts exact configured `H+T` clips and ranks subject tracks by strict-window
+count first. The old K1/K2 results remain diagnostics rather than proof of
+incremental causal plan signal; legacy second-track ambiguity provenance cannot
+be recovered from the retained caches.
+
+The corrected same-seed 16-window tiny run (`400` verifier + `400` predictor
+steps, batch `2`, `lambda_inverse_plan=0.01`) passed the verifier prerequisite
+at `+89.70%` versus a train-mean-plan baseline and improved training loss by
+`41.24%`. G1a still failed: `+15.82%` versus persistence but only `+1.38%`
+versus null. G1b passed every `k<=8`. G1d failed: strict-majority shuffled and
+flipped wins were each `16/16` with `9/9` source-majority wins (Wilson lower
+`70.09%`), but aggregate margins were only `+3.04%` (source-cluster paired 95%
+CI `1.93–4.32%`) and `+3.24%` (`2.51–3.92%`), and yaw geometry was `0/8`
+across six eligible sources (Wilson upper `39.03%`). A single paired
+`lambda_inverse_plan=0` diagnostic produced `+15.20%` persistence, `+1.57%`
+null, `14/16` shuffled and `15/16` flipped wins, `+2.44%`/`+1.56%` margins,
+and `0/8` yaw geometry. The final pair suggests a small conditioning effect,
+but repeated BF16 CUDA executions were not bit-deterministic, so sub-point
+deltas are directional single-run evidence rather than a multi-seed causal
+estimate. Both objectives remain far below G1a/G1d. The source-held-out rerun
+was skipped because corrected tiny health failed; B3.7/H20 remains ineligible.
+
 - DoD: tiny overfit works; G1a/G1b/G1c/G1d pass locally or a precise blocker is
   recorded; K6 source-count trend is reported before paid scaling.
 - Test:
@@ -519,7 +570,7 @@ prior when available.
 | G1a | conditioned predictor beats person-weighted latent persistence `>=10%` and null-plan `>=5%` | objective/conditioning bug hunt |
 | G1b | rollout beats persistence at every k<=8 | shorten/reweight before scaling |
 | G1c/K4 | probe transfer passes and gameability check passes | calibrate probes or state-head primary |
-| G1d/K3/K5-lite | true 6-D plan beats shuffled/flipped plans on `>=70%` windows | strengthen conditioning before capacity/data |
+| G1d/K3/K5-lite | true 6-D plan wins on `>=70%` windows, source-majority Wilson confidence is above chance with at least five sources, aggregate shuffled/flipped margins reach `>=5%` with positive source-cluster paired confidence, and yaw-only flips move predicted person center correctly across at least five eligible sources | strengthen conditioning before capacity/data |
 | K6 | source-count ablation improves with more sources | expand data before more H20/model scaling |
 
 ## Ralph Execution Rules

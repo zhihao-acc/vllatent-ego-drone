@@ -5,6 +5,7 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
+from vllatent.model.human_world_model import TransitionPlanVerifier  # noqa: E402
 from vllatent.plan_tokens import PLAN_TOKEN_DIM  # noqa: E402
 from vllatent.schemas import PATCH_TOKENS  # noqa: E402
 from vllatent.train.world_model_losses import (  # noqa: E402
@@ -14,6 +15,7 @@ from vllatent.train.world_model_losses import (  # noqa: E402
     person_patch_weights,
     person_state_loss,
     person_weighted_latent_loss,
+    physical_inverse_plan_loss,
 )
 
 
@@ -112,12 +114,80 @@ class TestWorldModelLosses:
         loss.backward()
         assert pred.grad is not None
 
+    def test_physical_inverse_loss_excludes_valid_field_and_reports_components(self) -> None:
+        predicted = torch.zeros(1, 2, PLAN_TOKEN_DIM - 1, requires_grad=True)
+        target_valid_zero = torch.zeros(1, 2, PLAN_TOKEN_DIM)
+        target_valid_one = target_valid_zero.clone()
+        target_valid_one[..., -1] = 1.0
+        mask = torch.ones(1, 2, dtype=torch.bool)
+
+        valid_zero = physical_inverse_plan_loss(
+            predicted,
+            target_valid_zero,
+            mask,
+        )
+        valid_one = physical_inverse_plan_loss(
+            predicted,
+            target_valid_one,
+            mask,
+        )
+
+        assert valid_zero.total.item() == pytest.approx(0.0, abs=1e-7)
+        assert torch.allclose(valid_zero.total, valid_one.total, atol=1e-7)
+        assert valid_one.per_field.shape == (PLAN_TOKEN_DIM - 1,)
+        assert torch.allclose(valid_one.per_field, torch.zeros_like(valid_one.per_field))
+
+        physical_target = target_valid_one.clone()
+        physical_target[..., : PLAN_TOKEN_DIM - 1] = torch.tensor(
+            [0.25, 0.5, 0.75, 1.0, 1.25]
+        )
+        physical = physical_inverse_plan_loss(predicted, physical_target, mask)
+        assert torch.all(physical.per_field > 0.0)
+        assert physical.total.item() == pytest.approx(physical.per_field.mean().item())
+
+    def test_frozen_verifier_cycle_routes_gradients_and_masks_dropped_rows(self) -> None:
+        torch.manual_seed(0)
+        verifier = TransitionPlanVerifier(dim=8, hidden_dim=16, dropout=0.0)
+        verifier.eval()
+        verifier.requires_grad_(False)
+        previous = torch.randn(2, 3, PATCH_TOKENS, 8)
+        predicted_next = torch.randn(
+            2,
+            3,
+            PATCH_TOKENS,
+            8,
+            requires_grad=True,
+        )
+        target_plan = torch.randn(2, 3, PLAN_TOKEN_DIM)
+        target_plan[..., -1] = 1.0
+        valid_mask = torch.ones(2, 3, dtype=torch.bool)
+        whole_plan_keep_mask = torch.tensor(
+            [
+                [True, True, True],
+                [False, False, False],
+            ]
+        )
+
+        recovered = verifier(previous.detach(), predicted_next)
+        loss = physical_inverse_plan_loss(
+            recovered,
+            target_plan,
+            valid_mask,
+            plan_keep_mask=whole_plan_keep_mask,
+        )
+        loss.total.backward()
+
+        assert predicted_next.grad is not None
+        assert predicted_next.grad[0].abs().sum() > 0
+        assert torch.count_nonzero(predicted_next.grad[1]) == 0
+        assert all(parameter.grad is None for parameter in verifier.parameters())
+
     def test_combined_loss_returns_components(self) -> None:
         pred_lat = torch.randn(2, 8, PATCH_TOKENS, 16, requires_grad=True)
         target_lat = torch.randn(2, 8, PATCH_TOKENS, 16)
         pred_state = torch.randn(2, 8, 4, requires_grad=True)
         state, valid, conf = _state()
-        pred_plan = torch.randn(2, 8, PLAN_TOKEN_DIM, requires_grad=True)
+        pred_plan = torch.randn(2, 8, PLAN_TOKEN_DIM - 1, requires_grad=True)
         plan = torch.randn(2, 8, PLAN_TOKEN_DIM)
         plan_valid = torch.ones(2, 8, dtype=torch.bool)
 
@@ -138,4 +208,5 @@ class TestWorldModelLosses:
         assert out.latent.shape == ()
         assert out.person_state.shape == ()
         assert out.inverse_plan.shape == ()
+        assert out.inverse_plan_per_field.shape == (PLAN_TOKEN_DIM - 1,)
         assert -1.0 <= out.latent_cosine.item() <= 1.0

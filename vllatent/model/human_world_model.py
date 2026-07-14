@@ -17,11 +17,112 @@ from vllatent.schemas import EMBED_DIM, HISTORY, PATCH_TOKENS
 
 
 class HumanWorldModelOutput(NamedTuple):
-    """B3 model outputs for latent, person-state, and inverse-plan supervision."""
+    """B3 rollout outputs; cycle verification requires an explicit transition."""
 
     predicted_latents: torch.Tensor       # (B, T, 196, D)
     predicted_person_state: torch.Tensor  # (B, T, 4): cx, cy, log_h, visibility_logit
-    predicted_plan: torch.Tensor          # (B, T, 6)
+
+
+def apply_whole_plan_dropout(
+    planned_actions: torch.Tensor,
+    *,
+    dropout_p: float,
+    training: bool,
+    generator: torch.Generator | None = None,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Drop complete plan sequences and return the exact retained-step mask.
+
+    Whole-window dropout makes the all-zero null-plan branch part of training and
+    lets the loss exclude actions that were unavailable to the predictor.
+    """
+    if planned_actions.ndim != 3 or planned_actions.shape[-1] != PLAN_TOKEN_DIM:
+        raise ValueError(
+            f"planned_actions: expected (B,T,{PLAN_TOKEN_DIM}), got {planned_actions.shape}"
+        )
+    if not 0.0 <= dropout_p <= 1.0:
+        raise ValueError(f"dropout_p must be in [0, 1], got {dropout_p}")
+
+    batch_size, horizon, _ = planned_actions.shape
+    if not training or dropout_p == 0.0:
+        keep_mask = torch.ones(
+            batch_size,
+            horizon,
+            device=planned_actions.device,
+            dtype=torch.bool,
+        )
+        return planned_actions, keep_mask
+    if dropout_p == 1.0:
+        keep_rows = torch.zeros(
+            batch_size,
+            1,
+            device=planned_actions.device,
+            dtype=torch.bool,
+        )
+    else:
+        keep_rows = torch.rand(
+            batch_size,
+            1,
+            device=planned_actions.device,
+            generator=generator,
+        ) >= dropout_p
+    keep_mask = keep_rows.expand(-1, horizon)
+    conditioned = planned_actions * keep_mask.unsqueeze(-1).to(dtype=planned_actions.dtype)
+    return conditioned, keep_mask
+
+
+class TransitionPlanVerifier(nn.Module):
+    """Recover physical plan fields from an action-blind latent transition."""
+
+    def __init__(
+        self,
+        dim: int = EMBED_DIM,
+        hidden_dim: int = 256,
+        dropout: float = 0.1,
+    ) -> None:
+        super().__init__()
+        if dim < 1:
+            raise ValueError(f"dim must be >= 1, got {dim}")
+        if hidden_dim < PLAN_TOKEN_DIM - 1:
+            raise ValueError(
+                f"hidden_dim must be >= {PLAN_TOKEN_DIM - 1}, got {hidden_dim}"
+            )
+        self.dim = dim
+        self.net = nn.Sequential(
+            nn.LayerNorm(2 * dim),
+            nn.Linear(2 * dim, hidden_dim),
+            nn.GELU(),
+            nn.Dropout(dropout),
+            nn.Linear(hidden_dim, PLAN_TOKEN_DIM - 1),
+        )
+
+    def forward(
+        self,
+        previous_latents: torch.Tensor,
+        next_latents: torch.Tensor,
+    ) -> torch.Tensor:
+        """Predict five physical fields from consecutive `(B,T,P,D)` states."""
+        if previous_latents.ndim != 4:
+            raise ValueError(
+                "previous_latents: expected (B,T,P,D), "
+                f"got {previous_latents.shape}"
+            )
+        if next_latents.ndim != 4:
+            raise ValueError(
+                f"next_latents: expected (B,T,P,D), got {next_latents.shape}"
+            )
+        if previous_latents.shape != next_latents.shape:
+            raise ValueError(
+                "previous/next latent shape mismatch: "
+                f"{previous_latents.shape} vs {next_latents.shape}"
+            )
+        if previous_latents.shape[-1] != self.dim:
+            raise ValueError(
+                f"latent last dimension: expected {self.dim}, got {previous_latents.shape[-1]}"
+            )
+
+        previous = previous_latents.float().mean(dim=2)
+        transition = (next_latents.float() - previous_latents.float()).mean(dim=2)
+        return self.net(torch.cat([previous, transition], dim=-1))
 
 
 class PlanConditionedLatentPredictor(nn.Module):
@@ -37,7 +138,6 @@ class PlanConditionedLatentPredictor(nn.Module):
         history: int = HISTORY,
         horizon: int = 8,
         plan_dim: int = PLAN_TOKEN_DIM,
-        action_dropout_p: float = 0.2,
         patch_tokens: int = PATCH_TOKENS,
     ) -> None:
         super().__init__()
@@ -49,8 +149,6 @@ class PlanConditionedLatentPredictor(nn.Module):
             raise ValueError(f"horizon must be >= 1, got {horizon}")
         if plan_dim != PLAN_TOKEN_DIM:
             raise ValueError(f"plan_dim is locked to {PLAN_TOKEN_DIM}, got {plan_dim}")
-        if not (0.0 <= action_dropout_p < 1.0):
-            raise ValueError(f"action_dropout_p must be in [0, 1), got {action_dropout_p}")
         if patch_tokens < 1:
             raise ValueError(f"patch_tokens must be >= 1, got {patch_tokens}")
 
@@ -60,7 +158,6 @@ class PlanConditionedLatentPredictor(nn.Module):
         self.history = history
         self.horizon = horizon
         self.plan_dim = plan_dim
-        self.action_dropout_p = action_dropout_p
         self.n_patches = patch_tokens
 
         self.blocks = nn.ModuleList(
@@ -99,17 +196,6 @@ class PlanConditionedLatentPredictor(nn.Module):
                 if j < n_visible or j <= i:
                     frame_mask[i, j] = True
         return frame_mask.repeat_interleave(self.n_patches, dim=0).repeat_interleave(self.n_patches, dim=1)
-
-    def _maybe_drop_plans(self, planned_actions: torch.Tensor) -> torch.Tensor:
-        if not self.training or self.action_dropout_p <= 0.0:
-            return planned_actions
-        keep = torch.rand(
-            planned_actions.shape[0],
-            planned_actions.shape[1],
-            1,
-            device=planned_actions.device,
-        ) >= self.action_dropout_p
-        return planned_actions * keep.to(dtype=planned_actions.dtype)
 
     def _validate_inputs(
         self,
@@ -152,7 +238,7 @@ class PlanConditionedLatentPredictor(nn.Module):
         dtype = self.temporal_embed.dtype
         history = history_latents.to(device=device, dtype=dtype)
         current = z_t.to(device=device, dtype=dtype)
-        plan = self._maybe_drop_plans(planned_actions.to(device=device, dtype=dtype))
+        plan = planned_actions.to(device=device, dtype=dtype)
         dt = dt_seconds.to(device=device, dtype=dtype).unsqueeze(-1)
 
         history_valid = history_mask.to(device=device, dtype=torch.bool)
@@ -217,7 +303,7 @@ class PlanConditionedLatentPredictor(nn.Module):
 
 
 class HumanWorldModel(nn.Module):
-    """B3 wrapper: plan-conditioned latent rollout plus person and inverse-plan heads."""
+    """B3 wrapper: plan-conditioned latent rollout plus an explicit transition verifier."""
 
     def __init__(
         self,
@@ -229,7 +315,6 @@ class HumanWorldModel(nn.Module):
         history: int = HISTORY,
         horizon: int = 8,
         hidden_dim: int = 256,
-        action_dropout_p: float = 0.2,
         patch_tokens: int = PATCH_TOKENS,
     ) -> None:
         super().__init__()
@@ -244,7 +329,6 @@ class HumanWorldModel(nn.Module):
             dropout=dropout,
             history=history,
             horizon=horizon,
-            action_dropout_p=action_dropout_p,
             patch_tokens=patch_tokens,
         )
         self.person_state_head = nn.Sequential(
@@ -254,12 +338,10 @@ class HumanWorldModel(nn.Module):
             nn.Dropout(dropout),
             nn.Linear(hidden_dim, 4),
         )
-        self.inverse_plan_head = nn.Sequential(
-            nn.LayerNorm(dim),
-            nn.Linear(dim, hidden_dim),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(hidden_dim, PLAN_TOKEN_DIM),
+        self.transition_plan_verifier = TransitionPlanVerifier(
+            dim=dim,
+            hidden_dim=hidden_dim,
+            dropout=dropout,
         )
 
     def forward(
@@ -282,8 +364,15 @@ class HumanWorldModel(nn.Module):
         return HumanWorldModelOutput(
             predicted_latents=predicted_latents,
             predicted_person_state=self.person_state_head(pooled),
-            predicted_plan=self.inverse_plan_head(pooled),
         )
+
+    def recover_plan(
+        self,
+        previous_latents: torch.Tensor,
+        next_latents: torch.Tensor,
+    ) -> torch.Tensor:
+        """Recover physical actions from an explicitly supplied transition pair."""
+        return self.transition_plan_verifier(previous_latents, next_latents)
 
 
 def count_parameters(module: nn.Module) -> int:
@@ -295,5 +384,7 @@ __all__ = [
     "HumanWorldModel",
     "HumanWorldModelOutput",
     "PlanConditionedLatentPredictor",
+    "TransitionPlanVerifier",
+    "apply_whole_plan_dropout",
     "count_parameters",
 ]

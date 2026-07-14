@@ -99,13 +99,104 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.2 — Person-track cache backfill and data screens | done | 2026-07-07 | Backfill worked; low/no-person and bad-label sources excluded from local cache; invalid/tiny visible boxes are sanitized; latest strict T=8 screen has 778 clips / 28 sources / 14,900 windows / 2,676 full-history person-valid |
 | B3.3 — 6-D plan-token contract and T configurability | done | 2026-07-07 | `PLAN_TOKEN_DIM=6`, yaw-rate norm, valid mask, T=8 through loader/collate/model; B3 `planned_actions` batch input added |
 | B3.4 — Stage-0 probes plus K1/K2 | done | 2026-07-12 | Strict-window refire passed G0/K1/K2 on 1,100 clips; old 0.95 AUROC remains retired as a hard blocker |
-| B3.4a — YOLO-standard data cleanup and expansion prep | in_progress | 2026-07-12 | Strict cache is screened; legacy cache still lacks second-track ambiguity provenance |
+| B3.4a — YOLO-standard data cleanup and expansion prep | done | 2026-07-12 | Strict cache/data path is prepared; legacy second-track ambiguity remains an explicit, regeneration-only limitation |
 | B3.5 — Depth-6 per-step conditioned world model | done | 2026-07-08 | Patch-local future queries fixed; detector-visible person-state visibility target; exact wrapper params `59,082,250` |
-| B3.6 — Stage-1 local depth-6 gate | blocked | 2026-07-12 | Strict G1b passes, but held-out G1a/G1d fail because learned plan dependence remains near zero |
+| B3.6 — Stage-1 local depth-6 gate | blocked | 2026-07-13 | Review-backed transition verifier passes its tiny diagnostic, but corrected tiny G1a/G1d fail; source-held-out rerun skipped by protocol |
 | B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
 | B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `superseded`.
+
+---
+
+## 2026-07-13 — B3.6 transition-verifier repair fails corrected tiny plan gates
+
+**Status:** B3.6 remains blocked and B3.7/H20 remains ineligible. The
+review-supported objective repair produces a small measurable conditioning
+effect, but it does not satisfy corrected tiny G1a or G1d. Per protocol, no new
+source-held-out training run was started.
+
+**Review synthesis and repair.** The previous inverse head was circular: it
+decoded the supplied plan from already plan-conditioned predicted latents. It
+has been replaced by an action-blind transition verifier trained on real
+consecutive DINO latents. The verifier is then frozen, and cycle consistency
+uses a real previous latent plus the predicted next latent to recover the five
+physical plan fields; the semantic `valid` bit is not regressed. Plan dropout is
+now whole-window, exposes its exact keep mask, and excludes dropped plans from
+cycle supervision. Model `forward` no longer exposes a predicted-plan tensor or
+hides internal dropout; callers must explicitly invoke
+`recover_plan(real_previous, next_latents)`. The harness logs primary/cycle
+components, per-field inverse losses, and shared-predictor gradient
+norms/cosine.
+
+The G1d measurement now uses three deterministic global different-clip
+derangements with no fixed points, a minimum physical-plan RMS distance of
+`0.10`, strict per-window majority across the negatives, window-weighted
+aggregate losses, the contractual `>=5%` shuffled/flipped margins, paired
+source-cluster bootstrap intervals for margins, boundary-aware Wilson intervals
+over source-majority outcomes, and a yaw-only person-center geometry check. G1d
+requires at least five represented sources and five yaw-eligible sources. The
+unsafe within-batch shuffle helper is removed. The tiny confidence calculation
+uses the `9` represented sources; overlapping windows are not treated as
+independent. The tiny
+banks were `89.58%` cross-source and had observed
+minimum/median RMS distances `0.11774`/`0.75100`. Serious capped runs now select
+windows source-balanced and report only actually represented sources. Future
+ingest now accepts exact configured `H+T` clips and ranks candidate subject
+tracks by strict-window count first. Legacy second-track ambiguity provenance
+cannot be reconstructed from the retained NPZs.
+
+The review also narrows the old Stage-0 interpretation: K1 does not implement a
+history-only incremental-plan ablation, and K2 does not compare an otherwise
+identical history/current-only model. Their strict pass remains a data/model
+sanity diagnostic, not evidence of causal plan signal.
+
+**Corrected tiny repair run.** Seed `0`, the same 16 train/eval windows, batch
+`2`, 400 verifier steps, 400 predictor steps, action-dropout `0.2`, and
+`lambda_inverse_plan=0.01`:
+
+- the real-transition verifier reached loss `0.038646` versus train-mean-plan
+  baseline `0.375203` (`+89.70%`) and passed its prerequisite;
+- training loss-window improvement was `41.24%`; the weighted cycle gradient
+  norm was `2.65%` of the primary norm with cosine `0.0272`;
+- G1a failed: `+15.82%` versus persistence passes its `10%` component, but
+  `+1.38%` versus null misses the required `5%`;
+- G1b passed at every `k<=8`;
+- G1d failed: true beat a strict majority of shuffled negatives and the flipped
+  plan on `16/16` windows; all `9/9` source majorities won (Wilson 95% CI
+  `70.09–100%`). Aggregate margins were only `+3.04%` versus shuffled
+  (source-cluster paired 95% CI `1.93–4.32%`) and `+3.24%` versus flipped
+  (`2.51–3.92%`), below the required `5%`; yaw geometry was `0/8` across six
+  eligible sources (zero source-majority wins, Wilson 95% CI `0–39.03%`).
+
+The repository's NED/body and image-center conventions confirm that positive
+yaw must move a static subject left; the two failed `0/8` responses are not
+explained by a metric sign inversion.
+
+**Paired no-cycle control.** One review-requested same-seed
+`lambda_inverse_plan=0` control was run; this was not a hyperparameter grid. It
+improved `+15.20%` over persistence and `+1.57%` over null and passed G1b. It
+produced `14/16` shuffled and `15/16` flipped majority wins; source majorities
+were `8/9` (Wilson 95% CI `56.50–98.01%`) and `9/9` (`70.09–100%`). Margins
+were only `+2.44%` shuffled (`1.32–3.67%`) and `+1.56%` flipped
+(`0.85–2.24%`), with `0/8` correct yaw responses across six eligible sources.
+In this single pair, the `0.01` cycle term increases persistence separation by
+`0.62` percentage points and shuffled/flipped margins by `0.60`/`1.68` points,
+while null separation drops by `0.19` points; neither produces yaw geometry.
+Repeated BF16 CUDA executions were not bit-deterministic, so these deltas are
+directional single-run evidence, not a multi-seed causal estimate. Both
+objectives fail the same G1a/G1d completion criterion.
+
+Reports:
+`reports/b3_stage1_overfit_transition_verifier_local/metrics.json` and
+`reports/b3_stage1_overfit_transition_verifier_lambda0_local/metrics.json`.
+
+**Decision and verification.** The next repair must directly strengthen
+counterfactual plan conditioning/geometry; more steps, capacity, source scaling,
+or a held-out rerun are not justified by this tiny result. The focused model,
+loss, metric, harness, loader, tracking, and ingest suite passed (`152 passed`);
+Ruff and `git diff --check` passed. CUDA preflight passed before both runs on the
+local RTX 5060 Ti. No dataset file was changed.
 
 ---
 

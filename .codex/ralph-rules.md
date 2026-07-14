@@ -32,14 +32,14 @@ Every iteration starts by reading:
   - `B3.1` reviewed cleanup of obsolete B1/B2 runnable paths (done 2026-07-07),
   - `B3.2` person-track cache backfill and data screens (done 2026-07-07),
   - `B3.3` 6-D plan-token contract and T configurability (done 2026-07-07),
-  - `B3.4` Stage-0 probes plus K1/K2 (replanned; old `0.95` AUROC probe is a
-    diagnostic bug detector, not a hard blocker),
-  - `B3.4a` YOLO-standard data cleanup and expansion prep (active; add
-    human-positive filtering before auto clipping and prepare ski-first
-    user-gated expansion),
-  - `B3.5` depth-6 per-step 6-D conditioned world model (do not start while
-    B3.4a is active),
-  - `B3.6` Stage-1 local gates G1a-G1d,
+  - `B3.4` Stage-0 probes plus K1/K2 (done 2026-07-12; diagnostic only, not
+    proof of incremental causal plan signal),
+  - `B3.4a` YOLO-standard data cleanup and expansion prep (done locally
+    2026-07-12; legacy ambiguity needs future frame regeneration and is not
+    repairable in the retained NPZs),
+  - `B3.5` depth-6 per-step 6-D conditioned world model (done 2026-07-08),
+  - `B3.6` Stage-1 local gates G1a-G1d (blocked 2026-07-13: corrected tiny G1b
+    passes, but G1a/G1d fail),
   - `B3.7` USER-GATED H20 depth-6 run,
   - `B3.8` planner-facing CEM/MPPI hindsight-replay evaluation.
 
@@ -76,12 +76,11 @@ Every iteration starts by reading:
   or EGO-Planner integration before deterministic B3 gates pass.
 - H20/SSH/docker/long jobs remain user-gated. Codex prepares one command only at
   B3.7 if B3.6 passes.
-- Current stop: B3.4a is active. Do not tune source selection by AUROC. Clean or
-  exclude bad `.npz` only by YOLO/person-label evidence, add YOLO
-  human-positive filtering after object-negative filtering and before auto
-  clipping, then prepare ski-first data expansion. Video download/full cache
-  expansion remains user-gated; provide paste-ready commands instead of running
-  those jobs. Do not start B3.5.
+- Current stop: B3.6 remains blocked after the review-backed real-transition
+  verifier repair. Its corrected tiny run passes G1b but misses null-plan,
+  shuffled/flipped-margin, and yaw-geometry gates. Do not run the
+  source-held-out gate, data/capacity scaling, or B3.7/H20 until a defensible
+  counterfactual-conditioning repair passes the corrected tiny protocol.
 
 ## B3 Verification Checklist
 
@@ -108,7 +107,7 @@ A healthy B3 local handoff should report:
 | G1a | conditioned predictor beats person-weighted latent persistence `>=10%` and null-plan `>=5%` | objective/conditioning bug hunt |
 | G1b | rollout beats persistence at every k<=8 | shorten/reweight before scaling |
 | G1c/K4 | probe transfer passes and gameability check passes | calibrate probes or state-head primary |
-| G1d/K3/K5-lite | true 6-D plan beats shuffled/flipped plans on `>=70%` windows | strengthen conditioning before capacity/data |
+| G1d/K3/K5-lite | true 6-D plan wins on `>=70%` windows, source-majority Wilson confidence is above chance with at least five sources, `>=5%` aggregate shuffled/flipped margins have positive source-cluster paired confidence, and yaw/person-center geometry clears the same five-source confidence floor | strengthen conditioning before capacity/data |
 | K6 | source-count ablation improves with more sources | expand data before more H20/model scaling |
 
 ## User-Gated Paste Blocks

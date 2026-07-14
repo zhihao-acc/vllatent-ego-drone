@@ -11,6 +11,8 @@ from vllatent.model.human_world_model import (  # noqa: E402
     HumanWorldModel,
     HumanWorldModelOutput,
     PlanConditionedLatentPredictor,
+    TransitionPlanVerifier,
+    apply_whole_plan_dropout,
     count_parameters,
 )
 from vllatent.plan_tokens import PLAN_TOKEN_DIM  # noqa: E402
@@ -33,6 +35,59 @@ def _enable_condition_film(model: PlanConditionedLatentPredictor | HumanWorldMod
         final = film.net[-1]
         final.weight.data.normal_(std=0.05)
         final.bias.data.normal_(std=0.05)
+
+
+@pytest.mark.torch
+class TestTransitionPlanVerifier:
+    def test_is_action_blind_and_validates_transition_inputs(self) -> None:
+        verifier = TransitionPlanVerifier(dim=32, hidden_dim=64, dropout=0.0)
+        previous = torch.randn(2, 8, PATCH_TOKENS, 32)
+        next_latents = torch.randn_like(previous)
+
+        recovered = verifier(previous, next_latents)
+
+        assert recovered.shape == (2, 8, PLAN_TOKEN_DIM - 1)
+        signature = inspect.signature(TransitionPlanVerifier.forward)
+        assert tuple(signature.parameters) == (
+            "self",
+            "previous_latents",
+            "next_latents",
+        )
+        with pytest.raises(ValueError, match="previous_latents"):
+            verifier(previous[:, 0], next_latents[:, 0])
+        with pytest.raises(ValueError, match="previous/next"):
+            verifier(previous, next_latents[:, :-1])
+        with pytest.raises(ValueError, match="last dimension"):
+            verifier(previous[..., :-1], next_latents[..., :-1])
+
+    def test_whole_plan_dropout_returns_all_step_masks_and_null_rows(self) -> None:
+        plans = torch.ones(16, 8, PLAN_TOKEN_DIM)
+        generator = torch.Generator().manual_seed(0)
+
+        conditioned, keep_mask = apply_whole_plan_dropout(
+            plans,
+            dropout_p=0.5,
+            training=True,
+            generator=generator,
+        )
+
+        assert keep_mask.shape == plans.shape[:2]
+        assert keep_mask.dtype == torch.bool
+        assert torch.all(keep_mask == keep_mask[:, :1])
+        assert torch.any(keep_mask[:, 0])
+        assert torch.any(~keep_mask[:, 0])
+        assert torch.equal(conditioned[keep_mask], plans[keep_mask])
+        assert torch.count_nonzero(conditioned[~keep_mask]) == 0
+        assert torch.count_nonzero(conditioned[~keep_mask[:, 0]]) == 0
+
+        eval_conditioned, eval_keep_mask = apply_whole_plan_dropout(
+            plans,
+            dropout_p=0.5,
+            training=False,
+            generator=generator,
+        )
+        assert torch.equal(eval_conditioned, plans)
+        assert torch.all(eval_keep_mask)
 
 
 @pytest.mark.torch
@@ -75,27 +130,25 @@ class TestPlanConditionedLatentPredictor:
         assert not torch.allclose(out1[:, 6], out2[:, 6], atol=1e-6)
 
     def test_action_dropout_only_applies_in_training(self) -> None:
-        model = PlanConditionedLatentPredictor(dim=32, depth=1, heads=4, horizon=8, action_dropout_p=0.5)
-        history, z_t, mask, plan, dt = _inputs(batch_size=1, dim=32, horizon=8)
-        model.eval()
-        with torch.no_grad():
-            eval_a = model(history, z_t, mask, plan, dt)
-            eval_b = model(history, z_t, mask, plan, dt)
-        assert torch.allclose(eval_a, eval_b, atol=1e-7)
+        plan = torch.ones(2, 8, PLAN_TOKEN_DIM)
+        eval_plan, eval_keep = apply_whole_plan_dropout(
+            plan,
+            dropout_p=1.0,
+            training=False,
+        )
+        train_plan, train_keep = apply_whole_plan_dropout(
+            plan,
+            dropout_p=1.0,
+            training=True,
+        )
+        assert torch.equal(eval_plan, plan)
+        assert torch.all(eval_keep)
+        assert torch.count_nonzero(train_plan) == 0
+        assert not torch.any(train_keep)
 
-        model.train()
-        train_a = model(history, z_t, mask, plan, dt)
-        train_b = model(history, z_t, mask, plan, dt)
-        assert not torch.allclose(train_a, train_b, atol=1e-7)
-
-    def test_action_dropout_does_not_scale_plan_valid_field(self) -> None:
-        model = PlanConditionedLatentPredictor(dim=32, depth=1, heads=4, horizon=8, action_dropout_p=0.5)
-        model.train()
-        plan = torch.ones(16, 8, PLAN_TOKEN_DIM)
-        torch.manual_seed(0)
-        dropped = model._maybe_drop_plans(plan)
-        assert torch.all((dropped[..., 5] == 0.0) | (dropped[..., 5] == 1.0))
-        assert torch.any(dropped[..., 5] == 0.0)
+    def test_predictor_does_not_hide_dropout_without_a_keep_mask(self) -> None:
+        signature = inspect.signature(PlanConditionedLatentPredictor.__init__)
+        assert "action_dropout_p" not in signature.parameters
 
     def test_residual_delta_is_patch_local(self) -> None:
         model = PlanConditionedLatentPredictor(dim=32, depth=1, heads=4, horizon=8, dropout=0.0)
@@ -126,7 +179,14 @@ class TestHumanWorldModel:
         assert isinstance(out, HumanWorldModelOutput)
         assert out.predicted_latents.shape == (2, 8, PATCH_TOKENS, 32)
         assert out.predicted_person_state.shape == (2, 8, 4)
-        assert out.predicted_plan.shape == (2, 8, PLAN_TOKEN_DIM)
+        assert not hasattr(out, "predicted_plan")
+
+        previous = torch.cat(
+            [_inputs(dim=32, horizon=8)[1].unsqueeze(1), out.predicted_latents[:, :-1]],
+            dim=1,
+        )
+        recovered = model.recover_plan(previous, out.predicted_latents)
+        assert recovered.shape == (2, 8, PLAN_TOKEN_DIM - 1)
 
     def test_forward_signature_has_no_future_targets(self) -> None:
         sig = inspect.signature(HumanWorldModel.forward)
@@ -146,4 +206,4 @@ class TestHumanWorldModel:
         model = HumanWorldModel(dim=768, depth=6, heads=12, horizon=8)
         n_params = count_parameters(model)
         assert 50_000_000 < n_params < 70_000_000
-        assert n_params == 59_082_250
+        assert n_params == 59_280_137

@@ -1,8 +1,10 @@
 """Tests for the B3 Stage-1 training harness helpers."""
+
 from __future__ import annotations
 
 import pytest
 
+from scripts import train_sports_b3 as harness_module
 from scripts.train_sports_b3 import (
     limit_indices,
     loss_window_improvement,
@@ -78,3 +80,59 @@ def test_loss_window_improvement_handles_short_runs() -> None:
 def test_b3_harness_defaults_to_strict_person_windows() -> None:
     args = parse_args([])
     assert args.strict_person_windows
+
+
+def test_source_balanced_limit_covers_all_sources_when_budget_allows() -> None:
+    sample_sources = ["dominant"] * 100 + ["small"] * 2 + ["singleton"]
+    indices = list(range(len(sample_sources)))
+
+    first = harness_module.source_balanced_limit_indices(
+        indices,
+        sample_sources,
+        max_samples=9,
+        seed=7,
+    )
+    second = harness_module.source_balanced_limit_indices(
+        indices,
+        sample_sources,
+        max_samples=9,
+        seed=7,
+    )
+
+    assert first == second
+    assert len(first) == 9
+    assert set(first).issubset(indices)
+    assert {sample_sources[index] for index in first} == {
+        "dominant",
+        "small",
+        "singleton",
+    }
+
+
+def test_represented_sources_for_report_uses_only_selected_indices() -> None:
+    sample_sources = ["a", "a", "b", "b", "c", "c"]
+    nominal_split_sources = ["a", "b", "c"]
+    selected_indices = [0, 1, 4]
+
+    represented = harness_module.represented_sources(
+        sample_sources,
+        selected_indices,
+    )
+
+    assert represented == ["a", "c"]
+    assert represented != nominal_split_sources
+
+
+def test_real_transition_previous_latents_uses_anchor_then_real_targets() -> None:
+    torch = pytest.importorskip("torch")
+    z_t = torch.full((2, 196, 4), -1.0)
+    target = torch.stack(
+        [torch.full((2, 196, 4), float(step)) for step in range(1, 4)],
+        dim=1,
+    )
+
+    previous = harness_module.real_transition_previous_latents(z_t, target)
+
+    assert previous.shape == target.shape
+    assert torch.equal(previous[:, 0], z_t)
+    assert torch.equal(previous[:, 1:], target[:, :-1])

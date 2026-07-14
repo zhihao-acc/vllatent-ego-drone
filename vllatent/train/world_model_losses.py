@@ -21,7 +21,15 @@ class WorldModelLossOutput(NamedTuple):
     latent: torch.Tensor
     person_state: torch.Tensor
     inverse_plan: torch.Tensor
+    inverse_plan_per_field: torch.Tensor
     latent_cosine: torch.Tensor
+
+
+class PhysicalInversePlanLossOutput(NamedTuple):
+    """Physical inverse-plan objective and its five field-wise components."""
+
+    total: torch.Tensor
+    per_field: torch.Tensor
 
 
 def person_patch_weights(
@@ -164,6 +172,70 @@ def person_state_loss(
     return state_loss + visibility_weight * visibility
 
 
+def physical_inverse_plan_loss(
+    predicted_plan: torch.Tensor,
+    target_plan: torch.Tensor,
+    plan_valid_mask: torch.Tensor,
+    sample_weight: torch.Tensor | None = None,
+    *,
+    plan_keep_mask: torch.Tensor | None = None,
+    beta: float = 0.05,
+) -> PhysicalInversePlanLossOutput:
+    """Regress only the five physical plan fields on available valid steps."""
+    import torch
+    import torch.nn.functional as F
+
+    physical_dim = PLAN_TOKEN_DIM - 1
+    if predicted_plan.ndim != 3 or predicted_plan.shape[-1] != physical_dim:
+        raise ValueError(
+            f"predicted_plan: expected (B,T,{physical_dim}), got {predicted_plan.shape}"
+        )
+    if target_plan.shape != predicted_plan.shape[:2] + (PLAN_TOKEN_DIM,):
+        raise ValueError(
+            "target_plan: expected "
+            f"{predicted_plan.shape[:2] + (PLAN_TOKEN_DIM,)}, got {target_plan.shape}"
+        )
+    if plan_valid_mask.shape != predicted_plan.shape[:2]:
+        raise ValueError(f"plan_valid_mask: expected {predicted_plan.shape[:2]}, got {plan_valid_mask.shape}")
+
+    mask = plan_valid_mask.to(device=predicted_plan.device, dtype=torch.float32)
+    if plan_keep_mask is not None:
+        if plan_keep_mask.shape != predicted_plan.shape[:2]:
+            raise ValueError(
+                f"plan_keep_mask: expected {predicted_plan.shape[:2]}, got {plan_keep_mask.shape}"
+            )
+        mask = mask * plan_keep_mask.to(
+            device=predicted_plan.device,
+            dtype=torch.float32,
+        )
+    if sample_weight is not None:
+        if sample_weight.shape != (predicted_plan.shape[0],):
+            raise ValueError(f"sample_weight: expected {(predicted_plan.shape[0],)}, got {sample_weight.shape}")
+        mask = mask * sample_weight.to(device=predicted_plan.device, dtype=torch.float32)[:, None]
+    denom = mask.sum()
+    if float(denom) <= 0.0:
+        per_field = predicted_plan.sum(dim=(0, 1)) * 0.0
+        return PhysicalInversePlanLossOutput(
+            total=per_field.mean(),
+            per_field=per_field,
+        )
+
+    per_element = F.smooth_l1_loss(
+        predicted_plan.float(),
+        target_plan[..., :physical_dim].to(
+            device=predicted_plan.device,
+            dtype=torch.float32,
+        ),
+        beta=beta,
+        reduction="none",
+    )
+    per_field = (per_element * mask.unsqueeze(-1)).sum(dim=(0, 1)) / denom
+    return PhysicalInversePlanLossOutput(
+        total=per_field.mean(),
+        per_field=per_field,
+    )
+
+
 def inverse_plan_loss(
     predicted_plan: torch.Tensor,
     target_plan: torch.Tensor,
@@ -172,33 +244,23 @@ def inverse_plan_loss(
     *,
     beta: float = 0.05,
 ) -> torch.Tensor:
-    """Masked inverse-dynamics auxiliary loss over B3 6-D plan tokens."""
-    import torch
-    import torch.nn.functional as F
-
-    if predicted_plan.shape != target_plan.shape:
-        raise ValueError(f"predicted/target plan shape mismatch: {predicted_plan.shape} vs {target_plan.shape}")
-    if predicted_plan.ndim != 3 or predicted_plan.shape[-1] != PLAN_TOKEN_DIM:
-        raise ValueError(f"predicted_plan: expected (B,T,{PLAN_TOKEN_DIM}), got {predicted_plan.shape}")
-    if plan_valid_mask.shape != predicted_plan.shape[:2]:
-        raise ValueError(f"plan_valid_mask: expected {predicted_plan.shape[:2]}, got {plan_valid_mask.shape}")
-
-    mask = plan_valid_mask.to(device=predicted_plan.device, dtype=torch.float32)
-    if sample_weight is not None:
-        if sample_weight.shape != (predicted_plan.shape[0],):
-            raise ValueError(f"sample_weight: expected {(predicted_plan.shape[0],)}, got {sample_weight.shape}")
-        mask = mask * sample_weight.to(device=predicted_plan.device, dtype=torch.float32)[:, None]
-    denom = mask.sum()
-    if float(denom) <= 0.0:
-        return predicted_plan.sum() * 0.0
-
-    per_step = F.smooth_l1_loss(
-        predicted_plan.float(),
-        target_plan.float(),
+    """Compatibility wrapper for the five-field physical inverse objective."""
+    physical_dim = PLAN_TOKEN_DIM - 1
+    if predicted_plan.ndim != 3 or predicted_plan.shape[-1] not in {
+        physical_dim,
+        PLAN_TOKEN_DIM,
+    }:
+        raise ValueError(
+            "predicted_plan: expected (B,T,5) or (B,T,6), "
+            f"got {predicted_plan.shape}"
+        )
+    return physical_inverse_plan_loss(
+        predicted_plan=predicted_plan[..., :physical_dim],
+        target_plan=target_plan,
+        plan_valid_mask=plan_valid_mask,
+        sample_weight=sample_weight,
         beta=beta,
-        reduction="none",
-    ).mean(dim=-1)
-    return (per_step * mask).sum() / denom
+    ).total
 
 
 def latent_cosine_similarity(predicted_latents: torch.Tensor, target_latents: torch.Tensor) -> torch.Tensor:
@@ -220,6 +282,7 @@ def human_world_model_loss(
     predicted_plan: torch.Tensor,
     planned_actions: torch.Tensor,
     planned_actions_valid_mask: torch.Tensor,
+    plan_keep_mask: torch.Tensor | None = None,
     person_conf: torch.Tensor | None = None,
     sample_weight: torch.Tensor | None = None,
     lambda_latent: float = 1.0,
@@ -241,28 +304,36 @@ def human_world_model_loss(
         person_state_valid=person_state_valid,
         person_conf=person_conf,
     )
-    inverse = inverse_plan_loss(
+    inverse_output = physical_inverse_plan_loss(
         predicted_plan=predicted_plan,
         target_plan=planned_actions,
         plan_valid_mask=planned_actions_valid_mask,
         sample_weight=sample_weight,
+        plan_keep_mask=plan_keep_mask,
     )
-    total = lambda_latent * latent + lambda_person_state * state + lambda_inverse_plan * inverse
+    total = (
+        lambda_latent * latent
+        + lambda_person_state * state
+        + lambda_inverse_plan * inverse_output.total
+    )
     return WorldModelLossOutput(
         total=total,
         latent=latent,
         person_state=state,
-        inverse_plan=inverse,
+        inverse_plan=inverse_output.total,
+        inverse_plan_per_field=inverse_output.per_field,
         latent_cosine=latent_cosine_similarity(predicted_latents, target_latents),
     )
 
 
 __all__ = [
     "WorldModelLossOutput",
+    "PhysicalInversePlanLossOutput",
     "human_world_model_loss",
     "inverse_plan_loss",
     "latent_cosine_similarity",
     "person_patch_weights",
     "person_state_loss",
     "person_weighted_latent_loss",
+    "physical_inverse_plan_loss",
 ]

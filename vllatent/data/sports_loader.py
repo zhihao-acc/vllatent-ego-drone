@@ -359,6 +359,7 @@ class SportsTrainingDataset:
         self._samples: list[tuple[int, int]] = []
         self.sample_domains: list[str] = []   # domain per sample index (parallel to _samples)
         self.sample_sources: list[str] = []   # source id per sample index (parallel to _samples)
+        self.sample_clip_ids: list[str] = []  # clip id per sample index (parallel to _samples)
         for clip_idx, clip in enumerate(self._clips):
             n = clip["latents"].shape[0]
             src = clip_source(self._clip_ids[clip_idx])
@@ -375,6 +376,7 @@ class SportsTrainingDataset:
                 self._samples.append((clip_idx, t))
                 self.sample_domains.append(self._clip_domains[clip_idx])
                 self.sample_sources.append(src)
+                self.sample_clip_ids.append(self._clip_ids[clip_idx])
         if not self._samples:
             if self._strict_person_windows:
                 raise ValueError("No strict person-valid windows found in cache")
