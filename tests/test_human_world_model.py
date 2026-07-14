@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import inspect
+from pathlib import Path
 
 import pytest
 
@@ -92,6 +93,11 @@ class TestTransitionPlanVerifier:
 
 @pytest.mark.torch
 class TestPlanConditionedLatentPredictor:
+    def test_uses_shared_b3_transformer_blocks_not_legacy_predictor(self) -> None:
+        source = Path(inspect.getfile(PlanConditionedLatentPredictor)).read_text()
+        assert "vllatent.model.transformer_blocks" in source
+        assert "vllatent.model.predictor" not in source
+
     def test_horizon8_output_shape(self) -> None:
         model = PlanConditionedLatentPredictor(dim=32, depth=1, heads=4, horizon=8)
         out = model(*_inputs(dim=32, horizon=8))

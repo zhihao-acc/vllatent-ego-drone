@@ -8,7 +8,7 @@ from unittest.mock import patch
 import numpy as np
 import pytest
 
-from vllatent.config import IngestConfig
+from vllatent.config import Config, IngestConfig
 from vllatent.ingest.pipeline import (
     MIN_SEGMENT_FRAMES,
     ClipPipelineResult,
@@ -17,7 +17,7 @@ from vllatent.ingest.pipeline import (
     _write_clip_npz,
     update_manifest_from_results,
 )
-from vllatent.schemas import EMBED_DIM, LATENT_DTYPE, PATCH_TOKENS
+from vllatent.schemas import EMBED_DIM, HISTORY, HORIZON, LATENT_DTYPE, PATCH_TOKENS
 
 
 class TestBuildClipNpz:
@@ -357,3 +357,70 @@ class TestHumanTrackabilityGate:
         state_valid = np.ones(12, dtype=np.bool_)
         state_valid[10] = False
         assert not _passes_human_trackability_gate(state_valid, history=3, horizon=8)
+
+
+def test_default_ingest_window_matches_active_b3_contract() -> None:
+    assert (HISTORY, HORIZON, MIN_SEGMENT_FRAMES) == (3, 8, 11)
+
+
+class TestIngestCli:
+    def test_process_handles_segment_results_and_enables_person_tracking(
+        self,
+        tmp_path: Path,
+        capsys: pytest.CaptureFixture[str],
+    ) -> None:
+        from vllatent.ingest.__main__ import main
+
+        cfg = IngestConfig(cache_dir=str(tmp_path))
+        results = [
+            ClipPipelineResult(
+                clip_id="ski01_seg000",
+                n_frames=11,
+                n_accepted=11,
+                latent_path="ski01_seg000.npz",
+                stages_skipped=[],
+                errors=[],
+            ),
+            ClipPipelineResult(
+                clip_id="ski01_seg001",
+                n_frames=12,
+                n_accepted=12,
+                latent_path="ski01_seg001.npz",
+                stages_skipped=[],
+                errors=[],
+            ),
+        ]
+
+        with (
+            patch.object(Config, "from_yaml", return_value=Config(ingest=cfg)),
+            patch("vllatent.ingest.pipeline.process_clip", return_value=results) as process,
+            patch("vllatent.ingest.pipeline.update_manifest_from_results") as update_manifest,
+        ):
+            status = main([
+                "process",
+                "--url",
+                "unused",
+                "--clip-id",
+                "ski01",
+                "--device",
+                "cpu",
+            ])
+
+        assert status == 0
+        assert process.call_args.kwargs["track_persons"] is True
+        update_manifest.assert_called_once_with(results, cfg)
+        assert "2 segments" in capsys.readouterr().out
+
+    def test_batch_enables_person_tracking(self, tmp_path: Path) -> None:
+        from vllatent.ingest.__main__ import main
+
+        cfg = IngestConfig(cache_dir=str(tmp_path))
+        with (
+            patch.object(Config, "from_yaml", return_value=Config(ingest=cfg)),
+            patch("vllatent.ingest.pipeline.process_batch", return_value=[]) as process,
+            patch("vllatent.ingest.pipeline.update_manifest_from_results"),
+        ):
+            status = main(["batch", "--clips", "clips.yaml", "--device", "cpu"])
+
+        assert status == 0
+        assert process.call_args.kwargs["track_persons"] is True

@@ -360,3 +360,9 @@ class TestValidateMegasamResult:
         r = MegaSamResult(poses=poses, confidences=np.ones(3), intrinsics=np.eye(3))
         errors = validate_megasam_result(r)
         assert any("det" in e for e in errors)
+
+
+def test_pipeline_does_not_copy_redundant_droid_archive() -> None:
+    script = Path(__file__).resolve().parents[1] / "scripts" / "run_megasam_pipeline.sh"
+    source = script.read_text()
+    assert "DROID_NPZ" not in source
