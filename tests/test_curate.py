@@ -1,6 +1,12 @@
 """B1.22c tests: curation gates + 3-level dedup (PURE — no torch, no yt-dlp)."""
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+import yaml
+
+from scripts import curate_sports_clips as curate_script
 from scripts.curate_sports_clips import KEYWORD_PRESETS, load_existing_many
 from vllatent.ingest.curate import (
     CurationGate,
@@ -164,3 +170,54 @@ def test_load_existing_many_unions_prior_yaml_files(tmp_path) -> None:
 
     assert ids == {"a", "b"}
     assert titles == ["first", "second"]
+
+
+def test_repository_has_one_unique_sports_clip_catalog() -> None:
+    repo_root = Path(__file__).resolve().parents[1]
+    canonical = repo_root / "configs" / "sports_clips.yaml"
+    catalogs = sorted((repo_root / "configs").glob("sports_clips*.yaml"))
+    assert catalogs == [canonical]
+
+    clips = (yaml.safe_load(canonical.read_text()) or {}).get("clips", [])
+    assert len(clips) == 403
+    assert len({clip["clip_id"] for clip in clips}) == len(clips)
+    assert len({clip["url"] for clip in clips}) == len(clips)
+
+
+def test_append_clip_entries_preserves_existing_and_rejects_collisions(tmp_path) -> None:
+    append_entries = getattr(curate_script, "append_clip_entries", None)
+    assert callable(append_entries)
+
+    catalog = tmp_path / "sports_clips.yaml"
+    catalog.write_text(
+        "clips:\n"
+        "- url: https://www.youtube.com/watch?v=a\n"
+        "  clip_id: ski01\n"
+        "  sport: skiing\n"
+    )
+    addition = {
+        "url": "https://www.youtube.com/watch?v=b",
+        "clip_id": "ski02",
+        "sport": "skiing",
+    }
+
+    merged = append_entries(catalog, [addition])
+    assert [clip["clip_id"] for clip in merged] == ["ski01", "ski02"]
+    assert (yaml.safe_load(catalog.read_text()) or {})["clips"] == merged
+
+    with pytest.raises(ValueError, match="duplicate clip_id"):
+        append_entries(catalog, [{**addition, "url": "https://www.youtube.com/watch?v=c"}])
+
+
+def test_next_clip_index_uses_canonical_catalog_maximum() -> None:
+    next_index = getattr(curate_script, "next_clip_index", None)
+    assert callable(next_index)
+    clips = [
+        {"clip_id": "ski01"},
+        {"clip_id": "cand45"},
+        {"clip_id": "ski358"},
+        {"clip_id": "ski-not-numeric"},
+    ]
+    assert next_index(clips, "ski") == 359
+    assert next_index(clips, "cand") == 46
+    assert next_index(clips, "new") == 1
