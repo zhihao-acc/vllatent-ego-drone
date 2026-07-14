@@ -51,20 +51,24 @@ def main(argv: list[str] | None = None) -> int:
     cfg = config.ingest
 
     if args.command == "process":
-        result = process_clip(
+        results = process_clip(
             url=args.url,
             clip_id=args.clip_id,
             cfg=cfg,
             skip_download=args.skip_download,
             skip_megasam=args.skip_megasam,
             device=args.device,
+            track_persons=True,
         )
-        if result.errors:
-            for e in result.errors:
-                print(f"ERROR: {e}", file=sys.stderr)
+        failed = [result for result in results if result.errors]
+        if failed:
+            for result in failed:
+                for e in result.errors:
+                    print(f"ERROR [{result.clip_id}]: {e}", file=sys.stderr)
             return 1
-        update_manifest_from_results([result], cfg)
-        print(f"OK: {result.clip_id} -> {result.n_accepted}/{result.n_frames} frames")
+        update_manifest_from_results(results, cfg)
+        total_frames = sum(result.n_accepted for result in results)
+        print(f"OK: {args.clip_id} -> {len(results)} segments, {total_frames} accepted frames")
         return 0
 
     if args.command == "batch":
@@ -73,6 +77,7 @@ def main(argv: list[str] | None = None) -> int:
             cfg=cfg,
             skip_existing=not args.no_skip_existing,
             device=args.device,
+            track_persons=True,
         )
         update_manifest_from_results(results, cfg)
         ok = sum(1 for r in results if not r.errors)

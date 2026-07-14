@@ -28,7 +28,7 @@ import numpy as np
 PATCH_TOKENS = 196          # DINOv3 ViT-B/16 patch tokens per frame (CLS/register dropped)
 EMBED_DIM = 768             # DINOv3 / predictor latent dim
 HISTORY = 3                 # H — history frames fed to the predictor (DINO-WM default)
-HORIZON = 4                 # T — prediction horizon (documented; not a StepSample field)
+HORIZON = 8                 # T — active B3 prediction horizon
 N_ACTIONS = 8               # AerialVLN discrete action set, ids 0..7
 DOF = 4                     # continuous waypoint DoF: (dx, dy, dz, dyaw)
 

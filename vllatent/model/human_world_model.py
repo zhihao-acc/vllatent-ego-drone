@@ -11,7 +11,7 @@ from typing import NamedTuple
 import torch
 import torch.nn as nn
 
-from vllatent.model.predictor import FiLMProjection, PredictorBlock
+from vllatent.model.transformer_blocks import FiLMProjection, PredictorBlock
 from vllatent.plan_tokens import PLAN_TOKEN_DIM
 from vllatent.schemas import EMBED_DIM, HISTORY, PATCH_TOKENS
 

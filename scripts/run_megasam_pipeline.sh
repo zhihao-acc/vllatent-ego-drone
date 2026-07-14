@@ -136,11 +136,6 @@ cp -v "${RECON_DIR}/poses.npy" "$OUT_DIR/"
 cp -v "${RECON_DIR}/motion_prob.npy" "$OUT_DIR/" 2>/dev/null || true
 cp -v "${RECON_DIR}/intrinsics.npy" "$OUT_DIR/" 2>/dev/null || true
 
-DROID_NPZ="${MEGASAM_DIR}/outputs/${CLIP_ID}_droid.npz"
-if [[ -f "$DROID_NPZ" ]]; then
-    cp -v "$DROID_NPZ" "$OUT_DIR/"
-fi
-
 echo ""
 echo "[megasam] =============================="
 echo "[megasam] Pipeline complete: ${CLIP_ID}"

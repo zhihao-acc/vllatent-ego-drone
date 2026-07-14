@@ -283,7 +283,7 @@ def process_clip(
     device: str = "cuda",
     camera_K: np.ndarray | None = None,
     camera_D: np.ndarray | None = None,
-    track_persons: bool = False,
+    track_persons: bool = True,
 ) -> list[ClipPipelineResult]:
     """Process a single clip end-to-end.
 
@@ -460,7 +460,7 @@ def process_batch(
     *,
     skip_existing: bool = True,
     device: str = "cuda",
-    track_persons: bool = False,
+    track_persons: bool = True,
 ) -> list[ClipPipelineResult]:
     """Process all clips in a YAML clip list."""
     from vllatent.ingest.acquire import load_clips_yaml
