@@ -109,6 +109,25 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `supers
 
 ---
 
+## 2026-07-14 — Consolidate sports clip catalogs
+
+**Status:** configuration-only consolidation; B3.6 remains blocked and
+B3.7/H20 remains ineligible.
+
+Merged `configs/sports_clips.yaml`, the B3.4a ski expansion, the 300-clip ski
+expansion, and the candidate catalog into the single canonical
+`configs/sports_clips.yaml`. The merged catalog contains all `403` entries
+(`ski01` through `ski358` plus `cand01` through `cand45`) with `403` unique
+clip IDs and `403` unique YouTube URLs. Removed the three superseded clip-list
+files. Future `scripts/curate_sports_clips.py` runs append atomically to the
+canonical catalog, reject duplicate IDs/URLs, and allocate the next unused
+numeric suffix instead of recreating side catalogs or overwriting existing
+entries.
+
+**Verification.** `657 passed`; whole-tree Ruff, hard pure-tier mypy, blob
+guard, `git diff --check`, and a fresh catalog parse/uniqueness audit passed.
+No network, video download, dataset cache, report, or GPU operation was run.
+
 ## 2026-07-14 — Consolidate local B3 report artifacts
 
 **Status:** artifact-only cleanup; B3.6 remains blocked and B3.7/H20 remains
