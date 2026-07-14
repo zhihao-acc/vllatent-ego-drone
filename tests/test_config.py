@@ -30,8 +30,6 @@ def test_defaults_construct_and_match_schemas_constants() -> None:
     assert cfg.predictor.dropout == 0.1
     # timm's NON-GATED DINOv3 ViT-B/16 re-host (Meta's gated repo rejected our access 2026-06-09).
     assert cfg.encoder.model_id == "vit_base_patch16_dinov3.lvd1689m"
-    # Frozen CLIP ViT-B/32 text tower for lang_tokens (A5.13b) — NON-GATED.
-    assert cfg.encoder.text_model_id == "openai/clip-vit-base-patch32"
 
 
 def test_from_yaml_default_builds() -> None:
@@ -88,7 +86,6 @@ def test_from_yaml_rejects_unknown_key(tmp_path) -> None:
         lambda: DistillConfig(lambda_latent=-1.0),
         lambda: EncoderConfig(dtype="float64"),
         lambda: EncoderConfig(input_hw=0),
-        lambda: EncoderConfig(text_model_id=""),  # must be a non-empty model id
     ],
 )
 def test_validation_rejects_bad_values(factory) -> None:

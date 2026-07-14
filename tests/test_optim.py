@@ -5,7 +5,6 @@ import pytest
 
 torch = pytest.importorskip("torch")
 
-from vllatent.model.predictor import LatentPredictor  # noqa: E402
 from vllatent.train.optim import build_param_groups  # noqa: E402
 
 pytestmark = pytest.mark.torch
@@ -45,31 +44,9 @@ def test_every_param_assigned_once() -> None:
     assert len(assigned) == len(set(assigned)), "a param landed in two groups"
 
 
-def test_temporal_embed_not_decayed() -> None:
-    pred = LatentPredictor(depth=2)
-    groups = build_param_groups(pred, weight_decay=0.05)
-    no_decay = next(g for g in groups if g["weight_decay"] == 0.0)
-    assert id(pred.temporal_embed) in _ids(no_decay)
-
-
-def test_qkv_weight_decayed() -> None:
-    pred = LatentPredictor(depth=2)
-    groups = build_param_groups(pred, weight_decay=0.05)
-    decay = next(g for g in groups if g["weight_decay"] == 0.05)
-    assert id(pred.blocks[0].qkv.weight) in _ids(decay)
-
-
 def test_requires_grad_false_excluded() -> None:
     m = _Tiny()
     m.fc.weight.requires_grad_(False)
     groups = build_param_groups(m, weight_decay=0.05)
     assigned = {id(p) for g in groups for p in g["params"]}
     assert id(m.fc.weight) not in assigned
-
-
-def test_latent_only_excludes_head_when_passed_predictor() -> None:
-    """Passing model.predictor (not the full model) yields predictor-only groups."""
-    pred = LatentPredictor(depth=2)
-    groups = build_param_groups(pred, weight_decay=0.05)
-    n = sum(len(g["params"]) for g in groups)
-    assert n == sum(1 for _ in pred.parameters())

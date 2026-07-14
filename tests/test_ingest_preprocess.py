@@ -55,7 +55,7 @@ class TestCutFixedClips:
         with pytest.raises(ValueError, match="clip_length_frames"):
             cut_fixed_clips(self._paths(10), clip_length_frames=3, min_usable_frames=7)
 
-    def test_default_min_usable_is_7(self) -> None:
-        segs = cut_fixed_clips(self._paths(50), clip_length_frames=50)
+    def test_default_min_usable_matches_b3_window(self) -> None:
+        segs = cut_fixed_clips(self._paths(21), clip_length_frames=11)
         assert len(segs) == 1
-        assert len(segs[0]) == 50
+        assert len(segs[0]) == 11

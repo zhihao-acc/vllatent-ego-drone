@@ -100,7 +100,8 @@ class TestActionMetrics:
         target = _target(batch_size=1)
         pred = target.clone()
         pred[:, 1:, 0] = -1.0
-        mask = torch.tensor([[True, False, False, False]])
+        mask = torch.zeros(1, HORIZON, dtype=torch.bool)
+        mask[:, 0] = True
         metrics = compute_action_metrics(pred, target, mask)
         assert metrics.aggregate_score == pytest.approx(0.0, abs=1e-6)
         assert metrics.n_valid == 1

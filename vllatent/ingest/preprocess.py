@@ -12,6 +12,8 @@ from pathlib import Path
 
 import numpy as np
 
+from vllatent.schemas import HISTORY, HORIZON
+
 
 @dataclass(frozen=True)
 class FrameExtraction:
@@ -93,23 +95,14 @@ def load_frame(path: str | Path) -> np.ndarray:
     return load_rgb(path)
 
 
-def load_frames(frame_dir: str | Path) -> np.ndarray:
-    """Load all JPEG frames from a directory as a (N, H, W, 3) uint8 array."""
-    paths = sorted(Path(frame_dir).glob("*.jpg"))
-    if not paths:
-        raise FileNotFoundError(f"No .jpg frames in {frame_dir}")
-    frames = [load_frame(p) for p in paths]
-    return np.stack(frames)
-
-
 def cut_fixed_clips(
     frame_paths: list[Path],
     clip_length_frames: int,
-    min_usable_frames: int = 7,
+    min_usable_frames: int = HISTORY + HORIZON,
 ) -> list[list[Path]]:
     """Split frame paths into non-overlapping segments of fixed length.
 
-    Trailing segments shorter than ``min_usable_frames`` (default = H+T = 7) are discarded.
+    Trailing segments shorter than ``min_usable_frames`` (default = H+T = 11) are discarded.
 
     Args:
         frame_paths: Sorted list of frame file paths.
@@ -119,6 +112,8 @@ def cut_fixed_clips(
     Returns:
         List of frame-path lists, one per usable segment.
     """
+    if not frame_paths:
+        return []
     if clip_length_frames < min_usable_frames:
         raise ValueError(
             f"clip_length_frames ({clip_length_frames}) must be >= "
@@ -180,7 +175,6 @@ __all__ = [
     "cut_fixed_clips",
     "extract_frames",
     "load_frame",
-    "load_frames",
     "undistort_fisheye",
     "batch_undistort",
 ]

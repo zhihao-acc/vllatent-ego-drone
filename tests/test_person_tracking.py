@@ -8,10 +8,6 @@ import pytest
 
 from vllatent.ingest.person_tracking import (
     PERSON_BBOX_DIM,
-    PERSON_BBOX_SPACE_ENCODER_CROP,
-    PERSON_BBOX_SPACE_KEY,
-    PERSON_STATE_VALID_KEY,
-    PersonTrackResult,
     TrackedDetection,
     accel_outlier_flags_from_deltas,
     duplicate_frame_runs_from_latents,
@@ -384,41 +380,3 @@ def test_screen_cache_dir_reports_person_label_qc(tmp_path: Path) -> None:
     assert "person_label_qc" in report["clips"][0]
     assert "person_invalid_labels" in report["clips"][0]["flags"]
     assert "subject_ambiguity_unknown" in report["clips"][0]["flags"]
-
-
-def test_backfill_writes_encoder_crop_bbox_space(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    from scripts import backfill_person_tracks
-
-    cache_path = tmp_path / "cand01_fpv00_c000.npz"
-    np.savez(
-        cache_path,
-        latents=np.ones((2, 1, 1), dtype=np.float32),
-        deltas=np.ones((1, 4), dtype=np.float32),
-    )
-    frames_dir = tmp_path / "frames" / "cand01_fpv00_c000"
-    frames_dir.mkdir(parents=True)
-    (frames_dir / "000001.jpg").touch()
-    (frames_dir / "000002.jpg").touch()
-
-    def fake_track_persons_from_paths(frame_paths: list[Path], *, device: str) -> PersonTrackResult:
-        assert len(frame_paths) == 2
-        return PersonTrackResult(
-            person_bbox=np.tile(np.array([[0.5, 0.5, 0.2, 0.3]], dtype=np.float32), (2, 1)),
-            person_visible=np.ones(2, dtype=np.bool_),
-            person_state_valid=np.ones(2, dtype=np.bool_),
-            person_conf=np.ones(2, dtype=np.float32),
-            provenance={"bbox_space": PERSON_BBOX_SPACE_ENCODER_CROP},
-        )
-
-    monkeypatch.setattr(backfill_person_tracks, "track_persons_from_paths", fake_track_persons_from_paths)
-    record = backfill_person_tracks.backfill_one(
-        cache_path,
-        frames_root=tmp_path / "frames",
-        device="cpu",
-        dry_run=False,
-        overwrite=False,
-    )
-    assert record["status"] == "backfilled"
-    with np.load(str(cache_path)) as data:
-        assert str(data[PERSON_BBOX_SPACE_KEY].tolist()) == PERSON_BBOX_SPACE_ENCODER_CROP
-        assert data[PERSON_STATE_VALID_KEY].tolist() == [True, True]

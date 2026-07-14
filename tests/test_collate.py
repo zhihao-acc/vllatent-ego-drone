@@ -200,18 +200,10 @@ class TestImportPurity:
         src = importlib.util.find_spec("vllatent.data.collate")
         assert src is not None and src.origin is not None
         tree = ast.parse(Path(src.origin).read_text())
-        for node in ast.walk(tree):
+        module_imports: list[str] = []
+        for node in tree.body:
             if isinstance(node, ast.Import):
-                for alias in node.names:
-                    if alias.name == "torch":
-                        if not isinstance(
-                            getattr(node, "_parent", None), ast.FunctionDef
-                        ):
-                            pass
-            if isinstance(node, (ast.Import, ast.ImportFrom)):
-                if isinstance(node, ast.ImportFrom) and node.module and node.module.startswith("torch"):
-                    for parent in ast.walk(tree):
-                        if isinstance(parent, ast.FunctionDef):
-                            for child in ast.walk(parent):
-                                if child is node:
-                                    break
+                module_imports.extend(alias.name for alias in node.names)
+            elif isinstance(node, ast.ImportFrom) and node.module:
+                module_imports.append(node.module)
+        assert all(name.split(".")[0] != "torch" for name in module_imports)

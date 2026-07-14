@@ -129,7 +129,8 @@ class TestActionPolicyLoss:
         target[..., 0] = 1.0
         pred = target.clone()
         pred[:, 1:, 0] = -1.0
-        mask = torch.tensor([[True, False, False, False]])
+        mask = torch.zeros(1, T, dtype=torch.bool)
+        mask[:, 0] = True
         loss = action_policy_loss(pred, target, mask)
         assert loss.item() == pytest.approx(0.0, abs=1e-7)
 

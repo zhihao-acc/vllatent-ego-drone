@@ -1,6 +1,7 @@
 """Tests for vllatent.ingest.pipeline — end-to-end per-clip processing."""
 from __future__ import annotations
 
+import ast
 from dataclasses import asdict
 from pathlib import Path
 from unittest.mock import patch
@@ -424,3 +425,27 @@ class TestIngestCli:
 
         assert status == 0
         assert process.call_args.kwargs["track_persons"] is True
+
+
+def test_pilot_cache_ingest_cannot_disable_person_tracking() -> None:
+    pilot_path = Path(__file__).resolve().parents[1] / "scripts" / "ingest_youtube_pilot.py"
+    source = pilot_path.read_text()
+    assert "--no-track-persons" not in source
+
+    tree = ast.parse(source)
+    process_calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "process_clip"
+    ]
+    assert process_calls
+    for call in process_calls:
+        track_keyword = next(
+            (keyword for keyword in call.keywords if keyword.arg == "track_persons"),
+            None,
+        )
+        assert track_keyword is not None
+        assert isinstance(track_keyword.value, ast.Constant)
+        assert track_keyword.value.value is True

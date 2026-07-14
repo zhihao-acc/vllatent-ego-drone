@@ -18,7 +18,6 @@ from vllatent.ingest.acquire import (
 )
 
 
-@pytest.mark.tool
 class TestProbeClip:
     def test_parses_json(self) -> None:
         info = {"title": "Test", "duration": 60, "fps": 30, "width": 1920, "height": 1080}
@@ -29,7 +28,6 @@ class TestProbeClip:
         assert result["fps"] == 30
 
 
-@pytest.mark.tool
 class TestDownloadClip:
     def test_returns_clip_metadata(self, tmp_path: Path) -> None:
         video = tmp_path / "test_clip.mp4"
@@ -61,7 +59,6 @@ class TestDownloadClip:
         assert "all_proxy" not in mock_run.call_args.kwargs["env"]
 
 
-@pytest.mark.tool
 class TestValidateClip:
     def test_valid_video(self) -> None:
         info = {"streams": [{"codec_type": "video"}]}

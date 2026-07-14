@@ -109,6 +109,41 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `supers
 
 ---
 
+## 2026-07-14 — Deep drift trim and active-path decoupling
+
+**Status:** repository drift cleanup is complete; B3.6 remains blocked and
+B3.7/H20 remains ineligible.
+
+**Bounded audit and removal.** Inspected every file under `reports/`,
+`scripts/`, `tests/`, and `vllatent/` (158 reports, 22 script entrypoints, 43
+test files, and 45 package modules at audit time). Removed 22 tracked stale
+script/test/package files (retired B1 visualization, text, predictor/head,
+sanity, report, backfill, benchmark, and one-shot migration surfaces) and
+trimmed dead compatibility functions. Seven nonignored superseded report/run
+paths were removed, including 24,368,486 bytes of completed
+`reports/user_gate_logs`. The 185,486,785 bytes under ignored `reports/qc/`,
+`reports/qc_smoke/`, and `reports/e2e_test/` remain untouched pending an
+explicit user deletion decision.
+
+**Active-path repairs and decoupling.** Added regressions before behavior
+changes. The package ingest CLI now handles the pipeline's list return, and
+both it and the retained pilot enforce required person tracking; exact strict
+clips use `H=3,T=8`; the active
+B3 model imports `FiLMProjection`/`PredictorBlock` from a small shared
+`transformer_blocks` module instead of the retired B1 predictor; and MegaSaM
+no longer copies a redundant roughly 50 MiB DROID archive per subclip. The B3
+trainer defaults generated runs to ignored `runs/`, active heavy dependencies
+are declared without the retired CLIP/Transformers stack, and the stale
+training-policy memo is retained only as a short superseded tombstone. The B2
+proposal-policy seam plus checkpoint/optimizer helpers remain deliberately
+preserved until the B3.8 prior decision / B3.7 integration.
+
+**Verification.** `654 passed`; whole-tree Ruff, shell syntax, hard pure-tier
+mypy, import smoke, blob guard, live-reference scans, and `git diff --check`
+passed. Informational full-package mypy remains non-gating but improved from 43
+errors in 12 files to 34 errors in 9 files. No CUDA, H20, SSH, Docker, video
+download, or active-dataset mutation was performed.
+
 ## 2026-07-14 — Drift-prep repository and dataset cleanup
 
 **Status:** B3.6 remains blocked; no gate or training state changed.

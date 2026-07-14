@@ -19,7 +19,7 @@ repository tiers onto hardware and processes.
 | Tier | Modules | Runs on | Deps |
 |---|---|---|---|
 | **PURE** | `schemas, actions, frames, config, manifest, audit, ingest/quality, ingest/ego_motion` | CI / any box | numpy, pyyaml |
-| **TORCH** | `encode/, data/, model/, train/`, remaining ingest tools | dev box; H20 only after B3.6 | torch 2.8, transformers>=4.56, timm>=1.0.20 |
+| **TORCH** | `encode/, data/, model/, train/`, remaining ingest tools | dev box; H20 only after B3.6 | torch 2.8, timm>=1.0.20, declared ingest extras |
 | **SIM** | retired in active code | `fly0-m1` docker only, if a historical Phase-A render must be reproduced | airsim, msgpack-rpc; `/opt/aerialvln` scenes |
 
 CI gates ONLY the pure tier (torch-free). The torch tier is covered by `make test-torch`

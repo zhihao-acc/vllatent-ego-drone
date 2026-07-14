@@ -313,17 +313,6 @@ def test_g1d_zero_yaw_coverage_fails_closed_without_crashing() -> None:
 
 
 @pytest.mark.torch
-def test_cluster_bootstrap_does_not_claim_confidence_from_one_source() -> None:
-    lower, upper = metrics_module.clustered_bootstrap_mean_ci(
-        [1.0] * 16,
-        ["same-source"] * 16,
-    )
-
-    assert lower is None
-    assert upper is None
-
-
-@pytest.mark.torch
 def test_boundary_aware_source_interval_is_not_degenerate() -> None:
     lower, upper = metrics_module.wilson_interval(2, 2)
 

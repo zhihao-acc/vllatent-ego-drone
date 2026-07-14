@@ -7,12 +7,12 @@ SHELL := /bin/bash
 # PURE tier (numpy/pyyaml only; CI-importable). The HARD mypy + import gate scopes here.
 PURE_TIER := vllatent/schemas.py vllatent/actions.py vllatent/frames.py vllatent/config.py vllatent/manifest.py vllatent/audit.py vllatent/ingest/quality.py vllatent/ingest/ego_motion.py
 
-.PHONY: help setup setup-torch lint typecheck typecheck-all import-smoke test test-torch test-ingest-pure test-ingest-tool encode-smoke text-smoke audit blob ralph
+.PHONY: help setup setup-torch lint typecheck typecheck-all import-smoke test test-torch test-ingest-pure test-ingest-tool encode-smoke audit blob ralph
 
 help:
 	@echo "vllatent-ego-drone dev targets:"
 	@echo "  make setup        - light dev deps (ruff, mypy, types-PyYAML, pyyaml, numpy, pytest; NO torch)"
-	@echo "  make setup-torch  - the torch extra (dev box / H20: torch, transformers, timm, einops, opencv)"
+	@echo "  make setup-torch  - the torch/ingest extra (dev box / H20)"
 	@echo "  make lint         - ruff check ."
 	@echo "  make typecheck    - HARD mypy gate on the PURE tier"
 	@echo "  make typecheck-all- mypy on the full package (informational; heavy deps may be missing)"
@@ -20,7 +20,6 @@ help:
 	@echo "  make test         - pure unit tests (-m 'not torch and not sim')"
 	@echo "  make test-torch   - torch-tier tests (needs the torch extra)"
 	@echo "  make encode-smoke - real-weight DINOv3 forward (downloads ~330MB non-gated timm weights; no token)"
-	@echo "  make text-smoke   - real-weight CLIP text tower -> (M,768) lang_tokens (downloads CLIP; no token)"
 	@echo "  make audit        - run the AerialVLN audit parser on the fixture episode"
 	@echo "  make blob         - pre-commit blob guard"
 	@echo "  make ralph        - print the active B3 Ralph-loop launch prompt"
@@ -60,11 +59,6 @@ test-ingest-tool:
 # From CN, HF_ENDPOINT=https://hf-mirror.com speeds the download: HF_ENDPOINT=... make encode-smoke
 encode-smoke:
 	$(PY) -m vllatent.encode.dinov3 --smoke
-
-# Downloads the NON-GATED CLIP ViT-B/32 text tower (no token) + runs a real text encode -> (M,768).
-# From CN, HF_ENDPOINT=https://hf-mirror.com speeds the download: HF_ENDPOINT=... make text-smoke
-text-smoke:
-	$(PY) -m vllatent.encode.text --smoke
 
 audit:
 	$(PY) -m vllatent.audit --episode fixtures/episodes/tiny_episode.json

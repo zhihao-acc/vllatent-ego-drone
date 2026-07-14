@@ -27,7 +27,7 @@ from vllatent.model.human_world_model import (
     count_parameters,
 )
 from vllatent.plan_tokens import PLAN_TOKEN_FIELDS
-from vllatent.schemas import EMBED_DIM, HISTORY
+from vllatent.schemas import EMBED_DIM, HISTORY, HORIZON
 from vllatent.train.world_model_losses import (
     human_world_model_loss,
     physical_inverse_plan_loss,
@@ -807,7 +807,7 @@ def prepare_plan_derangements(
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Train/evaluate the B3 Stage-1 human world model gate")
     parser.add_argument("--cache-dir", default="ingest_data/latent_cache")
-    parser.add_argument("--run-dir", default="reports/b3_stage1_local")
+    parser.add_argument("--run-dir", default="runs/b3_stage1_local")
     parser.add_argument("--device", default="cuda")
     parser.add_argument("--batch-size", type=int, default=4)
     parser.add_argument("--max-steps", type=int, default=40)
@@ -827,7 +827,7 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--g1d-min-plan-distance", type=float, default=0.10)
     parser.add_argument("--g1d-min-cumulative-yaw", type=float, default=0.05)
     parser.add_argument("--history", type=int, default=HISTORY)
-    parser.add_argument("--horizon", type=int, default=8)
+    parser.add_argument("--horizon", type=int, default=HORIZON)
     parser.add_argument(
         "--strict-person-windows",
         action=argparse.BooleanOptionalAction,

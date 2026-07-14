@@ -25,7 +25,7 @@ from vllatent.schemas import DELTA_DTYPE, HORIZON
 
 
 def _future_deltas() -> np.ndarray:
-    return np.array(
+    base = np.array(
         [
             [1.0, 0.0, 0.0, 3.0],
             [0.0, 2.0, 0.0, -7.0],
@@ -34,6 +34,8 @@ def _future_deltas() -> np.ndarray:
         ],
         dtype=DELTA_DTYPE,
     )
+    repeats = (HORIZON + len(base) - 1) // len(base)
+    return np.tile(base, (repeats, 1))[:HORIZON]
 
 
 def test_locked_four_field_contract() -> None:
@@ -105,7 +107,8 @@ def test_uniform_translation_scale_invariance_with_observed_reference() -> None:
 def test_yaw_column_is_not_part_of_b2_1_contract() -> None:
     base = _future_deltas()
     yaw_changed = base.copy()
-    yaw_changed[:, 3] = np.array([999.0, -999.0, 45.0, -45.0], dtype=DELTA_DTYPE)
+    yaw_pattern = np.array([999.0, -999.0, 45.0, -45.0], dtype=DELTA_DTYPE)
+    yaw_changed[:, 3] = np.resize(yaw_pattern, HORIZON)
 
     a = future_deltas_to_scale_free_targets(base, dt_seconds=0.2)
     b = future_deltas_to_scale_free_targets(yaw_changed, dt_seconds=0.2)

@@ -157,10 +157,13 @@ Preserve reusable infrastructure:
   encoding, ingest/VO/yaw extraction, checkpointing, optimizer/loss helpers,
   scale-free utilities, and tests that still guard source split, scale invariance,
   no target leakage, and tier purity;
-- `vllatent/model/action_policy.py`, `vllatent/model/heads.py`,
+- `vllatent/model/action_policy.py`,
   `vllatent/train/action_metrics.py`, `tests/test_action_policy.py`, and
   `tests/test_action_metrics.py` until B3 equivalents exist, because they seed the
   6-D prior/inverse-dynamics diagnostics.
+
+The test-only 4-D heads were retired after B3.5/B3.6 supplied the active
+person-state head and five-field transition verifier.
 
 Removed in B3.1 as obsolete runnable B1/B2 paths:
 
@@ -183,9 +186,9 @@ entries without explicit user approval.
   reference removed paths; historical plans/reports/logs are preserved unless
   separately approved.
 - Test:
-  `$PY -m pytest -q tests/test_smoke.py tests/test_config.py tests/test_sports_loader.py tests/test_collate.py tests/test_scale_free_targets.py tests/test_predictor.py tests/test_losses.py tests/test_checkpoint.py && bash scripts/check_no_blobs.sh`
-- Verified 2026-07-07: active-reference scan clean; pytest subset passed
-  `157 passed`; `bash scripts/check_no_blobs.sh` passed.
+  `$PY -m pytest -q tests/test_smoke.py tests/test_config.py tests/test_sports_loader.py tests/test_collate.py tests/test_scale_free_targets.py tests/test_human_world_model.py tests/test_losses.py tests/test_checkpoint.py && bash scripts/check_no_blobs.sh`
+- Reverified after the 2026-07-14 predictor retirement: active-reference scan
+  clean; current pytest subset passed `167 passed`; blob guard passed.
 - Deps: B3.0. Blocks B3.2/B3.3.
 
 ### B3.2 - Person-Track Cache Backfill And Data Screens
@@ -205,6 +208,9 @@ dry-run tests only.
 - Verified 2026-07-07: person-track contract, optional cache arrays,
   loader/collate fallback, dry-run-capable backfill script, and cache-screen CLI
   are implemented. Fixture tests passed.
+- Drift cleanup 2026-07-14: the one-shot backfill script was retired after the
+  retained frame tree was removed; supported ingest writes person tracks
+  directly and legacy caches continue to use the conservative loader fallback.
 - User pasteback: dry run `20/20 would_backfill`; full backfill `796 backfilled`,
   `102 skipped_existing`, `9 frame_count_mismatch`, `1 missing_frames`.
   The tracker path worked; user manually reviewed low-person sources and judged
@@ -257,7 +263,7 @@ config-driven so `T=8` works through loader/collate/model tests.
   `valid` combines moving, speed-valid, and VO confidence; future person/world
   labels never appear in inputs.
 - Test:
-  `$PY -m pytest -q tests/test_plan_tokens.py tests/test_sports_loader.py tests/test_collate.py tests/test_predictor.py`
+  `$PY -m pytest -q tests/test_plan_tokens.py tests/test_sports_loader.py tests/test_collate.py tests/test_human_world_model.py`
 - Verified 2026-07-07: added pure `vllatent.plan_tokens` with
   `PLAN_TOKEN_DIM=6`, `PLAN_TOKEN_FIELDS`, clipped yaw-rate normalization, and
   VO/motion/speed-composed validity. `SportsTrainingDataset(..., horizon=8)`
@@ -265,10 +271,12 @@ config-driven so `T=8` works through loader/collate/model tests.
   `collate_sports_batch` emits `planned_actions (B,T,6)` as the B3
   world-model input. `LatentPredictor(horizon=8)` shape test passes. Future
   person/world labels remain labels only and are not threaded into model
-  `forward`.
+  `forward`. The original `LatentPredictor` shape test was retired with B1;
+  current `HumanWorldModel(horizon=8)` coverage preserves the contract.
 - Verified command:
-  `$PY -m pytest -q tests/test_plan_tokens.py tests/test_sports_loader.py tests/test_collate.py tests/test_predictor.py`
-  passed (`73 passed`). Ruff and `git diff --check` passed.
+  `$PY -m pytest -q tests/test_plan_tokens.py tests/test_sports_loader.py tests/test_collate.py tests/test_human_world_model.py`
+  passed (`77 passed`, reverified 2026-07-14). Ruff and `git diff --check`
+  passed.
 - Deps: B3.1. Blocks B3.4/B3.5.
 
 ### B3.4 - Stage-0 Probes Plus K1/K2
@@ -452,7 +460,7 @@ exactly `59,082,250` parameters.
   pass; residual deltas are patch-local rather than symmetric; target latents/person
   labels are not accepted by `forward`; exact parameter count is logged.
 - Test:
-  `$PY -m pytest -q tests/test_human_world_model.py tests/test_predictor.py tests/test_world_model_losses.py`
+  `$PY -m pytest -q tests/test_human_world_model.py tests/test_world_model_losses.py`
 - Deps: B3.3/B3.4a. Blocks B3.6.
 
 ### B3.6 - Stage-1 Local Depth-6 World-Model Gate

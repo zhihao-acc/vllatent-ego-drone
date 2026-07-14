@@ -3,7 +3,7 @@ name = "vllatent"
 version = "0.0.1"
 description = "Human- and plan-conditioned latent world model for sports-following drones"
 requires-python = ">=3.10"
-# PURE-tier deps ONLY. The heavy training stack (torch/transformers/timm) is the
+# PURE-tier deps ONLY. The heavy training/ingest stack is the
 # [torch] extra, installed on the dev box / H20 — never in default CI (which gates
 # only the pure tier). The sim stack (airsim) is the [sim] extra, installed only in
 # the fly0-m1 docker. See CLAUDE.md "Tier split".
@@ -14,7 +14,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dev   = ["ruff>=0.4", "mypy>=1.8", "pytest>=7.0", "types-PyYAML"]
-torch = ["torch>=2.8,<2.13", "transformers>=4.56,<6", "timm>=1.0.20,<2", "ultralytics>=8.2.0", "einops", "opencv-python"]
+torch = ["torch>=2.8,<2.13", "timm>=1.0.20,<2", "ultralytics>=8.2.0", "opencv-python", "pillow", "scenedetect", "plotly"]
 sim   = ["airsim", "msgpack-rpc-python", "opencv-python"]
 
 [build-system]
@@ -40,7 +40,7 @@ ignore_missing_imports = true
 # Torch/sim stacks aren't installed in CI; treat them as missing imports so mypy
 # type-checks the pure core without them present.
 [[tool.mypy.overrides]]
-module = ["torch.*", "transformers.*", "timm.*", "einops.*", "cv2.*", "airsim.*", "msgpackrpc.*"]
+module = ["torch.*", "timm.*", "ultralytics.*", "cv2.*", "PIL.*", "scenedetect.*", "plotly.*", "airsim.*", "msgpackrpc.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

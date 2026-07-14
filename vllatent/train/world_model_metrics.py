@@ -467,36 +467,6 @@ def source_majority_counts(
     return successes, len(groups)
 
 
-def clustered_bootstrap_mean_ci(
-    values: list[float] | list[bool],
-    cluster_ids: list[str],
-    *,
-    seed: int = 0,
-    n_resamples: int = 2000,
-) -> tuple[float | None, float | None]:
-    """Bootstrap a mean by resampling whole source clusters with replacement."""
-    import numpy as np
-
-    array = np.asarray(values, dtype=np.float64)
-    if array.ndim != 1 or not np.all(np.isfinite(array)):
-        raise ValueError("values must be a finite one-dimensional array")
-    groups = _cluster_index_groups(cluster_ids, n_values=int(array.size))
-    if len(groups) < 2:
-        return None, None
-    if n_resamples < 1:
-        raise ValueError(f"n_resamples must be >= 1, got {n_resamples}")
-    rng = np.random.default_rng(seed)
-    statistics = np.empty(n_resamples, dtype=np.float64)
-    for sample_index in range(n_resamples):
-        selected_groups = rng.integers(0, len(groups), size=len(groups))
-        indices = np.concatenate(
-            [np.asarray(groups[int(group)], dtype=np.int64) for group in selected_groups]
-        )
-        statistics[sample_index] = array[indices].mean()
-    lower, upper = np.percentile(statistics, [2.5, 97.5])
-    return float(lower), float(upper)
-
-
 def clustered_paired_margin_ci(
     model_losses: list[float],
     counterfactual_losses: list[float],
@@ -766,7 +736,6 @@ __all__ = [
     "YawGeometryCounts",
     "aggregate_stage1_metrics",
     "build_plan_derangements",
-    "clustered_bootstrap_mean_ci",
     "clustered_paired_margin_ci",
     "flipped_plan",
     "null_plan",

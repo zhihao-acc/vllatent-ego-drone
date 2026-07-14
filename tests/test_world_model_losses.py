@@ -11,7 +11,6 @@ from vllatent.schemas import PATCH_TOKENS  # noqa: E402
 from vllatent.train.world_model_losses import (  # noqa: E402
     WorldModelLossOutput,
     human_world_model_loss,
-    inverse_plan_loss,
     person_patch_weights,
     person_state_loss,
     person_weighted_latent_loss,
@@ -102,17 +101,6 @@ class TestWorldModelLosses:
             person_state_loss(high_vis, target, valid, conf).item(),
             abs=1e-7,
         )
-
-    def test_inverse_plan_loss_masks_invalid_steps(self) -> None:
-        pred = torch.zeros(1, 8, PLAN_TOKEN_DIM, requires_grad=True)
-        target = torch.ones_like(pred)
-        mask = torch.zeros(1, 8, dtype=torch.bool)
-        assert inverse_plan_loss(pred, target, mask).item() == pytest.approx(0.0, abs=1e-7)
-        mask[:, :2] = True
-        loss = inverse_plan_loss(pred, target, mask)
-        assert loss.item() > 0.0
-        loss.backward()
-        assert pred.grad is not None
 
     def test_physical_inverse_loss_excludes_valid_field_and_reports_components(self) -> None:
         predicted = torch.zeros(1, 2, PLAN_TOKEN_DIM - 1, requires_grad=True)

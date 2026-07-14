@@ -67,10 +67,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--clips", default="configs/sports_clips.yaml", help="Clips YAML")
     parser.add_argument("--config", default="configs/sports.yaml", help="Sports config")
     parser.add_argument("--limit", type=int, default=0, help="Max clips to process (0=all)")
-    parser.add_argument("--device", default="cuda", help="Torch device for CLIP/DINOv3")
+    parser.add_argument("--device", default="cuda", help="Torch device for person tracking and DINOv3")
     parser.add_argument("--skip-download", action="store_true", help="Skip yt-dlp download")
     parser.add_argument("--skip-megasam", action="store_true", help="Skip MegaSaM VO")
-    parser.add_argument("--no-track-persons", action="store_true", help="Disable B3 person-track segment gate")
     parser.add_argument("--filter-only", action="store_true", help="Download + filter only, no pipeline")
     args = parser.parse_args(argv)
 
@@ -101,7 +100,7 @@ def main(argv: list[str] | None = None) -> int:
     _log(f"Processing {len(clips)} clips from {args.clips}")
     _log(f"  raw_dir={raw_dir}, frames_dir={frames_dir}, cache_dir={cache_dir}")
     _log(f"  device={args.device}, skip_download={args.skip_download}")
-    _log(f"  track_persons={not args.no_track_persons}")
+    _log("  track_persons=True")
 
     results_summary: list[dict] = []
 
@@ -274,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
                     skip_download=True,
                     skip_megasam=args.skip_megasam,
                     device=args.device,
-                    track_persons=not args.no_track_persons,
+                    track_persons=True,
                 )
 
                 for seg_result in segment_results:

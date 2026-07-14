@@ -52,12 +52,7 @@ def _expand_env(value: Any) -> Any:
 
 @dataclass(frozen=True)
 class EncoderConfig:
-    """Frozen student-encoder settings (the 196/768 shapes are schemas constants).
-
-    Two frozen towers feed the student: the DINOv3 vision encoder (``model_id``) and the CLIP text
-    tower (``text_model_id``) that produces the cached ``lang_tokens``. Both are NON-GATED HF re-hosts
-    and single-sourced here (the verifier/cache/manifest read them from Config, never re-hardcode).
-    """
+    """Frozen DINOv3 encoder settings (the 196/768 shapes are schema constants)."""
 
     # timm's NON-GATED re-host of Meta's DINOv3 ViT-B/16 (LVD-1689M) — same weights, no gate/token,
     # loaded via timm.create_model (HF repo 'timm/vit_base_patch16_dinov3.lvd1689m'). Meta's own
@@ -66,18 +61,11 @@ class EncoderConfig:
     input_hw: int = 224
     dtype: str = "float16"
     hf_endpoint: str = "https://hf-mirror.com"
-    # Frozen CLIP ViT-B/32 text tower (A5.13b) — NON-GATED (`gated:false`, 15M downloads; probed
-    # 2026-06-14). Native text width 512; the wrapper lifts → EMBED_DIM (768) for the lang_tokens cache
-    # (the meaningful 512→768 mapping is the student's learned cross-attention, Phase B).
-    text_model_id: str = "openai/clip-vit-base-patch32"
-
     def __post_init__(self) -> None:
         if self.input_hw <= 0:
             raise ValueError(f"encoder.input_hw must be > 0, got {self.input_hw}")
         if self.dtype not in ENCODER_DTYPES:
             raise ValueError(f"encoder.dtype must be one of {ENCODER_DTYPES}, got {self.dtype!r}")
-        if not isinstance(self.text_model_id, str) or not self.text_model_id:
-            raise ValueError(f"encoder.text_model_id must be a non-empty str, got {self.text_model_id!r}")
 
 
 @dataclass(frozen=True)
@@ -246,7 +234,7 @@ class IngestConfig:
     undistort_model: str = "pinhole"
     quality_threshold: float = 0.3
     person_gate_history: int = HISTORY
-    person_gate_horizon: int = 8
+    person_gate_horizon: int = HORIZON
 
     def __post_init__(self) -> None:
         if not isinstance(self.name, str) or not self.name:

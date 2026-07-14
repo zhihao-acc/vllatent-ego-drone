@@ -55,7 +55,7 @@ native loader (`…/fly0-style-pipeline/third_party/AirVLN`) is **reuse/replay o
 | Tier | Modules | Imports | Runs |
 |---|---|---|---|
 | **PURE** | `schemas, actions, frames, config, manifest, audit, ingest/quality, ingest/ego_motion` | numpy/pyyaml/stdlib | CI hard-gates |
-| **TORCH** | `encode/, data/, model/, train/`, remaining ingest tools | + torch/transformers/timm; optional tools stay lazy where absence is supported | `make test-torch`, dev box; H20 only after B3.6 |
+| **TORCH** | `encode/, data/, model/, train/`, remaining ingest tools | + torch/timm and ingest extras; optional tools stay lazy where absence is supported | `make test-torch`, dev box; H20 only after B3.6 |
 | **SIM** | historical reproduction only | + airsim | `fly0-m1` docker, user-gated |
 
 Guard rule: the pure tier must NEVER gain a torch/airsim/transformers/timm import; CI imports it with
@@ -68,7 +68,7 @@ supported entrypoint; AirSim is confined to historical, user-gated reproduction 
 Dev box RTX 5060 Ti 16 GB · AutoDL **H20 ~96 GB** (training + full encode→cache; **SSH HANDS-OFF**) ·
 lab 5×4090 (K=5, Phase C) · `fly0-m1` docker (UE4+AirSim render; scenes `/opt/aerialvln/…`; launched
 MANUALLY, wait port 41451) · Jetson Orin NX 16 GB (deploy = the binding size constraint). Conda env
-`vllatent-ego-drone` (Py3.10 / torch 2.8 / CUDA 12.x / transformers≥4.56 / timm≥1.0.20). China network:
+`vllatent-ego-drone` (Py3.10 / torch 2.8 / CUDA 12.x / timm≥1.0.20). China network:
 GitHub mirror chain, `HF_ENDPOINT=https://hf-mirror.com`. Full map: `docs/TOPOLOGY.md`.
 
 ## Wiki Knowledge Base — FETCH CONTEXT before any work

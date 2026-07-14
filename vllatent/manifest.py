@@ -33,13 +33,13 @@ CACHE_VERSION = CacheConfig().version
 # Required top-level keys of a cache manifest, with their expected JSON types.
 _REQUIRED: dict[str, type] = {
     "cache_version": str,
-    "encoder": dict,      # {model_id, text_model_id, revision, dtype, patch_tokens, dim}
+    "encoder": dict,      # {model_id, revision, dtype, patch_tokens, dim}
     "dataset": dict,      # {name, variant, split, license}
     "convention": dict,   # {quaternion_order, color_order, frame}
     "entries": list,      # list of per-episode entries
 }
 
-_REQUIRED_ENCODER = {"model_id", "text_model_id", "revision", "dtype", "patch_tokens", "dim"}
+_REQUIRED_ENCODER = {"model_id", "revision", "dtype", "patch_tokens", "dim"}
 _REQUIRED_DATASET = {"name", "variant", "split", "license"}
 _REQUIRED_CONVENTION = {"quaternion_order", "color_order", "frame"}
 
@@ -63,7 +63,6 @@ def build_manifest(
         "cache_version": cache.version,
         "encoder": {
             "model_id": enc.model_id,
-            "text_model_id": enc.text_model_id,  # frozen CLIP text tower for lang_tokens (A5.13b)
             "revision": "",            # pinned at real-weight load (A5.10/A5.14)
             "dtype": enc.dtype,
             "patch_tokens": PATCH_TOKENS,   # de-dup: the one true 196 (schemas)

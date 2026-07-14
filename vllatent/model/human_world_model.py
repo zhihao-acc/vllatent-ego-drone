@@ -13,7 +13,7 @@ import torch.nn as nn
 
 from vllatent.model.transformer_blocks import FiLMProjection, PredictorBlock
 from vllatent.plan_tokens import PLAN_TOKEN_DIM
-from vllatent.schemas import EMBED_DIM, HISTORY, PATCH_TOKENS
+from vllatent.schemas import EMBED_DIM, HISTORY, HORIZON, PATCH_TOKENS
 
 
 class HumanWorldModelOutput(NamedTuple):
@@ -136,7 +136,7 @@ class PlanConditionedLatentPredictor(nn.Module):
         mlp_ratio: int = 4,
         dropout: float = 0.1,
         history: int = HISTORY,
-        horizon: int = 8,
+        horizon: int = HORIZON,
         plan_dim: int = PLAN_TOKEN_DIM,
         patch_tokens: int = PATCH_TOKENS,
     ) -> None:
@@ -313,7 +313,7 @@ class HumanWorldModel(nn.Module):
         mlp_ratio: int = 4,
         dropout: float = 0.1,
         history: int = HISTORY,
-        horizon: int = 8,
+        horizon: int = HORIZON,
         hidden_dim: int = 256,
         patch_tokens: int = PATCH_TOKENS,
     ) -> None:

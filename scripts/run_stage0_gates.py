@@ -8,7 +8,7 @@ import json
 from pathlib import Path
 
 from vllatent.data.sports_loader import SportsTrainingDataset
-from vllatent.schemas import HISTORY
+from vllatent.schemas import HISTORY, HORIZON
 from vllatent.train.person_probes import (
     Stage0GateThresholds,
     collect_frame_probe_examples,
@@ -31,7 +31,7 @@ def _clip_ids(cache_dir: Path, limit: int | None) -> list[str] | None:
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--cache-dir", required=True, help="Directory containing .npz latent caches")
-    parser.add_argument("--horizon", type=int, default=8)
+    parser.add_argument("--horizon", type=int, default=HORIZON)
     parser.add_argument("--history", type=int, default=HISTORY)
     parser.add_argument("--val-frac", type=float, default=0.2)
     parser.add_argument("--seed", type=int, default=42)

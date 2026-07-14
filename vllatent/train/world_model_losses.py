@@ -236,33 +236,6 @@ def physical_inverse_plan_loss(
     )
 
 
-def inverse_plan_loss(
-    predicted_plan: torch.Tensor,
-    target_plan: torch.Tensor,
-    plan_valid_mask: torch.Tensor,
-    sample_weight: torch.Tensor | None = None,
-    *,
-    beta: float = 0.05,
-) -> torch.Tensor:
-    """Compatibility wrapper for the five-field physical inverse objective."""
-    physical_dim = PLAN_TOKEN_DIM - 1
-    if predicted_plan.ndim != 3 or predicted_plan.shape[-1] not in {
-        physical_dim,
-        PLAN_TOKEN_DIM,
-    }:
-        raise ValueError(
-            "predicted_plan: expected (B,T,5) or (B,T,6), "
-            f"got {predicted_plan.shape}"
-        )
-    return physical_inverse_plan_loss(
-        predicted_plan=predicted_plan[..., :physical_dim],
-        target_plan=target_plan,
-        plan_valid_mask=plan_valid_mask,
-        sample_weight=sample_weight,
-        beta=beta,
-    ).total
-
-
 def latent_cosine_similarity(predicted_latents: torch.Tensor, target_latents: torch.Tensor) -> torch.Tensor:
     """Mean cosine similarity diagnostic over latent rollout tensors."""
     import torch.nn.functional as F
@@ -330,7 +303,6 @@ __all__ = [
     "WorldModelLossOutput",
     "PhysicalInversePlanLossOutput",
     "human_world_model_loss",
-    "inverse_plan_loss",
     "latent_cosine_similarity",
     "person_patch_weights",
     "person_state_loss",
