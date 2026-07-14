@@ -109,6 +109,22 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `supers
 
 ---
 
+## 2026-07-14 — Consolidate local B3 report artifacts
+
+**Status:** artifact-only cleanup; B3.6 remains blocked and B3.7/H20 remains
+ineligible.
+
+At user direction, removed ignored `reports/e2e_test/`, six superseded local
+`b3_stage1_*` run directories, and the older expanded person-screen and Stage-0
+JSON outputs (`75,403,638` bytes total). Retained exactly the newest B3 JSON
+report by modification time:
+`reports/b3_stage1_overfit_transition_verifier_lambda0_local/metrics.json`
+(`11,562` bytes, SHA-256
+`ce97ad0a2e9a82827fe905ac8586621ae886df81a5104f3a60f7d84193cb3098`).
+Historical log references remain provenance for the already-recorded results.
+The research memo, `reports/qc/`, `reports/qc_smoke/`, all 1,100 active NPZs,
+and intentional additional workspace artifacts were untouched.
+
 ## 2026-07-14 — Deep drift trim and active-path decoupling
 
 **Status:** repository drift cleanup is complete; B3.6 remains blocked and
