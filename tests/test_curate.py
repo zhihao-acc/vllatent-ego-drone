@@ -179,7 +179,7 @@ def test_repository_has_one_unique_sports_clip_catalog() -> None:
     assert catalogs == [canonical]
 
     clips = (yaml.safe_load(canonical.read_text()) or {}).get("clips", [])
-    assert len(clips) == 403
+    assert len(clips) >= 403
     assert len({clip["clip_id"] for clip in clips}) == len(clips)
     assert len({clip["url"] for clip in clips}) == len(clips)
 

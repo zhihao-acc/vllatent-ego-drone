@@ -2,14 +2,14 @@
 """Curate real sports-FPV YouTube candidates (B1.22c).
 
 Searches a thoughtful keyword set with yt-dlp, fetches metadata, applies the resolution/fps/
-aspect/duration gates + 3-level dedup (vs each other, curated clips, and prior candidates), and writes
-``configs/sports_clips_candidates.yaml`` for human review → promotion into ``sports_clips.yaml``.
+aspect/duration gates + 3-level dedup, and appends unique entries to the canonical
+``configs/sports_clips.yaml`` catalog.
 
 The decision logic lives in ``vllatent.ingest.curate`` (PURE, unit-tested); this script is the
 network/orchestration shell. Run on the dev box:
 
-    python scripts/curate_sports_clips.py --max-per-query 15 --out configs/sports_clips_candidates.yaml
-    python scripts/curate_sports_clips.py --clip-prefix ski --start-index 16 --out configs/sports_clips_b34a_ski.yaml
+    python scripts/curate_sports_clips.py --max-per-query 15
+    python scripts/curate_sports_clips.py --keyword-preset ski-large --clip-prefix ski
 
 Keyword strategy — FOLLOW-CAM ONLY (the deployment view): a drone CHASING/FOLLOWING a skier, so
 the followed skier is IN FRAME (from behind/above). This is what the latent world model must learn
@@ -25,6 +25,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -262,6 +263,65 @@ def load_existing(path: Path) -> tuple[set[str], list[str]]:
     return ids, titles
 
 
+def load_clip_entries(path: Path) -> list[dict]:
+    """Load and validate one canonical clips catalog, or return an empty list."""
+    if not path.exists():
+        return []
+    raw = yaml.safe_load(path.read_text()) or {}
+    if not isinstance(raw, dict) or not isinstance(raw.get("clips", []), list):
+        raise ValueError(f"{path}: expected a mapping with a clips list")
+    clips = raw.get("clips", [])
+    for index, clip in enumerate(clips):
+        if not isinstance(clip, dict):
+            raise ValueError(f"{path}: clips[{index}] must be a mapping")
+        if not clip.get("clip_id") or not clip.get("url"):
+            raise ValueError(f"{path}: clips[{index}] requires clip_id and url")
+    return list(clips)
+
+
+def merge_clip_entries(existing: list[dict], additions: list[dict]) -> list[dict]:
+    """Append additions while rejecting duplicate clip IDs or URLs."""
+    merged: list[dict] = []
+    seen_ids: set[str] = set()
+    seen_urls: set[str] = set()
+    for clip in [*existing, *additions]:
+        clip_id = str(clip.get("clip_id", ""))
+        url = str(clip.get("url", ""))
+        if not clip_id or not url:
+            raise ValueError("every clip requires a non-empty clip_id and url")
+        if clip_id in seen_ids:
+            raise ValueError(f"duplicate clip_id: {clip_id}")
+        if url in seen_urls:
+            raise ValueError(f"duplicate clip URL: {url}")
+        seen_ids.add(clip_id)
+        seen_urls.add(url)
+        merged.append(dict(clip))
+    return merged
+
+
+def append_clip_entries(path: Path, additions: list[dict]) -> list[dict]:
+    """Atomically preserve the canonical catalog while appending new entries."""
+    merged = merge_clip_entries(load_clip_entries(path), additions)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temp_path = path.with_suffix(f"{path.suffix}.tmp")
+    temp_path.write_text(
+        yaml.safe_dump({"clips": merged}, default_flow_style=False, sort_keys=False, allow_unicode=True)
+    )
+    temp_path.replace(path)
+    return merged
+
+
+def next_clip_index(clips: list[dict], prefix: str) -> int:
+    """Return one past the largest numeric suffix already used by ``prefix``."""
+    pattern = re.compile(rf"^{re.escape(prefix)}(\d+)$")
+    suffixes = [
+        int(match.group(1))
+        for clip in clips
+        if (match := pattern.fullmatch(str(clip.get("clip_id", "")))) is not None
+    ]
+    return max(suffixes, default=0) + 1
+
+
 def load_existing_many(paths: list[Path]) -> tuple[set[str], list[str]]:
     """Union existing ids + titles across curated and candidate YAML files."""
     ids: set[str] = set()
@@ -275,16 +335,12 @@ def load_existing_many(paths: list[Path]) -> tuple[set[str], list[str]]:
 
 def main() -> None:
     p = argparse.ArgumentParser(description="Curate ski-FPV YouTube candidates")
-    p.add_argument("--out", default="configs/sports_clips_candidates.yaml")
+    p.add_argument("--out", default="configs/sports_clips.yaml")
     p.add_argument(
         "--existing",
         nargs="*",
-        default=[
-            "configs/sports_clips.yaml",
-            "configs/sports_clips_candidates.yaml",
-            "configs/sports_clips_b34a_ski.yaml",
-        ],
-        help="YAML files whose clip URLs/titles must be excluded",
+        default=[],
+        help="Additional YAML files whose clip URLs/titles must be excluded",
     )
     p.add_argument("--proxy", default=os.environ.get("YTDLP_PROXY", "http://127.0.0.1:7890"))
     p.add_argument("--max-per-query", type=int, default=15)
@@ -292,13 +348,18 @@ def main() -> None:
     p.add_argument("--target-accepted", type=int, default=0, help="stop after this many accepted entries (0=off)")
     p.add_argument("--sport", default="skiing")
     p.add_argument("--clip-prefix", default="cand", help="prefix for emitted clip IDs; do not include '_'")
-    p.add_argument("--start-index", type=int, default=1, help="first numeric suffix for emitted clip IDs")
+    p.add_argument(
+        "--start-index",
+        type=int,
+        default=None,
+        help="first numeric suffix for emitted clip IDs (default: next unused suffix)",
+    )
     p.add_argument("--keyword-preset", choices=sorted(KEYWORD_PRESETS), default="ski")
     p.add_argument("--keywords", nargs="*", default=None, help="override the default keyword set")
     args = p.parse_args()
     if "_" in args.clip_prefix:
         raise SystemExit("--clip-prefix must not contain '_' because source split uses '_' as a separator")
-    if args.start_index < 0:
+    if args.start_index is not None and args.start_index < 0:
         raise SystemExit("--start-index must be non-negative")
     if args.max_fetch < 0:
         raise SystemExit("--max-fetch must be non-negative")
@@ -307,7 +368,8 @@ def main() -> None:
 
     gate = CurationGate()
     keywords = args.keywords or KEYWORD_PRESETS[args.keyword_preset]
-    existing_paths = [Path(p) for p in args.existing]
+    out_path = Path(args.out)
+    existing_paths = [out_path, *(Path(path) for path in args.existing if Path(path) != out_path)]
     existing_ids, existing_titles = load_existing_many(existing_paths)
     existing_labels = ", ".join(str(p) for p in existing_paths)
     print(f"[curate] {len(keywords)} queries, {len(existing_ids)} existing ids to exclude from {existing_labels}")
@@ -349,16 +411,21 @@ def main() -> None:
         else:
             rejected.append({**meta, "_drop": "; ".join(reasons)})
 
+    existing_entries = load_clip_entries(out_path)
+    start_index = (
+        args.start_index
+        if args.start_index is not None
+        else next_clip_index(existing_entries, args.clip_prefix)
+    )
     entries = [
         candidate_to_entry(m, f"{args.clip_prefix}{i:02d}", sport=args.sport)
-        for i, m in enumerate(accepted, start=args.start_index)
+        for i, m in enumerate(accepted, start=start_index)
     ]
-    out_path = Path(args.out)
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-    out_path.write_text(yaml.dump({"clips": entries}, default_flow_style=False, sort_keys=False))
+    if entries:
+        append_clip_entries(out_path, entries)
 
     print(f"[curate] metadata fetches: {metadata_fetches}/{args.max_fetch or 'unbounded'}")
-    print(f"\n[curate] ACCEPTED {len(accepted)} → {out_path}")
+    print(f"\n[curate] ACCEPTED {len(accepted)} → appended to {out_path}")
     for m in accepted:
         print(f"  + {m['id']}  {m['height']}p/{m['fps']}fps/{int(m.get('duration') or 0)}s  {m['title'][:60]}")
     print(f"\n[curate] REJECTED {len(rejected)} (sample):")
