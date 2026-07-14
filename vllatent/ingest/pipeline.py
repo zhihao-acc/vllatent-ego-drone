@@ -233,7 +233,12 @@ def _process_segment(
     timestamps = np.arange(n, dtype=np.float64) / cfg.target_fps
     if person_tracks is None and track_persons:
         _log(f"  {segment_id}: tracking person subject with YOLO-World/ByteTrack")
-        person_tracks = track_persons_from_paths(segment_frame_paths[:n], device=device)
+        person_tracks = track_persons_from_paths(
+            segment_frame_paths[:n],
+            device=device,
+            history=cfg.person_gate_history,
+            horizon=cfg.person_gate_horizon,
+        )
     elif person_tracks is None:
         person_tracks = empty_person_tracks(n)
 
@@ -344,7 +349,7 @@ def process_clip(
 
     n_frames_on_disk = len(list(frames_dir.glob("*.jpg")))
     min_segment_frames = (
-        cfg.person_gate_history + cfg.person_gate_horizon + 1
+        cfg.person_gate_history + cfg.person_gate_horizon
         if track_persons
         else MIN_SEGMENT_FRAMES
     )
@@ -406,7 +411,12 @@ def process_clip(
                 from vllatent.ingest.person_tracking import track_persons_from_paths
 
                 _log(f"  {segment_id}: pre-gating person trackability")
-                person_tracks = track_persons_from_paths(seg_paths, device=device)
+                person_tracks = track_persons_from_paths(
+                    seg_paths,
+                    device=device,
+                    history=cfg.person_gate_history,
+                    horizon=cfg.person_gate_horizon,
+                )
                 if not _passes_human_trackability_gate(
                     person_tracks.person_state_valid,
                     history=cfg.person_gate_history,

@@ -72,6 +72,40 @@ def test_select_subject_tie_breaks_by_centrality() -> None:
     assert result.person_conf[0] == pytest.approx(0.9)
 
 
+def test_select_subject_prefers_strict_windows_over_longer_fragmented_track() -> None:
+    fragmented_frames = (0, 1, 2, 4, 5, 6, 8, 9, 10)
+    strict_window_frames = range(11, 18)
+    detections = [
+        TrackedDetection(
+            frame_idx,
+            11,
+            np.array([35, 35, 55, 65], dtype=np.float32),
+            0.9,
+        )
+        for frame_idx in fragmented_frames
+    ]
+    detections.extend(
+        TrackedDetection(
+            frame_idx,
+            22,
+            np.array([40, 35, 60, 65], dtype=np.float32),
+            0.8,
+        )
+        for frame_idx in strict_window_frames
+    )
+
+    result = select_subject_track(
+        detections,
+        n_frames=18,
+        image_hw=(100, 100),
+        history=3,
+        horizon=4,
+    )
+
+    assert result.selected_track_id == 22
+    assert np.all(result.person_state_valid[11:18])
+
+
 def test_select_subject_marks_zero_area_crop_box_invisible() -> None:
     detections = [
         # Wide 200x100 frame center-crops x=[50,150], so this clips to zero width.

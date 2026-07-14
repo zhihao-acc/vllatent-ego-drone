@@ -255,6 +255,83 @@ class TestMinSegmentFrames:
         from vllatent.schemas import HISTORY, HORIZON
         assert MIN_SEGMENT_FRAMES == HISTORY + HORIZON
 
+    def test_person_tracked_process_accepts_exact_configured_history_plus_horizon(
+        self,
+        tmp_path: Path,
+    ) -> None:
+        from vllatent.ingest.person_tracking import PersonTrackResult
+        from vllatent.ingest.pipeline import process_clip
+
+        history = 3
+        horizon = 8
+        n_frames = history + horizon
+        clip_id = "exact_person_window"
+        frames_root = tmp_path / "frames"
+        clip_frames = frames_root / clip_id
+        clip_frames.mkdir(parents=True)
+        frame_paths = [clip_frames / f"{idx:06d}.jpg" for idx in range(n_frames)]
+        for frame_path in frame_paths:
+            frame_path.touch()
+
+        cfg = IngestConfig(
+            raw_dir=str(tmp_path / "raw"),
+            frames_dir=str(frames_root),
+            cache_dir=str(tmp_path / "cache"),
+            person_gate_history=history,
+            person_gate_horizon=horizon,
+        )
+        tracks = PersonTrackResult(
+            person_bbox=np.tile(
+                np.array([[0.5, 0.5, 0.2, 0.3]], dtype=np.float32),
+                (n_frames, 1),
+            ),
+            person_visible=np.ones(n_frames, dtype=np.bool_),
+            person_state_valid=np.ones(n_frames, dtype=np.bool_),
+            person_conf=np.ones(n_frames, dtype=np.float32),
+            provenance={},
+        )
+        expected = ClipPipelineResult(
+            clip_id=clip_id,
+            n_frames=n_frames,
+            n_accepted=n_frames,
+            latent_path=f"{clip_id}.npz",
+            stages_skipped=[],
+            errors=[],
+        )
+
+        with (
+            patch(
+                "vllatent.ingest.pipeline.load_rgb",
+                return_value=np.zeros((8, 8, 3), dtype=np.uint8),
+            ),
+            patch("vllatent.ingest.quality.composite_quality", return_value=1.0),
+            patch(
+                "vllatent.ingest.quality.filter_frames",
+                return_value=np.ones(n_frames, dtype=np.bool_),
+            ),
+            patch(
+                "vllatent.ingest.person_tracking.track_persons_from_paths",
+                return_value=tracks,
+            ) as track_persons,
+            patch("vllatent.ingest.pipeline._process_segment", return_value=expected),
+        ):
+            results = process_clip(
+                url="unused",
+                clip_id=clip_id,
+                cfg=cfg,
+                skip_download=True,
+                track_persons=True,
+                device="cpu",
+            )
+
+        assert results == [expected]
+        track_persons.assert_called_once_with(
+            frame_paths,
+            device="cpu",
+            history=history,
+            horizon=horizon,
+        )
+
 
 class TestHumanTrackabilityGate:
     def test_passes_when_history_and_future_have_trackable_support(self) -> None:

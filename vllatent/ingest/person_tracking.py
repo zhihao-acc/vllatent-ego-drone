@@ -12,6 +12,8 @@ from typing import Any
 
 import numpy as np
 
+from vllatent.schemas import HISTORY, HORIZON
+
 PERSON_BBOX_KEY = "person_bbox"
 PERSON_VISIBLE_KEY = "person_visible"
 PERSON_STATE_VALID_KEY = "person_state_valid"
@@ -395,10 +397,16 @@ def select_subject_track(
     *,
     n_frames: int,
     image_hw: tuple[int, int],
+    history: int = HISTORY,
+    horizon: int = HORIZON,
 ) -> PersonTrackResult:
-    """Select the strongest track and reject concurrently plausible runners-up."""
+    """Select the track with the most strict B3 windows and reject ambiguous runners-up."""
     if n_frames <= 0:
         raise ValueError("n_frames must be positive")
+    if history <= 0:
+        raise ValueError(f"history must be > 0, got {history}")
+    if horizon <= 0:
+        raise ValueError(f"horizon must be > 0, got {horizon}")
     if not detections:
         return empty_person_tracks(n_frames)
 
@@ -419,6 +427,7 @@ def select_subject_track(
                 "centrality": float("-inf"),
                 "area": 0.0,
                 "confidence": 0.0,
+                "strict_windows": 0,
             }
         valid_boxes = boxes[valid]
         valid_items = [item for item, keep in zip(items, valid, strict=False) if bool(keep)]
@@ -426,19 +435,37 @@ def select_subject_track(
         centrality = -float(np.mean(np.sum((centers - 0.5) ** 2, axis=1)))
         area = float(np.mean(valid_boxes[:, 2] * valid_boxes[:, 3]))
         confidence = float(np.mean([item.confidence for item in valid_items]))
+        track_bbox = np.zeros((n_frames, PERSON_BBOX_DIM), dtype=np.float32)
+        track_visible = np.zeros(n_frames, dtype=np.bool_)
+        for item, box in zip(valid_items, valid_boxes, strict=False):
+            track_bbox[item.frame_idx] = box
+            track_visible[item.frame_idx] = True
+        trackable = person_trackable_mask(track_bbox, track_visible)
+        strict_window_mask = strict_person_window_mask(
+            trackable,
+            history=history,
+            horizon=horizon,
+        )
+        strict_windows = int(np.sum(strict_window_mask))
         return {
             "valid_frames": int(np.sum(valid)),
             "frame_ids": {item.frame_idx for item in valid_items},
             "centrality": centrality,
             "area": area,
             "confidence": confidence,
+            "strict_windows": strict_windows,
         }
 
     evidence = {track_id: _evidence(items) for track_id, items in by_track.items()}
 
-    def _score(track_id: int) -> tuple[int, float, float]:
+    def _score(track_id: int) -> tuple[int, int, float, float]:
         item = evidence[track_id]
-        return (item["valid_frames"], item["centrality"], item["area"])
+        return (
+            item["strict_windows"],
+            item["valid_frames"],
+            item["centrality"],
+            item["area"],
+        )
 
     ranked_ids = sorted(by_track, key=_score, reverse=True)
     selected_id = ranked_ids[0]
@@ -523,7 +550,13 @@ def select_subject_track(
             "tracker": "bytetrack",
             "classes": list(PERSON_TRACK_CLASSES),
             "bbox_space": PERSON_BBOX_SPACE_ENCODER_CROP,
-            "selection": "longest_then_central_then_largest; strongest_covisible_runner_up",
+            "selection": (
+                "strict_windows_then_longest_then_central_then_largest; "
+                "strongest_covisible_runner_up"
+            ),
+            "selection_history": history,
+            "selection_horizon": horizon,
+            "selected_strict_windows": int(top["strict_windows"]),
             "selected_track_id": selected_id,
             "second_best_track_id": second_best_id,
             "subject_ambiguity_margin": ambiguity_margin,
@@ -571,6 +604,8 @@ def track_persons_from_paths(
     model_id: str = "yolov8s-worldv2.pt",
     confidence: float = PERSON_TRACK_CONFIDENCE,
     classes: tuple[str, ...] = PERSON_TRACK_CLASSES,
+    history: int = HISTORY,
+    horizon: int = HORIZON,
 ) -> PersonTrackResult:
     """Run YOLO-World/ByteTrack on an ordered frame sequence.
 
@@ -599,7 +634,13 @@ def track_persons_from_paths(
         stream=False,
     )
     detections = _detections_from_ultralytics_results(list(results))
-    result = select_subject_track(detections, n_frames=len(paths), image_hw=image_hw)
+    result = select_subject_track(
+        detections,
+        n_frames=len(paths),
+        image_hw=image_hw,
+        history=history,
+        horizon=horizon,
+    )
     return PersonTrackResult(
         person_bbox=result.person_bbox,
         person_visible=result.person_visible,
