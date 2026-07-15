@@ -109,6 +109,124 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `supers
 
 ---
 
+## 2026-07-15 — B3-CS1/CS2 final review hardening correction
+
+**Status:** completion review PASS with `0` unresolved CRITICAL and `0` HIGH;
+`B3-CS1` and `B3-CS2` are complete. This newest correction supersedes the
+fixture hash and test count in the immediately older B3-CS2 entry.
+
+The final review exposed and the iteration-10 correction closed every blocker:
+accepted float64 signed zeros now canonicalize to `+0.0` without changing the
+known camera hash; `CameraTrajectory.record_valid` is bytes-backed immutable; the
+skier digest admits only one exact full CS2 schema/version with both skis and both
+contacts; a ramp-out used by the forecast must itself start by history tick `-2`;
+steady-carve radius uses achieved state curvature; and an independent serialized
+root-law audit checks omega, acceleration, world velocity/acceleration, gross lean,
+and consecutive curvature/speed/heading/x/y/ground-position updates. Adversarial
+tests cover every former failure. The PURE AST guard now combines the stateful
+random/time denylist with a stdlib, NumPy, PyYAML, and internal-module allowlist.
+
+The signed-zero-normalized canonical eight-root fixture-table SHA-256 is
+`15bff8634187e52a3e6a6d76377b6b51dc530dfa06c1c6432ace8bc36643d95b`, reproduced
+in two fresh Python processes. The known zero-camera contract SHA-256 remains
+`2a22de62d4249fd9c065f9e7ded8b2540c92b1bcb8f39fa395ca5854ea3b355e`.
+
+**Final verification:** focused CS1/CS2 pytest -> `82 passed`; PURE import/AST
+guard included; scoped Ruff -> `All checks passed!`; Ruff format check -> `10
+files already formatted`; project Conda mypy -> `Success: no issues found in 5
+source files`; `git diff --check` passed. Mandatory targeted completion re-review
+-> PASS, unresolved CRITICAL `0`, HIGH `0`.
+
+No external, Blender/asset, rendering, data generation/encoding, model/loader,
+training, GPU/H20, controller, SSH, Docker, Orin, GUI, network, purchase,
+publication, or real-flight operation occurred. `B3-CS3` remains the next USER
+gate for Blender 4.5.11, CC0 asset provenance/acquisition, and CPU rendering.
+
+---
+
+## 2026-07-15 — B3-CS2 PURE deterministic skier proof verified
+
+**Status:** `B3-CS1` and `B3-CS2` meet their active-plan DoD; the next step is
+the USER-gated `B3-CS3`. No later card was started.
+
+Implemented the report-frozen float64 15-degree slope-plane law, absolute-tick
+quintic maneuver schedule, bounded braking, ground-root/armature transforms,
+dimensioned left/right ski stance and centerline/base/binding/contact geometry,
+commanded/realized ski frames, analytic slip, gross lean, and absolute animation
+parameters. Independent diagnostics reconstruct serialized geometry and use a
+small-angle-stable SO(3) residual. Adversarial tests reject coordinated root-point,
+ski-forward/tip-gap, stored-ordering, schedule, continuation, and `1e-8`-radian
+frame corruption.
+
+The eight frozen roots are exactly straight, accelerate/tuck, brake, left/right
+carve, carve transition, occlusion path, and composite start state. Their canonical
+fixture-table SHA-256 is
+`54c6d914fb806eee368d3e80ccb565430c76d375246a18b32693640ca98ebf03`, reproduced
+in two fresh Python processes. The brake ramp now ends at history tick `-2`, so
+the verified forecast begins in the full brake hold and speed is non-increasing
+through tick `8`. Canonical records/digests replay byte-identically; arrays are
+backed by immutable bytes; the digest has exact typed domain schemas and excludes
+camera, branch/action, visibility, and pixel state. Continuation audits bind every
+record to its supplied schedule, reject future phase boundaries and equal-key
+different-law/target futures, include ramp source/history cues, and pin half-away
+terminal-bin ties.
+
+**Verification:**
+`pytest -q tests/test_sim_contracts.py tests/test_sim_frames.py
+tests/test_sim_skier.py tests/test_sim_skier_audit.py` -> `76 passed`; its PURE
+import/AST guard rejects renderer/model, wall-clock, stdlib random, and aliased
+NumPy-random imports. Scoped Ruff -> `All checks passed!`; project Conda mypy ->
+`Success: no issues found in 5 source files`; `git diff --check` passed. Midpoint
+contract/mechanics reviews and targeted re-review report no unresolved CRITICAL or
+HIGH finding.
+
+No Blender/asset, rendering, data generation/encoding, model/loader/training,
+GPU/H20, controller, SSH, Docker, Orin, GUI, network, purchase, publication, or
+real-flight operation occurred.
+
+**Next USER gate:** `B3-CS3` requires explicit authority for the official Blender
+4.5.11 build, CC0 Quaternius asset acquisition/provenance, and CPU feasibility
+rendering. Do not begin it without that authority.
+
+---
+
+## 2026-07-15 — B3-CS1 renderer-neutral PURE causal contract verified
+
+**Status:** `B3-CS1` DoD and narrow verification pass; `B3-CS2` is the next
+authorized local PURE card.
+
+Replaced the previously untracked controller-oriented simulator surface
+file-by-file with renderer-neutral NumPy contracts in `vllatent/sim/contracts.py`
+and `vllatent/sim/frames.py`; removed its stale passive-video/controller token
+adapter and matching test. The active record has exactly four requested body-FRD
+channels plus a separate fixed `dt_seconds`, nine exact eight-step programs,
+float64 SI storage and unnormalized float32 model inputs, immutable named
+requested/achieved SE(3), exact rig/camera transforms and analytic body-twist
+integration. The fixed 24-mm camera manifest includes centered 224-square
+intrinsics, crop/clip/pixel settings, and disabled depth of field; the zero-program
+known-answer camera hash is
+`2a22de62d4249fd9c065f9e7ded8b2540c92b1bcb8f39fa395ca5854ea3b355e`.
+
+Root/split validation requires one indivisible group containing all nine siblings.
+The canonical skier digest admits only root, skis, contacts, phases, bone-local
+transforms, and randomness and recursively rejects camera, branch/action,
+visibility, mask, and pixel fields. Analytic pinhole tests verify the locked signs
+for both siblings of yaw, forward, lateral, and vertical interventions, and strict
+depth/center/displacement eligibility boundaries.
+
+**Verification:**
+`python -m pytest -q tests/test_sim_contracts.py tests/test_sim_frames.py` ->
+`37 passed`; the focused AST/import guard ran inside that target and rejects
+renderer/model imports including `bpy`; scoped Ruff -> `All checks passed!`.
+No renderer, asset, data, model/training, GPU/H20, controller, network, or git
+publication operation occurred.
+
+**Next:** implement only `B3-CS2`, the versioned deterministic slope-plane skier
+root, ski/contact construction, causal continuation audit, canonical fixtures,
+and focused PURE mechanics/property tests. `B3-CS3` remains USER-gated.
+
+---
+
 ## 2026-07-14 — Consolidate sports clip catalogs
 
 **Status:** configuration-only consolidation; B3.6 remains blocked and
