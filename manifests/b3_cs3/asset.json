@@ -1,0 +1,83 @@
+{
+  "allowlisted_external_members": [
+    "License_Source.txt",
+    "Base Characters/Regular_Male_FullBody.blend"
+  ],
+  "authored_content_policy": "terrain, obstacles, equipment, materials, and animation are authored in-project",
+  "blender": {
+    "archive_sha256": "05ed7bd41bf3e61ae4f4a7cdc364c43088bf8b3fed702c2269c018fdf63a2188",
+    "binary_sha256": "dc72290ee8651c93c4a946c012c5f2a034946fd320e6c3ab214fa23181427428",
+    "build_hash": "4db51e9d1e1e",
+    "render_device": "CPU",
+    "version": "4.5.11 LTS"
+  },
+  "derived_artifacts": {
+    "authoritative_pose_table_file_sha256": "d07a9104ef2c271ef83e54921515a5d0eb9f1bdae7ffd245f0745a0c2b59ae6f",
+    "authored_scene_sha256": "23ea00328ed0ace0feb35ef6f998e8237cd545ee17e80f077ab26599f8e56c7c",
+    "derived_rig_sha256": "7afb7c5658cb980b9994fbdd2718f4c7fda746a586f519f4ef15326a937ba42b",
+    "rig_manifest_canonical_sha256": "893231d22a77061c810d032a63e93a462e33a830860ae49690aa70d2c39572b8",
+    "root_free_clip_canonical_sha256": "d39624214cee5e4fdddc725a8ee8142a12807ae86c96170827ee9622c13018fd"
+  },
+  "external_pack_count": 1,
+  "import_conversion_settings": {
+    "boot_binding_policy": "author deform boot_bind_l and boot_bind_r bones before pose evaluation",
+    "data_purge_policy": "remove source scenes, worlds, cameras, lights, actions, images, texts, libraries, and unused data",
+    "material_policy": "replace source materials with authored deterministic materials",
+    "metric_scale": 1.15,
+    "plugins_required": 0,
+    "rig_sanitization": "remove Rigify/control bones, constraints, drivers, custom properties, actions, and text blocks",
+    "root_normalization": "pelvis-origin body FRD metres using frozen R_root_from_source and metric_scale",
+    "save_policy": "save uncompressed with relative-path remapping disabled",
+    "source_objects": [
+      "Armature",
+      "RegularMale",
+      "Eyes",
+      "Eyebrows"
+    ],
+    "source_operation": "append selected objects from the selected source blend",
+    "source_transform_precondition": "all four appended object transforms must be identity"
+  },
+  "pack": {
+    "acquisition_date": "2026-07-20",
+    "archive_sha256": "631426cdc133f32ac5cee182e779487636ab4720e82d9e297a0daf16063bc00a",
+    "archive_size_bytes": 629923189,
+    "displayed_pack_date": "August 2025",
+    "inventory_sha256": "d57004aaef1eb76aebf80307a74b198111abc174451e173f870c86538fa63745",
+    "license_member": "License_Source.txt",
+    "license_sha256": "173831869ea6f9e270e1d13604c54a4dcf5af62e3593c47599510c929b892c99",
+    "license_spdx": "CC0-1.0",
+    "name": "Quaternius Universal Base Characters",
+    "selected_member": "Base Characters/Regular_Male_FullBody.blend",
+    "selected_member_sha256": "f35bee0656510d3832affe6fef4d00d61e1739021a713faa21d76dfde8b69cf2",
+    "selected_member_size_bytes": 4454184,
+    "selected_member_timestamp_utc": "2025-11-14T20:30:19Z",
+    "source_url": "https://quaternius.com/packs/universalbasecharacters.html",
+    "upstream_filename": "Universal Base Characters[Source].zip"
+  },
+  "rejected_external_content": [
+    "all alternate character bodies and exports",
+    "all hairstyle trees and unrelated textures",
+    "all nested Godot, Unity, and Unreal Engine archives",
+    "source scenes, worlds, cameras, lights, actions, and Rigify widgets",
+    "embedded rig_ui.py and all other Text datablocks",
+    "external image paths, creator-machine paths, and forest.exr"
+  ],
+  "saved_license_evidence": [
+    {
+      "id": "pack_page",
+      "relative_path": "evidence/quaternius-universal-base-characters.html",
+      "sha256": "f1df9c599ffb45ef095814829b38d67b40da699f5531372fde4a54bbfa25941a"
+    },
+    {
+      "id": "cc0_legal_code",
+      "relative_path": "evidence/cc0-1.0.html",
+      "sha256": "4ceb8ae6835f2f5263caa0e39c9e1adca9469686c267475049b33521dabbe339"
+    },
+    {
+      "id": "quaternius_faq",
+      "relative_path": "evidence/quaternius-faq.html",
+      "sha256": "83fabcc06fe168d61418c7681fdf15a4c11b558a7c246dabc713acdf5b8770e8"
+    }
+  ],
+  "schema_version": "b3-cs3-asset-manifest-v2"
+}

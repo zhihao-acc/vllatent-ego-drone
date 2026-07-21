@@ -25,6 +25,7 @@ import numpy as np
 
 from vllatent.sim.contracts import (
     FIXED_DT_SECONDS,
+    SKIER_POSE_ROOT_SCHEMA_VERSION,
     SKIER_ROOT_SCHEMA_VERSION,
     canonical_bytes,
     canonical_skier_digest,
@@ -1104,6 +1105,7 @@ class SkierFrameRecord:
     gross_lean_rad: float
     world_velocity_m_s: np.ndarray
     world_acceleration_m_s2: np.ndarray
+    root_schema_version: str = SKIER_ROOT_SCHEMA_VERSION
 
     def __post_init__(self) -> None:
         if not isinstance(self.state, SkierState):
@@ -1114,6 +1116,13 @@ class SkierFrameRecord:
             raise TypeError("animation: expected AnimationParameters")
         if not isinstance(self.root, RootGeometry) or not isinstance(self.skis, SkiPairGeometry):
             raise TypeError("root/skis: expected RootGeometry/SkiPairGeometry")
+        if self.root_schema_version not in (SKIER_ROOT_SCHEMA_VERSION, SKIER_POSE_ROOT_SCHEMA_VERSION):
+            raise ValueError("root_schema_version: unsupported skier root schema")
+        if self.root_schema_version == SKIER_POSE_ROOT_SCHEMA_VERSION:
+            if self.state.tracked_joint_positions_root_m.shape != (17, 3):
+                raise ValueError("CS3 pose root requires exactly 17 tracked joint positions")
+            if self.state.local_bone_transforms.shape != (17, 4, 4):
+                raise ValueError("CS3 pose root requires exactly 17 local bone transforms")
         object.__setattr__(self, "acceleration_m_s2", _finite("acceleration_m_s2", self.acceleration_m_s2))
         object.__setattr__(self, "omega_rad_s", _finite("omega_rad_s", self.omega_rad_s))
         object.__setattr__(self, "gross_lean_rad", _finite("gross_lean_rad", self.gross_lean_rad))
@@ -1151,7 +1160,7 @@ class SkierFrameRecord:
             }
 
         return {
-            "schema_version": SKIER_SCHEMA_VERSION,
+            "schema_version": self.root_schema_version,
             "integrator_version": INTEGRATOR_VERSION,
             "schedule_version": SCHEDULE_SCHEMA_VERSION,
             "ski_construction_version": SKI_CONSTRUCTION_VERSION,
@@ -1215,7 +1224,7 @@ class SkierFrameRecord:
         assert isinstance(left, dict) and isinstance(right, dict)
         return canonical_skier_digest(
             root={
-                "schema_version": SKIER_SCHEMA_VERSION,
+                "schema_version": self.root_schema_version,
                 "absolute_tick": self.state.absolute_tick,
                 "position_xy_m": payload["position_xy_m"],
                 "heading_rad": self.state.heading_rad,

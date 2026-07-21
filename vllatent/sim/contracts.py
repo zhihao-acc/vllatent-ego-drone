@@ -30,6 +30,7 @@ def _immutable_buffer(value: np.ndarray, dtype: np.dtype[np.generic]) -> np.ndar
 CONTRACT_SCHEMA_VERSION: Final[str] = "b3-cs1-camera-contract-v1"
 SKIER_DIGEST_SCHEMA_VERSION: Final[str] = "b3-cs-skier-digest-v1"
 SKIER_ROOT_SCHEMA_VERSION: Final[str] = "b3-cs2-skier-root-v1"
+SKIER_POSE_ROOT_SCHEMA_VERSION: Final[str] = "b3-cs3-skier-root-pose-v1"
 
 HORIZON_STEPS: Final[int] = 8
 FIXED_DT_SECONDS: Final[float] = 0.2
@@ -667,9 +668,16 @@ def _validate_skier_digest_domains(payload: Mapping[str, object]) -> None:
     _require_exact_keys("phases", phases, (_CS2_PHASE_KEYS,))
     _require_exact_keys("randomness", randomness, (_RANDOMNESS_KEYS,))
     _require_digest_int("randomness.seed", randomness["seed"])
-    _require_f64_digest_array("local_bone_transforms", payload["local_bone_transforms"], (None, 4, 4))
-    if _require_digest_text("root.schema_version", root["schema_version"]) != SKIER_ROOT_SCHEMA_VERSION:
-        raise ValueError(f"skier.root.schema_version: expected {SKIER_ROOT_SCHEMA_VERSION!r}")
+    root_schema_version = _require_digest_text("root.schema_version", root["schema_version"])
+    supported_root_versions = {SKIER_ROOT_SCHEMA_VERSION, SKIER_POSE_ROOT_SCHEMA_VERSION}
+    if root_schema_version not in supported_root_versions:
+        raise ValueError(f"skier.root.schema_version: expected one of {sorted(supported_root_versions)!r}")
+    pose_count: int | None = 17 if root_schema_version == SKIER_POSE_ROOT_SCHEMA_VERSION else None
+    _require_f64_digest_array(
+        "local_bone_transforms",
+        payload["local_bone_transforms"],
+        (pose_count, 4, 4),
+    )
     _require_digest_int("root.absolute_tick", root["absolute_tick"])
     _require_f64_digest_array("root.position_xy_m", root["position_xy_m"], (2,))
     for field in (
@@ -686,7 +694,7 @@ def _validate_skier_digest_domains(payload: Mapping[str, object]) -> None:
     _require_f64_digest_array(
         "root.tracked_joint_positions_root_m",
         root["tracked_joint_positions_root_m"],
-        (None, 3),
+        (pose_count, 3),
     )
     _require_f64_digest_array("skis.dimensions_m", skis["dimensions_m"], (3,))
     for field in (
@@ -793,6 +801,7 @@ __all__ = [
     "RootSiblingIdentity",
     "SENSOR_WIDTH_MM",
     "SKIER_DIGEST_SCHEMA_VERSION",
+    "SKIER_POSE_ROOT_SCHEMA_VERSION",
     "SKIER_ROOT_SCHEMA_VERSION",
     "T_CAM_FROM_RIG_M",
     "T_RIG_FROM_CAM_M",

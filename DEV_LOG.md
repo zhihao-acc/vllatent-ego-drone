@@ -109,6 +109,486 @@ Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `supers
 
 ---
 
+## 2026-07-20 — B3-CS3 Ralph iteration 10 complete
+
+**Status:** `B3-CS3` meets every dependency, DoD, verification, and review gate.
+The deterministic Blender scene, legal frozen rig, meaningful absolute-tick body
+dynamics, authoritative ski/contact realization, exact labels, and eight-root
+same-host replay proof are complete. `B3-CS4` was not started and remains the
+next explicit USER gate for data-generation authority.
+
+The first v2 semantic replay audit correctly rejected a cross-runtime canonical
+root mismatch. The only differing values were sub-ULP pose/posed-record results
+from Blender Python 3.11/NumPy 1.26.4 versus the host Python 3.13/NumPy 2.4.6;
+source mechanics, schedules, camera, renderer, provenance, and continuation data
+already matched. The repaired v3 authority stores the exact complete canonical
+pose and posed-record bytes for all 88 fixture rows. The host independently
+regenerates and pins that authority, while both host and Blender strictly decode,
+rehash, and byte-reserialize it instead of rerunning runtime-dependent pose
+linear algebra inside root identity construction.
+
+The final authoritative pose-table file SHA-256 is
+`d07a9104ef2c271ef83e54921515a5d0eb9f1bdae7ffd245f0745a0c2b59ae6f`;
+its canonical table SHA-256 is
+`d39624214cee5e4fdddc725a8ee8142a12807ae86c96170827ee9622c13018fd`.
+The final asset-manifest and scene-manifest file hashes are
+`d7edff7e266d1b6b610449ceac0049043fe7ffb4359387e87fcafc49db494ab1`
+and
+`442ea25fc910ce4b13d8de42fbb20055815773551e16c109e095b6524859e337`.
+The source blend, source license, and three saved license/provenance evidence
+files were rehashed to their manifest values. The derived rig and authored scene
+remain pinned at
+`7afb7c5658cb980b9994fbdd2718f4c7fda746a586f519f4ef15326a937ba42b`
+and
+`23ea00328ed0ace0feb35ef6f998e8237cd545ee17e80f077ab26599f8e56c7c`.
+
+The cross-runtime straight-root smoke produced the identical root ID
+`8fd3596d1cfdcf997f073767e4196d91a95ffd5b5d32c32e92ca42be90ff88d0`,
+envelope SHA-256
+`ffcc968863f06406a55f4e0db794493d7c13503d6966bc3c5e12d65e5a4466e2`,
+and 519,311 canonical bytes in host Python and Blender. Both fresh Blender
+processes then emitted all 88 frames and the identical replay SHA-256
+`2ea83a6a4ce30c6cd34b0a5bb0b677c1c2fd7024ef287aa0ac316ce98a3e336e`.
+The independent auditor rebuilt all eight canonical roots and every source,
+pose, posed, camera, label, and raster contract; it compared 800 artifacts and
+passed with ordered replay SHA-256
+`b70566e76527d5989210884c20b93394976d8d88887b1a547a6b13440eacb6f9`.
+The audit-report SHA-256 is
+`521c7aa6c731108bc75c00301ca3a6d2148b1d6b893ef983599bd6a9165a7d83`.
+All records use a valid zero four-channel command, eight distinct root/split
+groups, and the `test` split.
+
+Final scene, pose-table, and realized carve-cycle Blender audits pass. The two
+11-sample, 5 Hz carve cycles reach mirrored `+/-50 deg` edge peaks and matching
+lean peaks at index 5. Across the eight-root replay, maximum projection parity
+is `3.531076200064894e-05 px`; achieved intrinsic, camera-position, and
+camera-rotation residuals are at most `8.900960267510527e-06 px`,
+`2.194747765373159e-07 m`, and `1.2650165958545108e-07 rad`. Maximum world-pose
+position/rotation residuals are `9.631244048582199e-07 m` and
+`4.4261750946060666e-07 rad`; local pose reconstruction remains below
+`1.75e-15 m` and `2.61e-15` Frobenius. Equipment/contact gates pass, boot-binding
+residuals are exact zero, and the minimum inner-tip gap is
+`0.050019925832748474 m`. The fixed occluder changes observations at ticks 1--8
+and produces temporary occlusion at ticks 1--7 without changing causal state.
+
+The self-contained visual contact strip SHA-256 is
+`6148020d2896b1e274d8073049edc6da8865af02236ddadc358ff0f776281dd0`.
+All 24 tick-0/4/8 samples were visually inspected: ski contact, stance, tuck,
+brake, mirrored carves, transition, composite motion, equipment attachment, and
+temporary occlusion are coherent, with no rig explosion or detached equipment.
+
+**Verification:** focused CS1/CS2/CS3 pytest `151 passed`; scoped Ruff PASS;
+mypy PASS over 10 source/script files; Python compile PASS; PURE Blender
+import/AST boundary PASS; final replay/pose/cycle/scene audits PASS; visual review
+PASS; `git diff --check` PASS. Mandatory independent completion review verdict:
+PASS with `0 CRITICAL`, `0 HIGH`, `0 MEDIUM`, and two non-blocking LOW risks.
+
+**Remaining LOW risks:** the fixed CS3 camera lets the left/right carve fixtures
+leave the crop at tick 8, so the USER-gated CS4 manifest must reject or reframe
+unsuitable rows before generation. The worktree also contains unrelated
+user-owned changes, so only the exact CS3 paths and this append-only log hunk may
+be committed.
+
+**Next USER gate:** `B3-CS4` requires explicit authority for the frozen 32-root x
+nine-branch x eight-future paired CPU data-generation smoke plus shared
+histories. No CS4 generation, encoding, training, GPU/H20, controller, SSH,
+Docker, publication, or real-flight operation occurred.
+
+---
+
+## 2026-07-20 — B3-CS3 Ralph iteration 9 eight-root deterministic replay verified
+
+**Status:** both complete fresh-process eight-root replays, the independent
+artifact audit, all frozen numeric gates, and the visual contact-strip review
+pass. `B3-CS3` remains in progress until the immediate pre-completion review and
+final scoped verification pass; `B3-CS4` remains unauthorized.
+
+This entry supersedes the iteration-7/8 scene and replay evidence with authored
+scene v3 and the isolated observation intervention. The frozen scene SHA-256 is
+`23ea00328ed0ace0feb35ef6f998e8237cd545ee17e80f077ab26599f8e56c7c`;
+the tracked scene-manifest file SHA-256 is
+`decd9bf8fba18e7fae7ca9ee76e0b5556d8b8018c1f351130b170ffe4bccd5ae`.
+The scene fixes the authored occluder at dimensions `(0.40, 1.10, 1.00) m`,
+camera-to-tick-4 pelvis fraction `0.58`, and local-z offset `+0.15 m`. It is
+enabled only for `occlusion_path` and hidden from rendering and evaluated-scene
+ray queries for the other seven roots. The audit rejects a fixed-occluder modal
+ID outside that root.
+
+RGB remains Cycles CPU at 32 samples. Binary target-only and normal-scene ID
+passes use the Blender evaluated depsgraph at the frozen pixel centers under
+schema `b3-cs3-blender-depsgraph-center-ray-id-v1`; both agree pixel-for-pixel
+with the independent PURE masks. The requested camera matrix remains the label
+contract while Blender's achieved matrix/transform are separately recorded.
+Across 88 frames, maximum projection parity was
+`3.531076200064894e-05 px`; achieved intrinsic, position, and rotation residuals
+were at most `8.900960267510527e-06 px`, `2.194747765373159e-07 m`, and
+`1.2650165958545108e-07 rad`.
+
+All pose/equipment gates pass. Maximum Blender/PURE world position and rotation
+residuals were `9.631244048582199e-07 m` and
+`4.4261750946060666e-07 rad`; exact local-pose reconstruction stayed below
+`1.75e-15 m` and `2.61e-15` Frobenius. Maximum equipment origin/contact,
+ski-frame, attack, edge, binding-relative position, and slip residuals were
+`1.047789885729373e-05 m`, `1.0408024174015875e-05 m`,
+`3.1158139228564456e-07 rad`, `1.9919945206651083e-07 rad`,
+`3.1678976641913437e-07 rad`, `1.6180810771504831e-06 m`, and
+`1.7596034461650478e-06 m/s`. Boot-binding relative position and rotation were
+exact zero. The minimum realized inner-tip gap was `0.050019925832748474 m`.
+
+The two independent Blender processes each emitted 88 frames and the identical
+replay SHA-256
+`748c870e16217c763d216253db27223386302fe4f1f81bc5f477519f3c7e8697`.
+The independent audit compared all 792 declared files byte-for-byte, recomputed
+their hashes and schemas, and passed with ordered replay SHA-256
+`6dfd2ebf46f70422a6c0ac790ee1b2b2473270d153fb6ddf074473f84a75dfb2`.
+Its report SHA-256 is
+`b86672c82de620db2f8de72fea4c3d4a2f67e00f4681f635f3819ad19cdb6126`.
+The occlusion root reaches `p_visible_target=0` at ticks 3 and 4, then recovers
+to `p_visible_target=1`; tick 8 has `20/23` target pixels visible.
+
+The audited self-contained SVG contact strip SHA-256 is
+`6148020d2896b1e274d8073049edc6da8865af02236ddadc358ff0f776281dd0`.
+A review-only PNG contact sheet (SHA-256
+`bb2c7a93d3e759cc6ccf45530046d117a1690750145e9768304b819da7b6837c`)
+was visually inspected: the obstacle appears only in the occlusion row; stance,
+tuck, brake tip separation, mirrored carve poses, carve transition, ski contact,
+and composite motion are visible and coherent.
+
+**Verification:** two fresh 88-frame Blender processes PASS; independent replay
+audit PASS (`792` files); visual contact-strip review PASS; focused
+replay-auditor/Blender-boundary/label tests `22 passed`; scoped Ruff PASS.
+
+**Next Ralph iteration:** run the immediate pre-completion independent review,
+resolve every CRITICAL/HIGH finding, execute the final scoped verification, and
+inspect/stage/commit only the CS3 paths if all gates remain green. Do not start
+`B3-CS4`.
+
+---
+
+## 2026-07-20 — B3-CS3 Ralph iteration 8 authenticated render interface verified
+
+**Status:** one authoritative frame now passes the complete Blender/PURE
+state-pose-equipment-camera-label-RGB/ID boundary, including exact fresh-process
+replay after canonical PNG serialization. `B3-CS3` remains in progress until
+both complete 88-frame runs and the independent final review pass.
+
+The scene was re-frozen with unique nonzero object-index values for every
+rendered non-target mesh and a manifested helmet attachment at 0.65 of the
+evaluated Head bone. The superseding scene SHA-256 is
+`1a5daa2fb9a7ab4d6dc8f919d89fbe57ce5abfaf1c62490372c049529bba1b21`
+and its byte-identical tracked/external manifest SHA-256 is
+`8964d76abbc4804db0808ae41bb1dc579d295babe04d66749eeea73e73273af8`.
+A fresh scene audit passed after this index/attachment freeze.
+
+For the tick-0 straight frame, Blender consumed only the pinned exported local
+pose transforms, independently reconstructed their globals within `1e-10`,
+matched both source and posed skier digests, and passed Blender/PURE pose parity.
+Realized ski/binding/boot origins, frames, contact, attack/edge/slip, tip gap,
+and binding-relative metrics all passed their frozen gates. The actual inner-tip
+gap was `0.21999999284744262 m`; the largest listed equipment origin/contact
+residual was below `5.6e-8 m`, ski-frame residual below `8.9e-8 rad`, and slip
+component residual below `6.2e-7 m/s`.
+
+The static tick-0 camera remained centered and independently agreed with
+Blender projection to `1.9952669029581638e-5 px`. Cycles emitted both a normal
+scene IndexOB target-ID pass and a target-only pass. After the explicit
+top-down PNG boundary, they agreed pixel-for-pixel with PURE `M_vis` and `M_in`.
+The frame was visible and unoccluded with exact areas
+`A_full=A_in=A_vis=236`. State, pose, RGB, software masks, actual ID passes,
+geometry, labels, camera, and metadata all have path-independent SHA fields.
+
+Raw Blender PNG containers varied across fresh processes despite identical
+decoded pixels, so the bridge now decodes CRC-checked 8-bit RGB/gray scanlines
+and re-emits fixed filter-0/zlib-level-9 PNGs. Two subsequent fresh Blender
+processes produced byte-identical complete one-frame output trees and identical
+replay SHA-256
+`721250795b2334bb91f0c88eb6bf50b6b1f8619d047d8b7562d28a05c67cec14`.
+
+**Verification:** two authenticated one-frame renders PASS and recursive output
+comparison is exact. Focused replay-auditor/label/scene/boundary tests:
+`23 passed`. Scoped Ruff: PASS.
+
+**Next Ralph iteration:** run the complete 8 fixtures x 11 frames twice in fresh
+processes, audit all 792 declared files plus metadata, and inspect the real-RGB
+contact strip. `B3-CS4` remains unauthorized.
+
+---
+
+## 2026-07-20 — B3-CS3 Ralph iteration 7 authored scene and label contract verified
+
+**Status:** the pinned derived rig now opens into one audited authored Blender
+scene, and the independent PURE amodal/visible label implementation passes its
+focused mechanical tests. `B3-CS3` remains in progress; the eight-root CPU
+render and two-run exact replay comparison are still pending.
+
+Blender 4.5.11 built the tracked `b3-cs3-authored-slope-scene-v1` contract from
+the exact derived-rig and one-pack asset manifests. The scene contains the
+15-degree `80 m x 30 m` authored slope, procedural snow, primitive parallax and
+occlusion geometry, skis/bindings/boots/poles/helmet, one fixed world/sun, and
+the co-located fixed-intrinsics `DroneRig` camera hierarchy. Its Cycles contract
+is CPU-only, `224 x 224`, 32 samples, one thread, seed 1729, adaptive sampling,
+animated seed, denoising, and motion blur off, with Standard/None color settings
+at exposure 0, gamma 1, and dither 0. The scene SHA-256 is
+`7428e33d14b41a337c6410fe3752745df61d0393a67ca8908ae478d47d89756f`;
+the byte-identical tracked/external scene manifest SHA-256 is
+`be2c6386a1862cc067d244037065da9e30b088a7b85074746fe960764e389c8c`.
+
+A fresh factory-startup/autoexec-disabled Blender process re-opened that exact
+scene and passed its SHA, object allowlist, target/equipment sets, no-plugin /
+no-action / no-text / no-image / no-library boundary, procedural snow marker,
+fixed occluder, render/color settings, camera intrinsics, hierarchy, and
+co-location audit. The bridge now converts Python exceptions to a nonzero
+process exit so failed background audits cannot appear green.
+
+The PURE label module separately implements float64 world-geometry projection,
+unbounded absolute scanline-run `M_full`, exact `M_in`/target-only identity,
+perspective-correct strict-front `M_vis`, modal occluder identity, every frozen
+area/box/threshold formula, immutable canonical buffers, and canonical hashing;
+camera and branch state are separate inputs rather than target geometry.
+
+**Verification:** fresh Blender scene audit PASS. Focused scene/label/Blender
+boundary tests: `17 passed`. Scoped Ruff: PASS.
+
+**Next Ralph iteration:** bind the 88 authoritative poses to realized equipment,
+rendered geometry, deterministic RGB/ID/mask outputs, and per-frame metadata.
+`B3-CS4` remains unauthorized.
+
+---
+
+## 2026-07-20 — B3-CS3 Ralph iteration 6 review findings resolved
+
+**Status:** the mandatory iteration-5 review's two HIGH findings are resolved
+and its targeted re-review passes with no remaining CRITICAL/HIGH. `B3-CS3`
+remains in progress; scene/render/label replay is still pending.
+
+The project-Python pose module now owns the only canonical 88-row Blender export
+mapping and exact JSON-byte serialization. The canonical table is pinned at
+`a0f8d7f1f9f03acda36c8a710dcc9b1c561a6a49652b0008e06741c985b69171`
+and the complete exported file, including all local transforms, is pinned at
+SHA-256
+`3654cb8de21987695c3852c26aee4b6ca0d6e7f5e20c3f2c58086edbdd80e9ec`.
+The Blender bridge rejects either mismatch before pose application.
+
+Each exported row now carries the named parent-rest-local transform convention
+and all 17 digest-facing local transforms. Blender independently reconstructs
+the 17 root-global matrices from those deltas plus the frozen parent/rest frames,
+requires local/global position and rotation-Frobenius residuals `<=1e-10`, and
+applies only the reconstructed result. The all-88 PURE property test clears this
+gate and a deliberate 5 cm local-transform mutation is detected. The latest
+authenticated 88-pose Blender parity audit passes the existing `1e-6 m/rad`
+boundary.
+
+The asset manifest audit was also hardened to freeze the Blender binary/build
+hash and the recorded pack name, URL, filename, dates, and selected-member
+timestamp; eight focused mutation cases now fail closed.
+
+**Verification:** scoped Ruff passed. The focused CS1-CS3 suite over pose, rig,
+scene-camera geometry, Blender boundary, contracts, frames, skier mechanics, and
+skier audit completed with `112 passed`. Independent targeted re-review verdict:
+PASS, zero unresolved CRITICAL/HIGH.
+
+**Next Ralph iteration:** build and audit the deterministic authored Blender
+scene and label interfaces. `B3-CS4` remains unauthorized.
+
+---
+
+## 2026-07-20 — B3-CS3 Ralph iteration 5 Blender/PURE pose parity verified
+
+**Status:** every canonical CS3 body pose now has a verified Blender realization.
+`B3-CS3` remains in progress: the deterministic authored scene, exact mask
+construction, eight-root CPU render/replay, and visual contact strip are still
+pending.
+
+The authoritative pose table is exported by the project CPython/NumPy runtime
+and consumed as exact float64 JSON by Blender. This prevents Blender's bundled
+NumPy from silently becoming a second numeric authority for SVD/inverse results.
+Two independent exports were byte-identical at file SHA-256
+`6c238b74abbeafe8cc8f59552b6c0dfd56c8f8e7ae25b422cbc4a01c320f8b36`.
+The corrected canonical pose-table SHA-256 is
+`35dc79e92d0e5f558e22a9bd3d93e96fb992b8d87917524aa6b3a243826b2c7e`;
+this supersedes the intermediate iteration-4 hash without rewriting that
+historical entry.
+
+Pinned Blender 4.5.11 applied all 88 history/future poses across the eight
+canonical fixtures to the frozen derived rig. Each audit covers the armature
+object, five exact intermediate parents (`root`, `spine_02`, `neck_01`, and
+bilateral clavicles), and all 17 manifested bones. The maximum measured
+Blender-versus-authoritative residuals were `9.631244049048497e-07 m` in world
+position and `4.4261750946060666e-07 rad` in world rotation; root-local maxima
+were `1.9668911759528263e-07 m` and `3.9371693866364536e-07 rad`. All are below
+the frozen `1e-6` parity tolerances. Two fresh Blender processes emitted
+byte-identical audit JSON, SHA-256
+`86c4147bbb14f08110f63a21ad0744893dbf8936c93c6edd16953d48716d8b50`.
+
+**Verification:** scoped Ruff passed. The focused CS1-CS3 regression command
+over pose, rig, Blender boundary, contracts, frames, skier mechanics, and skier
+audit completed with `101 passed`. The PURE pinned-hash test also reproduces the
+authoritative pose table in two fresh project-Python processes. The mandatory
+post-iteration-5 independent review was launched read-only; its findings must be
+resolved before CS3 completion.
+
+**Next Ralph iteration:** author the deterministic slope, obstacles, equipment,
+camera, and exact target/visibility masks around the already-proven pose table.
+`B3-CS4` remains unauthorized.
+
+---
+
+## 2026-07-20 — B3-CS3 Ralph iteration 4 PURE pose/root/IK contract verified
+
+**Status:** the renderer-neutral CS3 pose contract passes its focused gate.
+`B3-CS3` is still in progress: Blender evaluated-pose parity, the authored
+scene, and the eight-root CPU render/replay proof have not yet passed.
+
+The source character is frozen at metric scale `1.15`, which gives the selected
+adult an approximately 1.78 m stature and keeps every canonical stateless
+two-bone binding solve strictly inside non-stretch reach. The current pinned
+derived rig outside the repository has SHA-256
+`7afb7c5658cb980b9994fbdd2718f4c7fda746a586f519f4ef15326a937ba42b`;
+the corrected canonical rig-manifest SHA-256 is
+`893231d22a77061c810d032a63e93a462e33a830860ae49690aa70d2c39572b8`.
+This supersedes the pre-scale hashes in iteration 3 without rewriting that
+historical entry. The manifest now freezes raw and closest-SO(3) rest frames for
+all 17 evaluated bones and their exact intermediate parents (`root`,
+`spine_02`, `neck_01`, and bilateral clavicles).
+
+The PURE absolute-tick evaluator now keeps the pelvis bone at its frozen local
+rest origin and places all flexion height solely in a versioned authoritative
+armature root. A canonical posed record is bound to the exact source skier
+digest, installs that CS3 root, requires exactly 17 joint positions and 17
+parent-rest-local transforms, and leaves the ground root and all ski/contact
+geometry unchanged. The stateless analytic IK rejects both overreach and a
+degenerate pole; measured upper/lower segment-length and boot-binding residuals
+are at most `1e-10` in their SI/angular units. The frozen mirror metric uses
+parent-rest-frame joint deltas plus rest-relative root-local positions. A
+dedicated signed 5 Hz carve-cycle envelope proves `<5 deg -> >=45 deg -> <5
+deg` and edge/lean peak alignment. The transition height pulse is part of the
+root law, with its minimum tied to the edge zero crossing rather than a pelvis
+bone translation.
+
+**Verification:** scoped Ruff passed. `pytest -q tests/test_sim_pose.py
+tests/test_sim_rig.py tests/test_blender_boundary.py tests/test_sim_contracts.py
+tests/test_sim_frames.py tests/test_sim_skier.py tests/test_sim_skier_audit.py`
+completed with `101 passed`. The exact canonical pose-table SHA-256 is
+`712ca471dc3840b93461f4724dd7d5e17ca1b99e004c8b2298888492112e7f24`,
+including the versioned carve envelope, and its test reproduces the hash in two
+fresh Python processes.
+
+**Next Ralph iteration:** apply this table in isolated Blender, audit evaluated
+intermediate-parent and manifested-bone matrices against PURE output, then
+author and verify the deterministic scene. `B3-CS4` remains unauthorized.
+
+---
+
+## 2026-07-20 — B3-CS3 Ralph iteration 3 pre-animation rig freeze verified
+
+**Status:** the exact `Regular` adult rig/provenance dependency is frozen and
+ready for pose authoring. `B3-CS3` is not complete; no clip, scene render, or
+dataset generation was started.
+
+The user-provided `Universal Base Characters[Source].zip` is 629,923,189 bytes,
+has SHA-256
+`631426cdc133f32ac5cee182e779487636ab4720e82d9e297a0daf16063bc00a`,
+passes `unzip -t`, and has 454 members with sorted-name inventory SHA-256
+`d57004aaef1eb76aebf80307a74b198111abc174451e173f870c86538fa63745`.
+Its embedded `License_Source.txt` is explicit CC0-1.0 (SHA-256
+`173831869ea6f9e270e1d13604c54a4dcf5af62e3593c47599510c929b892c99`).
+The only selected character source is
+`Base Characters/Regular_Male_FullBody.blend`, 4,454,184 bytes, SHA-256
+`f35bee0656510d3832affe6fef4d00d61e1739021a713faa21d76dfde8b69cf2`.
+The tracked asset allowlist contains only that blend and the license; alternate
+bodies, hairstyles, engine archives, source scripts/worlds/actions, and external
+textures are explicitly excluded.
+
+Pinned Blender 4.5.11 loaded the source with `--disable-autoexec` and appended
+only `Armature`, `RegularMale`, `Eyes`, and `Eyebrows` into a factory-empty
+scene. The derived artifact retains 65 source deform bones, adds explicit
+non-deform `boot_bind_l/r` interfaces, and freezes 17 evaluated semantics from
+pelvis through bilateral boots. Its pelvis-origin armature uses proper local FRD
+`+X forward,+Y right,+Z down`; source-to-root normalization has measured maximum
+position residual `0.0 m`. Raw Blender rest matrices are retained as evidence,
+while the digest-facing rest transforms use the versioned float64 closest-SO(3)
+SVD extraction; maximum Frobenius correction is
+`2.1030991301743777e-06`. All pose bases are exact identity before authoring.
+
+The frozen derived rig outside the repository has SHA-256
+`f900737b65cfcb5bb5c487e2fe9dd76e51123c65288647f9b2804953cec31914`;
+the renderer-neutral canonical rig-manifest SHA-256 is
+`525966fe11aac64748ef61511d5e866afbb9a3a636476013d108f97563dad632`.
+A fresh-process reopen audit verifies the file hash, raw and rigidized rest
+matrices, exact object allowlist, zero Actions, Texts, Images, Worlds, external
+Libraries, non-armature modifiers, or plugin requirements, and no need for
+Rigify or `rig_ui.py`.
+
+**Verification:** scoped Ruff passed; `pytest -q tests/test_sim_rig.py
+tests/test_blender_boundary.py` -> `8 passed`. A second clean derivation had
+identical normalized/rest/allowlist content; Blender save-container bytes were
+not claimed reproducible, so all later replay gates load the one pinned frozen
+artifact rather than regenerating it.
+
+**Next Ralph iteration:** author the deterministic slope/obstacles/equipment,
+fixed camera, absolute-tick root-free poses, and stateless analytic binding IK.
+`B3-CS4` remains unauthorized.
+
+---
+
+## 2026-07-15 — B3-CS3 Ralph iteration 2 acquisition gate diagnosis
+
+**Status:** Blender acquisition PASS; required adult `Regular` Quaternius source
+is USER-gated. `B3-CS3` is not complete and no scene/pose authoring or render was
+started.
+
+The official `blender-4.5.11-linux-x64.tar.xz` release was acquired from a
+synchronized release mirror because the primary host challenged headless access.
+Its size is `377,898,640` bytes and SHA-256 is
+`05ed7bd41bf3e61ae4f4a7cdc364c43088bf8b3fed702c2269c018fdf63a2188`,
+which passes the published `blender-4.5.11.sha256` check. `xz --test` passes.
+The extracted binary reports Blender `4.5.11 LTS`, Linux Release, build date
+2026-06-23, build hash `4db51e9d1e1e`; the binary SHA-256 is
+`dc72290ee8651c93c4a946c012c5f2a034946fd320e6c3ab214fa23181427428`.
+
+The free `Universal Base Characters[Standard].zip` was acquired from the official
+Quaternius itch.io distribution. It is `128,968,391` bytes with SHA-256
+`fdbf1804c90dfc1ea03e992bff7da2dfd1a79318e13270a660180f9308455f40`;
+`unzip -t` passes and its 112-member sorted-name inventory hashes to
+`ebae88c874662e33fc599d0ded3138f922c471c9041b8f26fd0b12ad9c172f5b`.
+The embedded license is CC0 1.0. Official pack, FAQ, CC0, and checksum evidence
+were saved and hashed outside the repository.
+
+The complete Standard inventory contains only the male/female `Superhero`
+full-body FBX/glTF models. It contains no `Regular` full-body model. A Blender
+4.5.11 background import confirms a usable humanoid armature, but it belongs to
+the wrong body variant. The locked report requires the Quaternius adult `Regular`
+humanoid and forbids silently changing that selection. The official
+`Universal Base Characters[Source].zip`, which contains all body variants and
+rigged `.blend` sources, is priced at USD 19.99. Download authority is not purchase
+authority, so no purchase occurred.
+
+**Next USER gate:** acquire the official Source archive (recommended) or explicitly
+revise the locked asset decision. Do not author clips against the wrong rig.
+`B3-CS4` remains unauthorized.
+
+---
+
+## 2026-07-15 — B3-CS3 Ralph iteration 1 dependency and authority audit
+
+**Status:** `B3-CS3` is eligible and in progress under explicit USER authority
+for the official Blender 4.5.11 build, the selected CC0 Quaternius asset, and
+CPU-only feasibility rendering. `B3-CS4` data generation remains unauthorized.
+
+The complete B3-CS3 dependency, authority, DoD, verification, and failure-action
+card was re-read against the locked simulator decision. No Blender executable or
+matching Blender/Universal Base Character archive existed locally at audit time.
+The official release filename is `blender-4.5.11-linux-x64.tar.xz`; two
+synchronized release mirrors reproduce its published SHA-256 entry
+`05ed7bd41bf3e61ae4f4a7cdc364c43088bf8b3fed702c2269c018fdf63a2188`.
+The selected free CC0 upstream filename is exactly
+`Universal Base Characters[Standard].zip`; the paid Source pack is excluded.
+
+**Verification:** focused CS1/CS2 dependency target -> `82 passed in 1.23s`.
+The PURE modules are unchanged and remain the renderer-neutral authority.
+
+---
+
 ## 2026-07-15 — B3-CS1/CS2 final review hardening correction
 
 **Status:** completion review PASS with `0` unresolved CRITICAL and `0` HIGH;

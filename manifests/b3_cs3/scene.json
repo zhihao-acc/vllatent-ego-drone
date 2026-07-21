@@ -1,0 +1,279 @@
+{
+  "actions": 0,
+  "asset_manifest_file_sha256": "d7edff7e266d1b6b610449ceac0049043fe7ffb4359387e87fcafc49db494ab1",
+  "authored_content_policy": "terrain, obstacles, equipment, materials, and animation are authored in-project",
+  "authored_materials": [
+    "CS3_BindingMaterial",
+    "CS3_BootMaterial",
+    "CS3_FoliageMaterial",
+    "CS3_HelmetMaterial",
+    "CS3_OccluderMaterial",
+    "CS3_PoleMaterial",
+    "CS3_RockMaterial",
+    "CS3_SkiMaterial",
+    "CS3_SnowMaterial",
+    "CS3_WoodMaterial"
+  ],
+  "blender_build_hash": "4db51e9d1e1e",
+  "blender_version": "4.5.11 LTS",
+  "camera_contract_sha256": "038843f72833d6835883a59b9a21f855ad57bdb7959a949107e079dd9da8dd61",
+  "camera_objects": {
+    "camera": "CS3_Camera",
+    "rig": "DroneRig"
+  },
+  "camera_root_schema_version": "b3-cs3-static-root-relative-camera-v1",
+  "derived_rig_sha256": "7afb7c5658cb980b9994fbdd2718f4c7fda746a586f519f4ef15326a937ba42b",
+  "dynamic_equipment_pass_indices": {
+    "CS3_Binding_L": 301,
+    "CS3_Binding_R": 302,
+    "CS3_Pole_L": 303,
+    "CS3_Pole_R": 304,
+    "CS3_Ski_L": 305,
+    "CS3_Ski_R": 306
+  },
+  "excluded_equipment": [
+    "CS3_Ski_L",
+    "CS3_Ski_R",
+    "CS3_Binding_L",
+    "CS3_Binding_R",
+    "CS3_Pole_L",
+    "CS3_Pole_R"
+  ],
+  "external_libraries": 0,
+  "external_pack_count": 1,
+  "helmet_head_bone_fraction": 0.65,
+  "images": 0,
+  "label_target_set_version": "b3-cs3-target-person-clothing-helmet-boots-v1",
+  "objects": [
+    {
+      "excluded_equipment": true,
+      "name": "CS3_Binding_L",
+      "pass_index": 301,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": true,
+      "name": "CS3_Binding_R",
+      "pass_index": 302,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Body",
+      "pass_index": 1,
+      "target_part": true,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Boot_L",
+      "pass_index": 1,
+      "target_part": true,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Boot_R",
+      "pass_index": 1,
+      "target_part": true,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Camera",
+      "pass_index": 0,
+      "target_part": false,
+      "type": "CAMERA"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Eyebrows",
+      "pass_index": 1,
+      "target_part": true,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Eyes",
+      "pass_index": 1,
+      "target_part": true,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_FixedOccluder",
+      "pass_index": 101,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Helmet",
+      "pass_index": 1,
+      "target_part": true,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_ParallaxPole",
+      "pass_index": 203,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": true,
+      "name": "CS3_Pole_L",
+      "pass_index": 303,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": true,
+      "name": "CS3_Pole_R",
+      "pass_index": 304,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Rock_A",
+      "pass_index": 201,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Rock_B",
+      "pass_index": 202,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": true,
+      "name": "CS3_Ski_L",
+      "pass_index": 305,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": true,
+      "name": "CS3_Ski_R",
+      "pass_index": 306,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_SkierArmature",
+      "pass_index": 0,
+      "target_part": false,
+      "type": "ARMATURE"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Slope",
+      "pass_index": 200,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_Sun",
+      "pass_index": 0,
+      "target_part": false,
+      "type": "LIGHT"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_TreeCrown",
+      "pass_index": 205,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "CS3_TreeTrunk",
+      "pass_index": 204,
+      "target_part": false,
+      "type": "MESH"
+    },
+    {
+      "excluded_equipment": false,
+      "name": "DroneRig",
+      "pass_index": 0,
+      "target_part": false,
+      "type": "EMPTY"
+    }
+  ],
+  "occluder": {
+    "center_fraction": 0.58,
+    "center_world_m": [
+      6.5082688541804785,
+      0.07773908822434639,
+      -0.008023858966634823
+    ],
+    "dimensions_m": [
+      0.4,
+      1.1,
+      1.0
+    ],
+    "id": "fixed_occluder_101",
+    "local_z_offset_m": 0.15,
+    "object": "CS3_FixedOccluder"
+  },
+  "plugins_required": 0,
+  "render": {
+    "adaptive_sampling": false,
+    "animated_seed": false,
+    "color_transform": "Standard",
+    "denoising": false,
+    "device": "CPU",
+    "dither": 0.0,
+    "engine": "CYCLES",
+    "exposure": 0.0,
+    "gamma": 1.0,
+    "motion_blur": false,
+    "resolution": [
+      224,
+      224
+    ],
+    "samples": 32,
+    "seed": 1729,
+    "threads": 1
+  },
+  "rig_manifest_canonical_sha256": "893231d22a77061c810d032a63e93a462e33a830860ae49690aa70d2c39572b8",
+  "scene_sha256": "23ea00328ed0ace0feb35ef6f998e8237cd545ee17e80f077ab26599f8e56c7c",
+  "scene_units": "metre",
+  "schema_version": "b3-cs3-authored-slope-scene-v1",
+  "slope": {
+    "angle_deg": 15.0,
+    "downhill_world": [
+      0.9659258262890683,
+      0.0,
+      -0.25881904510252074
+    ],
+    "length_m": 80.0,
+    "normal_world": [
+      0.25881904510252074,
+      0.0,
+      0.9659258262890683
+    ],
+    "right_world": [
+      0.0,
+      -1.0,
+      0.0
+    ],
+    "width_m": 30.0
+  },
+  "target_objects": [
+    "CS3_Body",
+    "CS3_Eyes",
+    "CS3_Eyebrows",
+    "CS3_Boot_L",
+    "CS3_Boot_R",
+    "CS3_Helmet"
+  ],
+  "texts": 0
+}
