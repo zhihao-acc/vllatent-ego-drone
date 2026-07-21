@@ -3,9 +3,8 @@
 H1/H2/L2/L3: replaces the old untyped ``load_config`` dict. The repo's whole deliverable is
 "flip an ablation via config, not code surgery", so the SWEPT knobs (T/H, predictor
 depth/heads, distillation weights+temperature) live here in a frozen, validated dataclass
-tree. The LOCKED-fixed shapes (DINOv3 PATCH_TOKENS=196 / EMBED_DIM=768; N_ACTIONS / DOF)
-stay constants in ``vllatent.schemas``; the AirVLN action step sizes stay constants in
-``vllatent.actions`` — neither is duplicated here.
+tree. The locked DINO shapes and retained passive-video delta width stay constants
+in ``vllatent.schemas`` and are not duplicated here.
 
 Dataclass defaults are the source of truth; ``configs/*.yaml`` provide per-experiment
 OVERRIDES (env-expanded, strict unknown-key rejection).
@@ -188,15 +187,17 @@ class TrainConfig:
 
 @dataclass(frozen=True)
 class DataConfig:
-    """Dataset identity + environment data paths + the splits."""
+    """Historical passive-video dataset identity and local cache paths.
 
-    name: str = "aerialvln"
-    license: str = "CC BY-NC-SA 4.0"        # non-commercial, share-alike (flag at publication)
-    root: str = "data"
-    json_dir: str = "data/aerialvln_json"
-    cache_dir: str = "data/latent_cache"
-    scenes_root: str = "/opt/aerialvln"
-    splits: tuple[str, ...] = ("train", "val_seen", "val_unseen")
+    Current simulator root/sibling manifests use :mod:`vllatent.sim` contracts;
+    this section remains only until the CS5 loader replaces the passive pipeline.
+    """
+
+    name: str = "legacy_passive_video"
+    license: str = "source-specific"
+    root: str = "ingest_data"
+    cache_dir: str = "ingest_data/latent_cache"
+    splits: tuple[str, ...] = ("train", "val")
 
     def __post_init__(self) -> None:
         if not self.splits:

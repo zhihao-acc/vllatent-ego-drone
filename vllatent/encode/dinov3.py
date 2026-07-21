@@ -11,7 +11,8 @@ manifest records ``color_order = "RGB"``). :meth:`encode_rgb` is for already-RGB
 
 **torch / timm imports are LAZY** — every heavy import lives inside :func:`_load_backbone`
 or a method, so a torch-free box (the pure CI lane) imports this module without crashing. The pure
-tier (``vllatent.{schemas,actions,frames,config,manifest,audit}``) NEVER imports this module.
+tier (``schemas``, ``config``, ``manifest``, selected ``ingest`` modules, and
+``vllatent.sim``) NEVER imports this module.
 
 The backbone is timm's **non-gated** re-host of Meta's DINOv3 ViT-B/16 (HF
 ``timm/vit_base_patch16_dinov3.lvd1689m``) — same LVD-1689M weights, **no HF token / no gate** (Meta's
@@ -21,7 +22,7 @@ Tested two ways (A5.10): a monkeypatched-backbone **contract** test (``tests/tes
 ``@pytest.mark.torch``) that pins the BGR->RGB flip + the ``(196,768)`` fp16 output without real
 weights, and a real-weight smoke ``make encode-smoke`` (downloads ~330 MB; no token needed).
 
-See plans/phase-a5-replan-postpivot.md A5.10.
+The historical contract tests remain in ``tests/test_encode_contract.py``.
 """
 from __future__ import annotations
 

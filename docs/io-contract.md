@@ -1,191 +1,138 @@
-# Historical I/O Contract — vllatent-ego-drone Phase A
+# B3-CS I/O contract
 
-> **Historical reference only.** Everything below the current-B3 note records the retired Phase-A
-> AerialVLN contract. Its T=4 rollout, language tokens, discrete actions, teacher seams, and direct
-> waypoint output are not the active B3 model contract. They remain documented for pure-tier
-> compatibility fixtures and possible historical reproduction. AirSim paths are inactive.
+This document summarizes the implemented CS1–CS3 boundary. Exact executable
+schemas and constants live in `vllatent/sim/`; the active queue and gates live in
+`plans/phase-b3-causal-ski-sim-latent-decoder.md`.
 
-## Current B3 boundary
+The retired Phase-A discrete AirSim/AerialVLN tuple and waypoint seam are not
+current interfaces. The historical passive-video six-field token's canonical
+definition remains at `vllatent.plan_tokens` until CS5 compatibility migration.
 
-The active contract is defined by `plans/phase-b3-human-conditioned-world-model.md` and implemented by
-`SportsTrainingDataset`/`TrainingBatch` plus `HumanWorldModel`:
+## 1. Forecast boundary
 
 ```text
-observed latents (H=3) + history mask + candidate future plan (T=8, 6-D) + dt
-    -> future person-weighted DINO latents + person state (cx, cy, log_h, visibility)
+history_latents:  (H=3, 196, 768)
+future_command:   (T=8, 4)
+dt_seconds:       (T=8,) separate
+        -> predicted_latents: (T=8, 196, 768)
+        -> decoder target:     (T=8, 4) = (cx, cy, log_h, p_visible)
 ```
 
-The plan fields are
-`[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio, yaw_rate_norm, valid]`.
-Future latents, person labels, masks, and confidences are loss targets only and never enter model
-`forward`. The current model has no language input and emits no metric waypoint. B3.6 remains blocked,
-so B3.7/H20 is ineligible.
+Future latents, labels, masks, visibility, simulator state, and skier state are
+targets/audit data only and must not enter model `forward`.
 
----
+## 2. Requested camera command
 
-## Historical Phase-A contract
+Canonical storage is little-endian float64 SI. Model loading later casts command
+and `dt` independently to float32 without normalization.
 
-> **What this is.** A *transcription* of the **LOCKED** I/O contract for in-repo reference. The
-> authoritative source is the vault design doc
-> `[[arch-design-2026-06-08-latent-pred]]` (§4 I/O contract · §6 data-audit spec · §9.3–9.7 seam
-> choices) and `[[dev-decision-2026-06-07-latent-pred-pipeline]]` (phases / DoD). **This file does not
-> re-derive or relitigate** the architecture — it pins the four seams + the loader tuple + the data
-> foot-guns so code in steps 3–10 has a single in-repo reference. Phase-A DoD item (1).
-
-### 0. Tensor I/O table (arch §4) — historical seam definition
-
-| Symbol | Shape / type | Frame / units | Source |
-|---|---|---|---|
-| `rgb_t` | `(224,224,3)` uint8 | camera-optical, **BGR from AirSim → convert to RGB** | AirSim render @ GT pose |
-| `z_t` (obs latent) | `(196, 768)` fp16 | DINOv3 patch space | frozen encoder, **cached** |
-| `history_latents` | `(H=3, 196, 768)` fp16 | — | cached latents |
-| `lang_tokens` `L` | `(M, 768)` fp16 | text-embed space | frozen text tower, **cached/episode** |
-| `action_id` (in) | scalar id `∈ {0..7}` | AerialVLN discrete | dataset `actions[t]` |
-| `ẑ_{t+1..t+T}` | `(T=4, 196, 768)` fp16 | DINOv3 space | predictor output |
-| waypoint (native) | `(4,)` = `(Δx,Δy,Δz,Δψ)` | **AirSim-NED body, yaw-only** | waypoint head |
-| → remap | `(4,)` body-FLU delta | fly0 convention | remap layer (**Phase D**) |
-| → handoff | `WaypointHandoff.G_world (3,)` ENU **+ Δψ** | **world ENU** | fly0 `frames.py` + odom (**Phase D**) |
-
-> **Typed student seams (Phase A, `vllatent/schemas.py`).** The model-output rows above are frozen,
-> shape/dtype-validated dataclasses (review H3) so an ablation is a config flag, not code surgery:
-> `ẑ_{t+1..t+T}` → `PredictorOutput.predicted_latents` `(T,196,768)` fp16; waypoint (native) →
-> `Waypoint.delta_4dof (4,)` f32, AirSim-NED body. The loader-input tuple is `StepSample` (§2).
->
-> **Retired teacher distillation seam (A5.9).** The old teacher/cache path was invalidated by
-> the sports pivot. Teacher fields in pure schemas/manifests are compatibility records only, not a
-> runnable training path.
-
----
-
-### 1. The four historical Phase-A seams
-
-### (a) Action representation — discrete codebook `0..7` → per-step FiLM
-
-- **Input is discrete.** AerialVLN is **discrete-native**: an 8-way action id (7 motion + STOP). The
-  codebook (8×768) embeds the id → small MLP → per-step **FiLM** `(γ_t, β_t)` applied as
-  `(1+γ_t)⊙h + β_t` inside each predictor block (ReL-NWM mechanism). No delta-derivation noise on the
-  *input* (arch §9.3).
-- **Action enum** — transcribed verbatim from
-  `third_party/AirVLN/airsim_plugin/airsim_settings.py::_DefaultAirsimActions`:
-
-  | id | name | id | name |
-  |---|---|---|---|
-  | 0 | `STOP` | 4 | `GO_UP` |
-  | 1 | `MOVE_FORWARD` | 5 | `GO_DOWN` |
-  | 2 | `TURN_LEFT` | 6 | `MOVE_LEFT` |
-  | 3 | `TURN_RIGHT` | 7 | `MOVE_RIGHT` |
-
-- **Step constants** — verbatim from `_DefaultAirsimActionSettings`:
-  `FORWARD_STEP_SIZE=5`, `LEFT_RIGHT_STEP_SIZE=5`, `UP_DOWN_STEP_SIZE=2`, `TURN_ANGLE=15`,
-  `TILT_ANGLE=15` (metres / metres / metres / degrees / degrees). Pitch/roll ≡ 0 ⇒ effective 4-DoF.
-- **Output is continuous** (seam d): the *input* uses the discrete id; the *output target* uses the
-  continuous delta derived from consecutive GT poses. The exact arithmetic (lateral move via yaw±90°,
-  NED z-down sign) is transcribed into `vllatent/actions.py` (step 4) by reproducing
-  `third_party/AirVLN/utils/env_utils.py::getPoseAfterMakeAction` — **reproduced, not re-designed**.
-
-### (b) Language injection — frozen text tower (512→768) → cross-attention
-
-- **Frozen** text encoder (default SigLIP/CLIP-ViT-B text tower, 512-d projected → 768; alt
-  BGE-small/MiniLM for long instructions) → per-token embeddings `L ∈ ℝ^{M×768}` used as **prefix
-  tokens** read via **cross-attention** in every predictor block ("Chain of World" / CoWVLA
-  mechanism **only — NOT its Emu3-8.5 B base**). Cached once per episode (arch §9.4).
-- **Division of labour:** language = global, slow-changing "what/where" → cross-attn; action =
-  per-step "motion" → FiLM (seam a).
-
-### (c) Waypoint → EGO seam — continuous 4-DoF `(Δx,Δy,Δz,Δψ)` in AirSim-NED body
-
-- **Waypoint head:** pool predicted patch tokens
-  → MLP `[768→512→256→4]` → `(Δx,Δy,Δz,Δψ)` with per-DoF `tanh × max_range`. Native convention =
-  **AirSim-NED body, yaw-only** (arch §9.7).
-- **Remap chain — DOCUMENTED ONLY; this remap is `NOT executed in Phase A`:**
-  `native AirSim-NED body` → `fly0 body-FLU delta` → `fly0 geometry/frames.py` (`R_FLU_FROM_FRD`,
-  `R_ENU_FROM_NED`) + `odom` → `world ENU + Δψ` → `WaypointHandoff` / `PoseStamped` → **frozen
-  EGO-Planner** (z & yaw config-unfixed for this loop).
-- In Phases A–C, `vllatent/frames.py` **re-derives** the remap and unit-tests it against fly0's
-  `geometry/frames.py` **semantics** — but **fly0 is NEVER imported** (A–C are standalone). The live
-  closed-loop seam and the `WaypointHandoff` yaw-field extension are **Phase D**.
-
----
-
-### 2. Historical loader output tuple (arch §6 item 5)
-
-The retired Phase-A loader contract emitted `StepSample` (`vllatent/schemas.py`) plus its historical
-targets. The current sports loader emits `SportsSample` and is summarized in the current-B3 note above.
-
-```
-(z_t, history_latents, history_mask, lang_tokens, lang_mask, action_id, z_next, delta_4dof, future_frame_rgb)
+```text
+requested_command.shape = (8, 4)
+requested_command fields =
+  [v_forward_m_s, v_right_m_s, v_down_m_s, yaw_rate_rad_s]
+dt_seconds.shape = (8,); every value = 0.2 s
+record_valid.shape = (8,); zero and pure-yaw rows are valid
 ```
 
-| field | shape / dtype | frame / notes |
-|---|---|---|
-| `z_t` | `(196, 768)` fp16 | DINOv3 patch tokens (cached), obs at step t |
-| `history_latents` | `(H=3, 196, 768)` fp16 | cached latents `z_{t-2..t}`; zero-padded at episode start |
-| `history_mask` | `(H=3,)` bool | True = real history frame, False = padding (block-causal at episode start) — M4 |
-| `lang_tokens` | `(M, 768)` fp16 | frozen text-tower output; cached per episode |
-| `lang_mask` | `(M,)` bool | True = real language token, False = padding (attention ignores pad) — M4 |
-| `action_id` | `int ∈ [0, 7]` | AerialVLN discrete `actions[t]` |
-| `z_next` | `(196, 768)` fp16 | DINOv3 latent of the next obs = prediction **target** |
-| `delta_4dof` | `(4,)` float32 | `(Δx,Δy,Δz,Δψ)` **AirSim-NED body, yaw-only**, derived from poses |
-| `future_frame_rgb` | uint8 RGB (optional) | GT future frame (Phase-C teacher) |
+Exactly nine constant programs exist, in frozen order:
 
-Confirms Phase-A DoD item (2): AerialVLN yields `(RGB obs, 4-DoF action/waypoint, next obs, language)`
-tuples.
+| branch | nonzero command |
+|---|---|
+| `zero` | none |
+| `yaw_plus`, `yaw_minus` | `yaw_rate = +/-pi/15 rad/s` |
+| `forward_plus`, `forward_minus` | `v_forward = +/-1.0 m/s` |
+| `lateral_plus`, `lateral_minus` | `v_right = +/-0.75 m/s` |
+| `vertical_plus`, `vertical_minus` | `v_down = +/-0.50 m/s` |
 
----
+The six-field passive-video token is neither shape-compatible nor
+meaning-compatible with this record.
 
-### 3. Historical frame and convention hazards
+## 3. Frames, signs, and SE(3)
 
-### Foot-gun #1 — orientation formats (audit + render) — CONFIRMED against real data (step 5b)
+Semantic rig/body axes are FRD: `+forward`, `+right`, `+down`; positive yaw turns
+forward toward right about `+down`. Blender camera axes are `+X` right, `+Y` up,
+`-Z` optical forward. The frozen rotation is:
 
-The two orientation fields use **different representations** — that is the real foot-gun:
+```text
+R_cam_from_rig = [[0, 1, 0],
+                  [0, 0,-1],
+                  [-1,0, 0]]
+R_rig_from_cam = R_cam_from_rig.T
+t_cam_from_rig = t_rig_from_cam = [0,0,0] m
+```
 
-| Field | Format | Note |
-|---|---|---|
-| AerialVLN `start_rotation` | **quaternion `[w, x, y, z]` — `w-FIRST`** | episode start orientation |
-| `airsim.Quaternionr(x, y, z, w)` | quaternion `xyzw` | sim API |
-| **Canonical internal order** | quaternion **`xyzw`** | `vllatent/frames.py` pins this |
-| AerialVLN `reference_path` row | **Euler `[x, y, z, pitch, roll, yaw]` (radians, 6-wide)** | per-pose; pitch=roll≡0; **yaw = `row[5]`** — NOT a quaternion |
+Transforms are row-major little-endian float64 matrices named
+`T_target_from_source`. The trajectory stores all of these separately:
 
-Reorder `start_rotation` (`w-FIRST`) → canonical `xyzw` **before any use**; read `reference_path`
-orientation as Euler (**yaw = `row[5]`**) — do **not** mistake the 6-wide row for a 7-wide quaternion.
-Index alignment (confirmed on real data): **`len(reference_path) == len(actions)`**; `reference_path[0]`
-is the start pose and `actions[t]` drives `reference_path[t] → reference_path[t+1]` (the terminal STOP
-has no stored next pose). The `fixtures/episodes/quaternion_trap.json` fixture is authored so a naïve
-(no-reorder) read of `start_rotation` yields a wrong yaw — the audit **flags it loudly**
-(`naive_would_mismatch`).
+- `requested_command` and `dt_seconds`;
+- authoritative `T_world_from_rig`;
+- `requested_T_rig0_from_rig_t`;
+- `achieved_T_rig0_from_rig_t`.
 
-### Foot-gun #2 — `BGR` → RGB at the render→encode boundary
+Requested and achieved transforms must never alias or overwrite each other.
+Future frame `k` is captured after one command integration step. History ticks
+`-2,-1,0` use the serialized initial camera under zero command.
 
-AirSim `Scene` images are **`BGR`** (AirVLN leaves the `cvtColor` call commented out); DINOv3 expects
-**RGB**. Convert at the render→encode boundary (`cv2.cvtColor(..., BGR2RGB)`) and **record the BGR→RGB
-flag in the cache manifest**. Wrong channel order silently poisons every cached latent.
+The fixed camera contract is 224 x 224, 24 mm lens, 36 mm horizontal sensor,
+zero shift, square pixels, clip range `[0.1,500] m`, and depth of field disabled.
 
-### Other pinned conventions
+Expected image signs relative to the matched zero sibling are frozen:
 
-- **NED z-down sign:** `GO_UP = −z`, `GO_DOWN = +z`.
-- **4-DoF only:** pitch = roll ≡ 0 ⇒ `(x, y, z, yaw)`; lateral moves (`MOVE_LEFT`/`MOVE_RIGHT`) are
-  **body-relative** (yaw±90°), not world-axis.
-- **AirSim msgpack-RPC is single-threaded** → wrap **every** `client.X()` call in a `threading.Lock`
-  (render tier, step 8). tornado IOLoop is not re-entrant.
-- **action ↔ reference_path index alignment:** `actions[t]` is index-aligned with the pose pair
-  `reference_path[t] → reference_path[t+1]`. **Assert it; do not assume** (audit step 5).
-- **Scene-dependent depth (Phase C only):** scenes 1 & 7 = `DepthVis`; others = `DepthPerspective`,
-  clip `[0,100]/100`. The encoder is **RGB-only**, so this bites only if depth is cached for Phase C.
-- **No frame-leak:** the NED→FLU→ENU remap is **documented-only** in A–C; do **NOT** import fly0 or
-  execute the remap in Phase A.
+| command | expected effect |
+|---|---|
+| positive yaw or positive lateral/right | `cx` decreases |
+| negative yaw or negative lateral/right | `cx` increases |
+| positive forward | `log_h` increases |
+| negative forward | `log_h` decreases |
+| positive down | `cy` decreases |
+| negative down | `cy` increases |
 
----
+## 4. Root, sibling, and digest identity
 
-### 4. Historical licenses
+`root_id` identifies the complete initial scene/camera/skier state and absolute-
+tick continuation schedule. `split_group_id` is the same indivisible group for
+the shared history and all nine siblings. No sibling or frame may cross a split.
 
-- **AerialVLN dataset:** `CC BY-NC-SA 4.0` — **non-commercial**, share-alike. Recorded again in
-  `DEV_LOG.md` at step 6 when the real slice is fetched.
-- **DINOv3 weights:** Meta custom non-OSI license (commercial OK with attribution; ITAR/military
-  prohibited) — fine for academic sim work.
+The canonical skier digest includes deterministic root, ski/contact, phase,
+pose, bone-local, and seed state. It explicitly rejects camera, branch, command,
+record-valid, visibility, render, RGB/image, mask, and pixel fields. Thus every
+sibling has the exact same skier digest at the same absolute tick.
 
----
+Canonical serialization is versioned, NFC-normalized, C-order, little-endian,
+finite, and hash-addressed with SHA-256. Arrays exposed by frozen records are
+backed by immutable buffers.
 
-### 5. Historical source of truth
+## 5. Continuation and skier proof
 
-Vault `[[arch-design-2026-06-08-latent-pred]]` records the historical Phase-A architecture and I/O
-intent. For current code and B3 execution state, use the B3 plan, `DEV_LOG.md`, and the implementation.
+Schedules use absolute integer ticks. Any active maneuver target/ramp begins no
+later than history tick `-2`; hidden starts in future ticks `1..8` are invalid.
+Non-steady futures require visible history cues, and terminal-state keys may not
+map to different continuation laws or target parameters.
+
+`vllatent.sim.skier`, `pose`, `rig`, `scene`, and their audit modules own the
+versioned float64 slope-plane mechanics, ground-root/armature separation,
+root-free animation, ski/contact realization, continuation audit, and CS3
+canonical root envelope.
+
+## 6. Labels
+
+The target set is person/skinned body, clothing, helmet, and boots. Skis, poles,
+detached equipment, terrain, and obstacles are excluded. Camera-independent
+world triangles are rasterized on an unbounded integer pixel lattice at pixel
+centers; separate full-amodal, in-crop amodal, and depth-tested visible results
+produce the frozen label record.
+
+Current implemented constants include a 224-square crop,
+`p_visible` threshold `0.20`, occlusion-ratio threshold `0.80`, and padded center
+range `[-0.25,1.25]`. Visibility is camera-relative and never enters root/skier
+identity.
+
+## 7. Import boundary and current gate
+
+All `vllatent/sim/*.py` modules are PURE: stdlib + NumPy/PyYAML only, with no
+`bpy`, torch, AirSim, wall-clock, UUID, secrets, or RNG imports. Blender code is
+isolated in `scripts/blender/b3_cs3_bridge.py`.
+
+CS1–CS3 are complete. CS4 is not authorized and also lacks an available complete
+normative CS4+ specification because two delegated reports were never tracked.
+Do not generate data until both blockers are resolved.

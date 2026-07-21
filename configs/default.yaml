@@ -1,4 +1,4 @@
-# vllatent-ego-drone — baseline config OVERRIDES (Phase A). Env-expandable: ${ENV:-default}.
+# vllatent-ego-drone — historical passive-pipeline overrides. Env-expandable: ${ENV:-default}.
 #
 # The TYPED source of truth for every knob is vllatent/config.py (the frozen Config tree).
 # This file only OVERRIDES environment-specific values. Swept ablation knobs DEFAULT in the
@@ -6,15 +6,13 @@
 #   predictor: { horizon: 6 }                       # T sweep
 #   predictor: { depth: 8, heads: 8 }               # capacity sweep
 #   distill:   { lambda_waypoint: 0.5 }             # loss-weight sweep
-# Fixed shapes (DINOv3 196/768, N_ACTIONS, DOF) are constants in vllatent/schemas.py — NOT here.
-# AirVLN action step sizes are constants in vllatent/actions.py — NOT here.
+# Current four-channel simulator records are defined under vllatent/sim and do
+# not consume this legacy data section.
 
 encoder:
   hf_endpoint: "${HF_ENDPOINT:-https://hf-mirror.com}"
 
 data:
-  root: "${VLLATENT_DATA:-data}"
-  json_dir: "${VLLATENT_DATA:-data}/aerialvln_json"
-  cache_dir: "${VLLATENT_CACHE:-data/latent_cache}"
-  scenes_root: "/opt/aerialvln"            # only inside the fly0-m1 docker
-  splits: ["train", "val_seen", "val_unseen"]
+  root: "${VLLATENT_DATA:-ingest_data}"
+  cache_dir: "${VLLATENT_CACHE:-ingest_data/latent_cache}"
+  splits: ["train", "val"]

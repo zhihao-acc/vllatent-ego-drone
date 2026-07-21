@@ -1,19 +1,13 @@
 #!/usr/bin/env bash
-# Print the Ralph-loop launch prompt for the active vllatent-ego-drone B3 queue.
-#
-# Each iteration reads DEV_LOG.md (position), .codex/ralph-rules.md (protocol),
-# and plans/phase-b3-human-conditioned-world-model.md (DoD). B3.6 is currently
-# blocked on corrected tiny G1a/G1d plan-dependence gates.
-#
-# This script only prints the Claude `/ralph-loop` invocation. Project protocol
-# remains canonical in `.codex/ralph-rules.md`; Claude keeps loop state locally.
+# Print the Ralph-loop launch prompt for the active B3-CS queue. This script
+# performs no implementation or external operation.
 set -euo pipefail
 
 cat <<'EOF'
 Start the Ralph loop from a Claude Code session in this repo with:
 
-  /ralph-loop Continue vllatent-ego-drone Phase B3. Each iteration follow .codex/ralph-rules.md exactly: READ DEV_LOG.md + .codex/ralph-rules.md + plans/phase-b3-human-conditioned-world-model.md, IDENTIFY the lowest actionable B3 step, REVIEW its DoD, make one bounded review-supported improvement, TEST with the narrowest relevant check, and RECORD verified facts in DEV_LOG.md. Current stop: B3.6 remains blocked because the corrected tiny protocol misses G1a/G1d; do not run the source-held-out gate, data/capacity scaling, or B3.7/H20 until a defensible counterfactual-conditioning repair passes corrected tiny G1a/G1b/G1d. Stop when the blocker repeats, user action is required, the next step is user-gated, the backstop is reached, or the completion promise is satisfied. Commit only when the user asks and stage specific paths only. --max-iterations 10 --completion-promise 'B3 HUMAN-CONDITIONED WORLD MODEL READY FOR USER-GATED H20 TRAINING'
+  /ralph-loop Continue vllatent-ego-drone B3-CS. Follow .codex/ralph-rules.md. READ, in order: AGENTS.md; .codex/ralph-rules.md; DEV_LOG.md; plans/phase-b3-causal-ski-sim-latent-decoder.md; then only files named by the active card. Do not consult Obsidian. Current verified state: CS1/CS2 complete 2026-07-15; CS3 complete 2026-07-20; CS4 is lowest pending. STOP before CS4 mutation unless both gates are satisfied: explicit USER authority for the frozen 32-root x nine-branch x eight-future CPU data-generation smoke, and restoration or reviewed complete migration of the absent normative CS4+ report clauses. Never invent missing equations/constants/thresholds. B3.6 remains blocked and B3.7/H20 remains ineligible. --max-iterations 10 --completion-promise 'B3-CS4 PAIRED CAUSAL SMOKE COMPLETE'
 
-Monitor:   grep '^iteration:' .claude/ralph-loop.local.md
-Cancel:    /cancel-ralph   (or remove .claude/ralph-loop.local.md for a deterministic stop)
+Monitor: grep '^iteration:' .claude/ralph-loop.local.md
+Cancel:  /cancel-ralph
 EOF

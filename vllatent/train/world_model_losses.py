@@ -1,7 +1,8 @@
-"""B3 human world-model losses (TORCH tier).
+"""Historical passive-video human world-model losses (TORCH tier).
 
 YOLO/ByteTrack person labels become bounded soft weights over the DINO 14x14
 patch grid. They are loss weights and targets, not extra DINO class tokens.
+These objectives remain only until their CS6/CS7 replacements land.
 """
 from __future__ import annotations
 

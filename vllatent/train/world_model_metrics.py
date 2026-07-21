@@ -1,4 +1,7 @@
-"""B3 Stage-1 world-model metrics (TORCH tier)."""
+"""Historical passive-video Stage-1 world-model metrics (TORCH tier).
+
+These six-field metrics remain only until their CS6/CS7 replacements land.
+"""
 
 from __future__ import annotations
 

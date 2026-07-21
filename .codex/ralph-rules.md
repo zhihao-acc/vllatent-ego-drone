@@ -1,130 +1,93 @@
-# Ralph Rules - vllatent-ego-drone Phase B-3
+# Ralph Rules — B3 Causal Ski Simulator and Latent Decoder
 
-These are the Codex-local Ralph-loop rules for the active Phase B-3 queue. They
-supersede the B2 scale-free action-imitation loop and make B2.12/H20 inactive.
+These are the canonical Ralph rules for the active B3-CS queue.
 
-## Completion Promise
+## Current stop and promise
 
-Default promise: `B3 HUMAN-CONDITIONED WORLD MODEL READY FOR USER-GATED H20 TRAINING`.
+Verified state:
+
+- `B3-CS1` and `B3-CS2`: done 2026-07-15.
+- `B3-CS3`: done 2026-07-20.
+- `B3-CS4`: lowest pending card; not started.
+
+The next-card completion promise, once its gates are cleared, is:
+
+> B3-CS4 PAIRED CAUSAL SMOKE COMPLETE
+
 Default backstop: `--max-iterations 10`.
 
-Stop when the promise is satisfied, the backstop is reached, a repeated blocker
-requires user action, or the next step is user-gated.
+At present a Ralph run must stop before CS4 mutation. CS4 requires both:
 
-## Read Phase
+1. explicit USER authority for the frozen 32-root x nine-branch x eight-future
+   CPU render/data-generation smoke; and
+2. restoration of the absent normative reports or a separately reviewed,
+   complete migration of every delegated CS4+ equation, constant, formula,
+   threshold, manifest row, and failure gate into the active plan.
 
-Every iteration starts by reading:
+The two report paths in the original draft were never tracked in this Git
+repository. Do not pretend they were read, reconstruct them from memory, or
+silently simplify their contract. B3.6 remains blocked and B3.7/H20 remains
+ineligible.
 
-1. `DEV_LOG.md` - current step status and latest user-verified facts.
-2. This file - protocol and gates.
-3. `plans/phase-b3-human-conditioned-world-model.md` - authoritative active B3 plan.
-4. `plans/phase-b-sports-training.md` only for historical B1/B2 evidence when needed.
-5. Relevant code/tests only after the active B3 step is identified.
+## Required read phase
 
-## Current Queue Discipline
+Every iteration reads, in order:
 
-- B1 latent-only world modeling is closed as diagnostic-complete / model-incomplete.
-- B2 action imitation is closed as evidence. B2.11c is useful as a partial
-  translation/speed prior, but it is not the B3 endpoint.
-- Do not continue to B2.12 or provide a B2b H20 command.
-- The active queue is:
-  - `B3.0` write/approve Phase B-3 plan and align guidance (done 2026-07-07),
-  - `B3.1` reviewed cleanup of obsolete B1/B2 runnable paths (done 2026-07-07),
-  - `B3.2` person-track cache backfill and data screens (done 2026-07-07),
-  - `B3.3` 6-D plan-token contract and T configurability (done 2026-07-07),
-  - `B3.4` Stage-0 probes plus K1/K2 (done 2026-07-12; diagnostic only, not
-    proof of incremental causal plan signal),
-  - `B3.4a` YOLO-standard data cleanup and expansion prep (done locally
-    2026-07-12; legacy ambiguity needs future frame regeneration and is not
-    repairable in the retained NPZs),
-  - `B3.5` depth-6 per-step 6-D conditioned world model (done 2026-07-08),
-  - `B3.6` Stage-1 local gates G1a-G1d (blocked 2026-07-13: corrected tiny G1b
-    passes, but G1a/G1d fail),
-  - `B3.7` USER-GATED H20 depth-6 run,
-  - `B3.8` planner-facing CEM/MPPI hindsight-replay evaluation.
+1. `AGENTS.md`;
+2. this file;
+3. `DEV_LOG.md`;
+4. `plans/phase-b3-causal-ski-sim-latent-decoder.md`;
+5. only files named by the active card.
 
-## Iteration Protocol
+The old human-conditioned B3 plan is optional historical evidence. Do not
+consult Obsidian for this queue.
 
-1. Identify the lowest actionable B3.x step from `DEV_LOG.md`.
-2. Review its DoD and test command in the B3 plan.
-3. Make one bounded improvement or run one bounded verification.
-4. Run the narrowest useful check listed for that step.
-5. Record verified facts in `DEV_LOG.md`.
-6. Commit only when the user asks, using specific paths only. Never `git add -A`
-   or `git add .`.
-7. Stop at USER gates, after an unfixable test failure, or when the completion
-   promise is satisfied.
+## Iteration protocol
 
-## B3 Quality Gates
+For at most ten bounded iterations:
 
-- `PLAN_TOKEN_DIM = 6`; fields are
-  `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio, yaw_rate_norm, valid]`.
-- Candidate future camera/drone plan is an input. Future person/world labels are
-  never inputs.
-- Target labels include future latents, person state `(cx, cy, log_h, visibility)`,
-  masks, confidences, and optional inverse-dynamics labels.
-- Person-track cache keys are optional and backward-compatible:
-  `person_bbox (N,4)`, `person_visible (N,)`, `person_state_valid (N,)`,
-  `person_conf (N,)`, plus detector provenance in manifests/backfill logs.
-- Translation conditioning remains scale-free and invariant to positive rescaling.
-- Yaw-rate normalization is finite and clipped. Metric speed is controller-side,
-  clamped strictly below `7.5 m/s`.
-- Source split remains mandatory by source video, not subclip.
-- The B3 predictor uses depth 6, D=768, H=3, T=8 first. Do not call it `~28M`;
-  log exact counts after B3.5.
-- No diffusion, language, game data, SAM2, PI-Prober, metric waypoint training,
-  or EGO-Planner integration before deterministic B3 gates pass.
-- H20/SSH/docker/long jobs remain user-gated. Codex prepares one command only at
-  B3.7 if B3.6 passes.
-- Current stop: B3.6 remains blocked after the review-backed real-transition
-  verifier repair. Its corrected tiny run passes G1b but misses null-plan,
-  shuffled/flipped-margin, and yaw-geometry gates. Do not run the
-  source-held-out gate, data/capacity scaling, or B3.7/H20 until a defensible
-  counterfactual-conditioning repair passes the corrected tiny protocol.
+1. Identify the lowest eligible card from the plan and newest verified log.
+2. Read its complete dependencies, authority, DoD, verification, and failure
+   action.
+3. If any USER or normative-spec gate is unmet, report it and stop.
+4. Otherwise make one bounded change or run one bounded verification within the
+   authorized resource class.
+5. Run the narrowest relevant check and wait for it to exit.
+6. Add only verified facts to the newest section of `DEV_LOG.md`; never rewrite
+   historical evidence to manufacture a pass.
+7. Start another iteration only when the dependent card is genuinely eligible.
 
-## B3 Verification Checklist
+Stop on the promise, iteration 10, the next USER gate, the same blocker twice, an
+unsafe dirty-worktree overlap, or a material decision outside frozen authority.
 
-A healthy B3 local handoff should report:
+## Scientific and implementation invariants
 
-- plan-token shape/dtype/field semantics and scale-invariance results;
-- yaw-rate finite/clipped behavior and `valid` mask composition;
-- old-cache fallback plus new person-label cache loading;
-- G0 real-latent probe center error and presence AUROC;
-- K1 camera/person causality readout;
-- K2 tiny conditioned predictor versus person-state persistence;
-- depth-6 model parameter count and forward shapes at T=8;
-- plan-causality and plan-sensitivity tests;
-- G1a/G1b/G1c/G1d/K3/K4/K5-lite/K6 gate readouts before any H20 command;
-- exact next USER gate if H20 is justified.
+- Four requested body-FRD command channels are separate from `dt_seconds`.
+- Zero and pure yaw are valid; exactly nine branch programs exist.
+- Every sibling shares one exact root/skier future and one indivisible split.
+- Requested and achieved SE(3) are distinct named float64 records.
+- The canonical skier digest excludes camera, branch, command, visibility,
+  render, image, mask, and pixel data.
+- Forecast continuation is cued in history; hidden future starts are invalid.
+- The historical passive six-field token stays separate at its existing path.
+- Renderer-neutral mechanics and contracts remain PURE and never import `bpy`.
+- Future labels never enter model `forward`; the decoder output remains only
+  `(cx, cy, log_h, p_visible)`.
+- No failure unlocks more data, a larger model, training, H20, controller work,
+  or a different simulator.
 
-## Stop/Pass Gates
+## Resource and mutation rules
 
-| Gate | Pass | On Fail |
-|---|---|---|
-| G0 | detector-visible presence is above a weak held-out sanity floor and person-state center/log-height decode on `person_state_valid` | fix labels/probes or replan |
-| K1 | plan-only camera-compensated person motion is near chance | rework causal separation or abort |
-| K2 | tiny conditioned predictor improves raw person-state MSE over persistence on valid-current, full-future, moving person rows | abort or replan dense WM path |
-| G1a | conditioned predictor beats person-weighted latent persistence `>=10%` and null-plan `>=5%` | objective/conditioning bug hunt |
-| G1b | rollout beats persistence at every k<=8 | shorten/reweight before scaling |
-| G1c/K4 | probe transfer passes and gameability check passes | calibrate probes or state-head primary |
-| G1d/K3/K5-lite | true 6-D plan wins on `>=70%` windows, source-majority Wilson confidence is above chance with at least five sources, `>=5%` aggregate shuffled/flipped margins have positive source-cluster paired confidence, and yaw/person-center geometry clears the same five-source confidence floor | strengthen conditioning before capacity/data |
-| K6 | source-count ablation improves with more sources | expand data before more H20/model scaling |
+Without explicit authority, do not render or generate/encode data; train; use a
+GPU/H20; operate SSH, Docker, GUI, Orin, or a controller; purchase; publish; or
+perform real-flight work. CS3 proof artifacts may be inspected read-only.
 
-## User-Gated Paste Blocks
+Preserve unrelated dirty changes. Stage exact paths only. Never use `git add -A`
+or `git add .`; never commit generated data, caches, weights, archives, or assets.
 
-Do not provide an H20 paste block until B3.6 passes and B3.7 is reached.
+## Review and handoff
 
-At B3.7, provide exactly one command and ask the user to paste:
-
-- tail of metrics JSONL;
-- source metrics;
-- G1 gate readouts;
-- steps/sec and GPU memory;
-- confirmation that checkpoint, config snapshot, and metrics files exist.
-
-Artifacts are pulled out-of-band and never committed.
-
-## Deterministic Stop
-
-Codex does not need Claude's stop hook. If local loop state is introduced, keep
-it under `.codex/ralph-loop.local.md`; it is ignored by git.
+Before claiming a card complete, inspect the scoped diff, run its focused tests,
+PURE import/AST guard, relevant Ruff/mypy checks, and `git diff --check`; then
+obtain an independent read-only review and resolve every CRITICAL/HIGH finding.
+The handoff must name the exact next USER gate and all remaining blockers.

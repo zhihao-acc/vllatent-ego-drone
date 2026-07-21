@@ -4,9 +4,8 @@ version = "0.0.1"
 description = "Human- and plan-conditioned latent world model for sports-following drones"
 requires-python = ">=3.10"
 # PURE-tier deps ONLY. The heavy training/ingest stack is the
-# [torch] extra, installed on the dev box / H20 — never in default CI (which gates
-# only the pure tier). The sim stack (airsim) is the [sim] extra, installed only in
-# the fly0-m1 docker. See CLAUDE.md "Tier split".
+# [torch] extra, installed only under explicit resource authority. Renderer-neutral
+# simulator contracts use the default PURE dependencies; Blender supplies `bpy`.
 dependencies = [
   "numpy>=1.24",
   "pyyaml>=6.0",
@@ -15,7 +14,6 @@ dependencies = [
 [project.optional-dependencies]
 dev   = ["ruff>=0.4", "mypy>=1.8", "pytest>=7.0", "types-PyYAML"]
 torch = ["torch>=2.8,<2.13", "timm>=1.0.20,<2", "ultralytics>=8.2.0", "opencv-python", "pillow", "scenedetect", "plotly"]
-sim   = ["airsim", "msgpack-rpc-python", "opencv-python"]
 
 [build-system]
 requires = ["setuptools>=68"]
@@ -37,18 +35,15 @@ python_version = "3.10"
 warn_unused_ignores = true
 ignore_missing_imports = true
 
-# Torch/sim stacks aren't installed in CI; treat them as missing imports so mypy
-# type-checks the pure core without them present.
+# Torch/ingest stacks aren't installed in CI; treat optional imports as missing.
 [[tool.mypy.overrides]]
-module = ["torch.*", "timm.*", "ultralytics.*", "cv2.*", "PIL.*", "scenedetect.*", "plotly.*", "airsim.*", "msgpackrpc.*"]
+module = ["torch.*", "timm.*", "ultralytics.*", "cv2.*", "PIL.*", "scenedetect.*", "plotly.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 markers = [
   "torch: needs the [torch] extra (DINOv3 / loader); auto-skipped where torch is absent",
-  "sim: needs AirSim + the fly0-m1 sim (auto-skipped off-container)",
-  "siblings: needs the fly0 sibling on PYTHONPATH (Phase D only; auto-skipped in A-C)",
   "tool: needs external tools (yt-dlp, ffmpeg, megasam); auto-skipped if not installed",
 ]
 testpaths = ["tests"]

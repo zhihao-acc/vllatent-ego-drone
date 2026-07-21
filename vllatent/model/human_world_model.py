@@ -1,8 +1,10 @@
-"""B3 human-conditioned latent world model (TORCH tier).
+"""Historical passive-video human-conditioned world model (TORCH tier).
 
-The B3 path consumes observed DINO history/current latents plus candidate
-future 6-D plan tokens. Future latents and person labels are training targets
-only and are deliberately absent from ``forward``.
+This compatibility path consumes observed DINO history/current latents plus
+candidate future six-field passive-video plan tokens. It is scheduled for CS6
+replacement and is not the current four-channel simulator interface. Future
+latents and person labels are training targets only and are deliberately absent
+from ``forward``.
 """
 from __future__ import annotations
 

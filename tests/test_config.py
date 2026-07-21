@@ -1,8 +1,8 @@
-"""Typed Config tests (PURE tier) — Phase-A step A5.3 (review H1/H2/L2/L3).
+"""Typed legacy Config tests (PURE tier).
 
 Pins the single-source-of-truth config: frozen defaults, from_yaml override + env expansion,
 strict unknown-key rejection (so an ablation yaml typo fails fast, not silently), boundary
-validation, and immutability. Mirrors how StepSample guards its boundary.
+validation, and immutability.
 """
 from __future__ import annotations
 
@@ -36,7 +36,8 @@ def test_from_yaml_default_builds() -> None:
     # The committed configs/default.yaml must parse into a valid Config.
     cfg = Config.from_yaml()
     assert isinstance(cfg, Config)
-    assert cfg.data.splits == ("train", "val_seen", "val_unseen")  # list -> tuple coercion
+    assert cfg.data.name == "legacy_passive_video"
+    assert cfg.data.splits == ("train", "val")  # list -> tuple coercion
 
 
 def test_from_yaml_env_expansion(monkeypatch: pytest.MonkeyPatch) -> None:

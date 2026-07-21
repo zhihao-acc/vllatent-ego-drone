@@ -1,10 +1,12 @@
-"""Human- and plan-conditioned latent world model for sports-following drones.
+"""Causal ski-simulation contracts and latent world-model components.
 
-The active B3 path consumes cached DINOv3 history plus a candidate 6-D future
-camera plan and predicts future patch latents and person state.
+The active B3-CS simulator interface is four body-FRD command channels in SI
+units plus a separate ``dt_seconds``.  The historical six-field passive-video
+token remains a distinct compatibility contract and is not a simulator command.
 
-Tier discipline (see CLAUDE.md "Tier split"):
-  PURE  (numpy/pyyaml only, CI-gated): schemas, actions, frames, config, manifest, audit
+Tier discipline (see ``AGENTS.md``):
+  PURE  (NumPy/PyYAML only, CI-gated): schemas, config, manifest, selected ingest,
+                                      and all of sim/
   TORCH:                               encode/, data/, model/, train/
 """
 

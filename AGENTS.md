@@ -1,109 +1,100 @@
-# vllatent-ego-drone (`vllatent`) - Codex Project Guidance
+# vllatent-ego-drone (`vllatent`) — Codex Project Guidance
 
-Read this before working in this repo. It is the Codex-facing companion to
-`CLAUDE.md`; when they differ, prefer `DEV_LOG.md` and
-`plans/phase-b3-human-conditioned-world-model.md` for current execution state.
+Read this before working in the repository. When guidance differs, prefer the
+newest verified `DEV_LOG.md` entry, `.codex/ralph-rules.md`, and
+`plans/phase-b3-causal-ski-sim-latent-decoder.md`.
 
-## Project Snapshot
+## Current position
 
-`vllatent` is a compact latent world model for a sports-following drone
-(skiing primary). Phase B-1 is closed as diagnostic-complete / model-incomplete:
-raw future-DINO latent prediction did not beat the persistence baseline on the
-real held-out action-video cache. Phase B-2 proved useful scale-free camera-motion
-signal but drifted toward imitating the YouTube camera operator. The active
-Phase B-3 deliverable is now a **human-conditioned, action-conditioned latent
-world model**:
+The active research path is a causal sports-following visual world model:
 
 ```text
-observed human/camera history + candidate future 6-D camera/drone plan
-    -> future person/world latents + person-state trajectory
+three observed DINO latent frames + eight future camera/drone action steps
+    -> eight future DINO latent frames
+    -> standalone decoder
+    -> eight future (cx, cy, log_h, p_visible) rows
 ```
 
-B2.11c remains evidence and a partial translation/speed proposal prior. B2.12/H20
-is inactive. Youtube/MegaSaM translation scale is not trusted; B3 uses scale-free
-translation plan tokens and leaves metric speed to onboard odometry/controller
-logic at inference. Commanded speed must be clamped strictly below `7.5 m/s`.
+`B3-CS1` and `B3-CS2` completed on 2026-07-15. `B3-CS3` completed on
+2026-07-20 with a deterministic Blender 4.5.11/Cycles CPU feasibility proof.
+`B3-CS4` is the lowest pending card and is a USER-gated 32-root x nine-branch
+CPU data-generation smoke. It has not started.
 
-## Required Read Order
+The draft plan originally delegated several CS4+ numeric/formula contracts to
+two reports that are absent from this repository and were never tracked by Git.
+CS4 is therefore blocked on both explicit USER data-generation authority and
+either restoration of those reports or a separately reviewed, complete migration
+of their missing normative clauses into the active plan. Never invent or weaken
+those clauses.
 
-1. `DEV_LOG.md` - current step status and latest user-verified facts.
-2. `.codex/ralph-rules.md` - Codex Ralph-loop protocol and stop gates.
-3. `plans/phase-b3-human-conditioned-world-model.md` - authoritative active Phase B-3 plan.
-4. `plans/phase-b-sports-training.md` - historical Phase B/B2 evidence, especially B2.9-B2.11c.
-5. `CLAUDE.md` - broader project invariants and historical context.
+B3.6 remains blocked; B3.7/H20 remains ineligible. The old B3.8/CEM queue and
+Phase-A AirSim/AerialVLN paths are retired.
 
-For project-memory context, use the vault in the order named by `CLAUDE.md`.
-Repo state is authoritative for code; vault notes are authoritative for why.
+## Required read order
 
-## Current B-3 Guardrails
+1. `AGENTS.md`.
+2. `.codex/ralph-rules.md`.
+3. `DEV_LOG.md`.
+4. `plans/phase-b3-causal-ski-sim-latent-decoder.md`.
+5. Only files named by the active card.
 
-- Frozen DINOv3 ViT-B/16, D=768, cached fp16 latents.
-- Depth-6 predictor, H=3, T=8. Do not call this model `~28M`; the current
-  transition-verifier wrapper has `59,280,137` parameters, including `397,829`
-  verifier parameters.
-- Candidate future 6-D plan is an input:
-  `[unit_dir_x, unit_dir_y, unit_dir_z, log_speed_ratio, yaw_rate_norm, valid]`.
-- Future person/world targets are labels only: target latents, person state
-  `(cx, cy, log_h, visibility)`, masks, and confidences must not enter model
-  `forward`.
-- The cache contract supports optional keys `person_bbox (N,4)`, `person_visible (N,)`,
-  `person_state_valid (N,)`, and `person_conf (N,)` with detector/tracker
-  provenance. `person_visible` is detector visibility; `person_state_valid` is
-  the stricter followed-subject supervision mask. Old caches must still load
-  with invisible-person defaults.
-- B3.4/B3.4a and B3.5 are complete. The old `0.95` AUROC probe and K1/K2 are
-  diagnostics, not proof of incremental causal plan signal. Future cache ingest
-  must keep `track_persons=True` so strict followed-subject windows are checked
-  before MegaSaM/DINO.
-- B3.6 is blocked after the review-backed real-transition-verifier repair. The
-  corrected tiny run passes G1b but fails G1a's null-plan margin and G1d's
-  aggregate shuffled/flipped margins and yaw-geometry requirement. Do not run
-  the source-held-out gate or scale data/capacity until a defensible conditioning
-  repair passes the corrected tiny protocol.
-- Do not continue to B2.12/H20. H20 becomes eligible only at B3.7 after B3.6
-  local gates justify one serious depth-6 run.
-- Do not add diffusion, language, game data, SAM2, PI-Prober, metric waypoint
-  training, or EGO-Planner integration before deterministic B3 gates pass.
-- Scene split by **source video**, not sub-clip (`stem.split("_")[0]`).
-- Youtube/MegaSaM translation magnitude is diagnostics only, not metric truth.
-- Real metric scale is supplied by onboard odometry/controller at inference.
-- Controller conversion must clamp commanded speed below `7.5 m/s`.
+`plans/phase-b3-human-conditioned-world-model.md` is optional historical
+evidence, not active authority. Do not consult Obsidian for this queue. Do not
+cite the two absent report paths as if they were available authority.
 
-## Tier Rules
+## Current B3-CS contracts
 
-| Tier | Modules | Import rule |
+- Simulator commands are four requested body-FRD channels
+  `[v_forward_m_s, v_right_m_s, v_down_m_s, yaw_rate_rad_s]` in SI units.
+  `dt_seconds` is separate and fixed at `0.2`. Zero and pure yaw are valid.
+- The exact nine branches are zero and plus/minus yaw, forward, lateral, and
+  vertical. Siblings share one `root_id`, one `split_group_id`, one history, and
+  the exact skier future.
+- Requested and achieved SE(3) records remain distinct. Transforms are named
+  `T_target_from_source`, row-major float64.
+- The canonical skier digest excludes camera, branch, command, visibility,
+  pixels, images, and render results.
+- Forecast changes must be identifiable from history. No hidden target,
+  maneuver, ramp, or trigger may begin after history.
+- The historical six-field passive-video token's canonical definition remains
+  at `vllatent.plan_tokens`; it must never be interpreted as the simulator
+  command.
+- Future latents and person/simulator state are labels only and never model
+  inputs. The decoder emits only `(cx, cy, log_h, p_visible)`.
+- IMU, VINS, radar, depth, terrain safety, obstacle avoidance, trajectory
+  optimization, and low-level control remain controller-side.
+
+## Tier boundaries
+
+| Tier | Current modules | Rule |
 |---|---|---|
-| PURE | `schemas`, `actions`, `frames`, `config`, `manifest`, `audit`, `ingest/quality`, `ingest/ego_motion` | stdlib + numpy/pyyaml only |
-| TORCH | `encode/`, `data/`, `model/`, `train/`, remaining ingest tools | torch is allowed; optional tool/model dependencies stay lazy where absence is supported |
-| SIM | historical Phase-A render/cache paths | no active repo module; AirSim RPC calls remain locked for reproduction |
+| PURE | `schemas`, `config`, `manifest`, `ingest/quality`, `ingest/ego_motion`, all `vllatent/sim/` | stdlib + NumPy/PyYAML only; no `bpy`, torch, timm, transformers, AirSim, wall-clock, or RNG |
+| TORCH | `encode/`, `data/`, `model/`, `train/`, remaining ingest tools | optional heavy imports remain lazy where supported |
+| BLENDER | `scripts/blender/b3_cs3_bridge.py` and audited CS3 artifacts | Blender-bundled runtime only; any new CS4 render/data generation is USER-gated |
 
-Never add torch, transformers, timm, or airsim imports to the pure tier.
+The old top-level `vllatent.actions`, `vllatent.frames`, and `vllatent.audit`
+modules no longer exist. Do not recreate them or add a fake
+`vllatent.sim.plan_tokens` alias.
 
-## Data And Artifact Rules
+## Data, artifact, and git rules
 
-- Do not commit weights, `.npz`, videos, frames, `runs/`, caches, or generated
-  QC report artifacts.
-- Use `git add <specific files>` only; never `git add -A` or `git add .`.
-- Cached-latent provenance must preserve encoder id/revision, BGR-to-RGB flag,
-  dtype, domain, and manifest validity.
-- Center-square-crop preprocessing is load-bearing; do not reintroduce stretch
-  encoding.
-- H20, Orin NX, SSH, docker, video download, and multi-GB model/data operations
-  are user-gated. Provide paste-ready commands; do not operate those systems.
+- Do not commit weights, `.npz`, videos, frames, caches, generated QC reports,
+  downloaded archives, or paid/source assets.
+- Preserve canonical CS3 manifests and proof artifacts. New renders, data,
+  encoding, training, GPU/H20, controller, SSH, Docker, GUI, publication, and
+  real-flight work require their own explicit authority.
+- Use exact paths for staging. Never use `git add -A` or `git add .`.
+- Preserve unrelated dirty-worktree changes. Do not restore or rewrite user work.
+- P1 passive ingest/loader removal waits for CS5. Old model/loss/metric wrapper
+  removal waits for CS6/CS7 replacements.
 
-## Verification Preferences
+## Verification
 
-- After pure changes: run the narrow affected pytest target first.
-- After torch/training changes: use the narrow torch tests first, then
-  `make test-torch` when feasible.
-- Run `make lint` and `make typecheck` before committing broad code changes.
-- Before any CUDA run, verify `nvidia-smi -L`, `/dev/nvidia*`, and
-  `torch.cuda.device_count()` in the intended execution mode.
-- For B3.6, run the corrected tiny protocol first; only a healthy tiny result
-  permits the fixed source-held-out comparison.
+Run the narrow affected tests first. For PURE changes, run the import/AST gate,
+focused pytest, Ruff, mypy, and `git diff --check`. Wait for commands to exit.
+Do not run broad training or hardware checks merely for activity.
 
-## Ralph Loop
+## Ralph
 
-This repo uses a Ralph-loop style workflow. Follow `.codex/ralph-rules.md`.
-User-gated steps stay `in_progress` until the user pastes verification numbers;
-do not infer completion from local files alone.
+Follow `.codex/ralph-rules.md`. A Ralph run stops at CS4 until both the missing-
+normative-spec blocker and the explicit USER data-generation gate are cleared.

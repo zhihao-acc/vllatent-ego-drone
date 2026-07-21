@@ -20,9 +20,9 @@ Delta preprocessing pipeline (applied once at dataset construction):
   3. Velocity normalization (delta / dt)
   4. Per-dimension z-score normalization (store mean/std for inference)
 
-B2 scale-free action labels use the pre-z-score velocity-like target path. B2
-previous-observed action inputs use a separate causal path (physics clip +
-velocity, no centered median) so future deltas cannot affect model inputs.
+The retained historical six-field passive-video plan token uses the pre-z-score
+velocity-like target path plus a past-only reference speed. It is a compatibility
+surface and is not the current four-channel simulator action contract.
 
 numpy-only emission — torch enters at DataLoader collation (B1.14).
 """
@@ -41,11 +41,8 @@ from vllatent.ingest.person_tracking import (
 )
 from vllatent.plan_tokens import plan_tokens_from_deltas
 from vllatent.scale_free_targets import (
-    SCALE_FREE_LOG_SPEED_CLAMP,
     SCALE_FREE_SPEED_EPS,
-    future_deltas_to_scale_free_targets,
     reference_speed_from_deltas,
-    scale_free_actions_from_deltas,
 )
 from vllatent.schemas import (
     DOF,
@@ -98,16 +95,8 @@ class SportsSample:
     person_state_target: np.ndarray    # (T, 4) f32 — cx,cy,log_h,visibility, labels only
     target_deltas: np.ndarray    # (T, 4) f32 — preprocessed future deltas (L_wp targets)
     last_action: np.ndarray      # (4,) f32 — most recent known action (delta t-1→t), zeros at clip start
-    planned_actions: np.ndarray               # (T, 6) f32 — B3 candidate/teacher-forced plan input
+    planned_actions: np.ndarray               # (T, 6) f32 — historical passive-video plan token
     planned_actions_valid_mask: np.ndarray    # (T,) bool — valid where motion, speed, and VO all pass
-    target_actions_scale_free: np.ndarray       # (T, 4) f32 — B2 target-only future actions
-    target_actions_moving_mask: np.ndarray      # (T,) bool — valid translation direction targets
-    target_actions_speed_mask: np.ndarray       # (T,) bool — valid unclipped speed-ratio targets
-    last_action_scale_free: np.ndarray          # (4,) f32 — B2 previous observed action input
-    action_history_scale_free: np.ndarray       # (H, 4) f32 — past-observed action history
-    action_history_mask: np.ndarray             # (H,) bool — True where action-history slot is real
-    camera_history_path_scale_free: np.ndarray  # (H, 3) f32 — cumulative past camera path
-    odom_reference_speed: float                 # arbitrary-scale observed speed reference for diagnostics
     vo_confidence: np.ndarray    # (T,) f32 — per-step VO confidence
     frame_quality: float         # composite quality of z_t frame
     dt_seconds: np.ndarray       # (T,) f32 — inter-frame time deltas
@@ -185,38 +174,6 @@ def _observed_reference_speed(
         return SCALE_FREE_SPEED_EPS
     lo = max(0, t - history)
     return reference_speed_from_deltas(observed_velocities[lo:t])
-
-
-def _scale_free_step_vectors_np(actions: np.ndarray) -> np.ndarray:
-    """Convert scale-free action vectors to arbitrary-scale relative path steps."""
-    dirs = actions[..., :3].astype(np.float64, copy=False)
-    log_speed = np.clip(actions[..., 3], -SCALE_FREE_LOG_SPEED_CLAMP, SCALE_FREE_LOG_SPEED_CLAMP)
-    speed_ratio = np.exp(log_speed.astype(np.float64, copy=False))
-    return (dirs * speed_ratio[..., None]).astype(np.float32)
-
-
-def _observed_action_history(
-    observed_velocities: np.ndarray,
-    t: int,
-    reference_speed: float,
-    *,
-    history: int = HISTORY,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Past-only scale-free action and path history ending at the anchor frame."""
-    actions = np.zeros((history, 4), dtype=np.float32)
-    actions[:, 0] = 1.0
-    mask = np.zeros(history, dtype=MASK_DTYPE)
-    for h in range(history):
-        delta_idx = t - history + h
-        if 0 <= delta_idx < observed_velocities.shape[0]:
-            actions[h] = scale_free_actions_from_deltas(
-                observed_velocities[delta_idx],
-                reference_speed=reference_speed,
-            ).actions
-            mask[h] = True
-    steps = _scale_free_step_vectors_np(actions) * mask.astype(np.float32)[:, None]
-    path = np.cumsum(steps, axis=0, dtype=np.float32)
-    return actions, mask, path.astype(np.float32, copy=False)
 
 
 def _load_clip(path: Path) -> dict[str, np.ndarray]:
@@ -517,31 +474,12 @@ class SportsTrainingDataset:
             t,
             history=self._history,
         )
-        target_actions = future_deltas_to_scale_free_targets(
-            target_velocity_like,
-            reference_speed=odom_reference_speed,
-        )
         plan_actions = plan_tokens_from_deltas(
             target_velocity_like,
             dt_seconds=None,
             reference_speed=odom_reference_speed,
             vo_confidence=vo_conf,
         )
-        if t > 0 and t - 1 < observed_velocities.shape[0]:
-            last_observed_velocity = observed_velocities[t - 1]
-        else:
-            last_observed_velocity = np.zeros(DOF, dtype=np.float32)
-        last_action_scale_free = scale_free_actions_from_deltas(
-            last_observed_velocity,
-            reference_speed=odom_reference_speed,
-        ).actions
-        action_history, action_history_mask, camera_history_path = _observed_action_history(
-            observed_velocities,
-            t,
-            odom_reference_speed,
-            history=self._history,
-        )
-
         fq = float(clip["frame_quality"][t])
 
         return SportsSample(
@@ -562,14 +500,6 @@ class SportsTrainingDataset:
             last_action=last_act,
             planned_actions=plan_actions.tokens,
             planned_actions_valid_mask=plan_actions.valid_mask,
-            target_actions_scale_free=target_actions.actions,
-            target_actions_moving_mask=target_actions.moving_mask,
-            target_actions_speed_mask=target_actions.speed_valid_mask,
-            last_action_scale_free=last_action_scale_free,
-            action_history_scale_free=action_history,
-            action_history_mask=action_history_mask,
-            camera_history_path_scale_free=camera_history_path,
-            odom_reference_speed=float(odom_reference_speed),
             vo_confidence=vo_conf,
             frame_quality=fq,
             dt_seconds=dt_sec,

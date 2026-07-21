@@ -1,8 +1,18 @@
 # Phase B-3: Human-Conditioned Latent World Model Plan
 
-> Created 2026-07-07. This is the active Phase B plan. It supersedes the B2.12/H20
+> **Status update 2026-07-14:** B3.6 remains blocked and B3.7/H20 remains
+> ineligible. `plans/phase-b3-causal-ski-sim-latent-decoder.md` is the active
+> research successor. The former untracked controller-heavy B3-Sim/B4 draft is
+> rejected and has no executable card. This file and all of its results remain
+> preserved historical evidence; do not continue B3.7/H20 or B3.8/CEM from it. Several runnable paths
+> and the former B1/B2 plan named below were removed in the 2026-07-21 P0
+> cleanup; recover them from Git history only if historical inspection is needed.
+
+> **Historical creation note:** Created 2026-07-07. This was the active Phase B plan
+> when written. It superseded the B2.12/H20
 > action-imitation handoff and the active execution portions of
-> `plans/phase-b-sports-training.md`. B1/B2 plan history, reports, and `DEV_LOG.md`
+> the former Phase-B sports-training plan (now retained in Git history only).
+> B1/B2 plan history, reports, and `DEV_LOG.md`
 > remain historical evidence unless the user explicitly requests removal.
 
 ## Objective
@@ -134,8 +144,8 @@ conditioning plus per-step `dt`. The B3 path keeps residual latent output.
 | B3.4a | done | AUTO local + USER-gated future regeneration, verified 2026-07-12 | YOLO-standard cache/data path prepared; legacy ambiguity provenance is unrecoverable from retained NPZs |
 | B3.5 | done | AUTO, verified 2026-07-08 | Patch-local future queries and detector-visible person-state target semantics |
 | B3.6 | blocked | AUTO/local, verified 2026-07-13 | Corrected tiny G1b passes, but G1a/G1d fail; held-out rerun is ineligible |
-| B3.7 | pending | USER-GATED H20 | One serious depth-6 H20 run |
-| B3.8 | pending | AUTO local, Orin later USER-gated | CEM/MPPI hindsight-replay planner eval |
+| B3.7 | superseded/ineligible | none | B3.6 remains blocked; no H20 run |
+| B3.8 | superseded | none | Controller/CEM work rejected from current causal-transition scope |
 
 ## B3 Queue
 
@@ -545,9 +555,10 @@ was skipped because corrected tiny health failed; B3.7/H20 remains ineligible.
   `$PY -m pytest -q tests/test_train_sports_b3.py tests/test_human_world_model.py tests/test_world_model_metrics.py`
 - Deps: B3.5. Blocks B3.7.
 
-### B3.7 - USER-GATED H20 Depth-6 Run
+### B3.7 - SUPERSEDED/INELIGIBLE H20 Depth-6 Run
 
-Provide one paste-ready H20 command only after B3.6 gates justify it.
+Historical card only. B3.6 did not pass and the B3-CS successor does not
+reactivate H20. Do not provide or run this command.
 
 - DoD: user pasteback includes metrics JSONL tails, source metrics, G1 gate
   readouts, steps/sec, memory, checkpoint/config existence; G1a tightened to
@@ -555,7 +566,10 @@ Provide one paste-ready H20 command only after B3.6 gates justify it.
 - Rule: no Codex SSH/docker/H20 operation.
 - Deps: B3.6. Blocks B3.8 scale-up decisions.
 
-### B3.8 - Planner-Facing CEM/MPPI Hindsight Replay
+### B3.8 - SUPERSEDED Planner-Facing CEM/MPPI Hindsight Replay
+
+Historical rejected card only. Controller-side planning is outside the active
+B3-CS causal-transition and decoder scope.
 
 Implement offline planner scoring over 6-D candidate plans, seeded by B2.11c
 translation/speed plus yaw statistics, then replace with a trained 6-D proposal

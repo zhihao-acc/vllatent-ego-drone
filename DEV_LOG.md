@@ -1,8 +1,10 @@
 # DEV_LOG — vllatent-ego-drone
 
-Append-only, **newest entry on top**. Read this first each iteration to find the current position,
-then re-read the relevant step in `plans/phase-b3-human-conditioned-world-model.md`. Project-level *why* lives in
-the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + step status.
+Append-only, **newest entry on top**. For the active B3-CS queue, first follow the
+read order in `AGENTS.md` and `.codex/ralph-rules.md`, then use the newest entry
+here and `plans/phase-b3-causal-ski-sim-latent-decoder.md` to identify the current
+card. Do not consult Obsidian for this queue. Older plan/vault directions below
+are preserved historical text, not current authority.
 
 ## Step status table
 
@@ -102,10 +104,57 @@ the vault (`latent-pred-pipeline/`), not here; this log tracks *code state* + st
 | B3.4a — YOLO-standard data cleanup and expansion prep | done | 2026-07-12 | Strict cache/data path is prepared; legacy second-track ambiguity remains an explicit, regeneration-only limitation |
 | B3.5 — Depth-6 per-step conditioned world model | done | 2026-07-08 | Patch-local future queries fixed; detector-visible person-state visibility target; exact wrapper params `59,082,250` |
 | B3.6 — Stage-1 local depth-6 gate | blocked | 2026-07-13 | Review-backed transition verifier passes its tiny diagnostic, but corrected tiny G1a/G1d fail; source-held-out rerun skipped by protocol |
-| B3.7 — H20 depth-6 run | pending | — | USER-GATED; one serious command only after B3.6 passes |
-| B3.8 — Planner-facing CEM/MPPI hindsight replay | pending | — | AUTO local; Orin/closed-loop later USER-gated |
+| B3.7 — H20 depth-6 run | superseded | 2026-07-14 | Ineligible: B3.6 remains blocked; the causal ski-sim/decoder replan does not reactivate H20 |
+| B3.8 — Planner-facing CEM/MPPI hindsight replay | superseded | 2026-07-14 | Rejected as controller-side/out of current causal-transition scope |
+| B3-CS0 — Causal ski-sim and latent-decoder research replan | done | 2026-07-14 | Blender 4.5.11/Cycles CPU, deterministic hybrid skier, paired roots, standalone `(cx,cy,log_h,p_visible)` decoder, and formal gates documented; no implementation/run |
+| B3-CS1 — Renderer-neutral pure contracts | done | 2026-07-15 | four-channel SI command + separate dt, nine branches, immutable hashes/grouping/SE(3), focused PURE gates |
+| B3-CS2 — Deterministic skier root and digest proof | done | 2026-07-15 | versioned float64 root law, absolute-tick schedule, ski/contact mechanics, continuation audit, deterministic fixtures |
+| B3-CS3 — Blender feasibility and eight-root replay proof | done | 2026-07-20 | pinned Blender/CC0 source rig, authored scene/body/contact/labels, exact fresh-process replay and independent audit |
+| B3-CS4 — Paired 32-root causal smoke | pending | — | next USER data-generation gate; also blocked until absent delegated normative clauses are restored or completely migrated/reviewed |
 
 Statuses: `pending` / `in_progress` / `done` / `blocked` / `replanned` / `superseded`.
+
+---
+
+## 2026-07-21 — P0 obsolete action-semantics cleanup verified
+
+**Status:** the requested P0 repository cleanup is complete and locally
+verified. `B3-CS1`–`B3-CS3` remain complete. `B3-CS4` remains unstarted and is
+the next USER data-generation gate; it is also blocked until the absent
+delegated normative clauses are restored or completely migrated and reviewed.
+
+Removed the B2 direct action-policy implementation/tests, the completed B3.4
+Stage-0 probe implementation/entrypoints/tests, the Phase-A
+AirSim/AerialVLN action/audit/frame implementation/config/fixtures/tests, the
+obsolete sports B3 trainer/test, and the former Phase-B sports-training plan.
+Removed the B2-only scale-free targets, action history, camera-history path, and
+action-policy batch from the retained passive sports loader/collator. The
+historical six-field passive-video token and its tests remain unchanged at their
+canonical modules and are explicitly separate from the four-channel SI
+simulator command plus independent `dt_seconds`.
+
+Removed the AirSim optional dependency, old pytest markers/skips, Phase-A audit
+target, and stale PURE import paths. CI and local gates now import/type-check all
+renderer-neutral `vllatent.sim` modules without importing Blender. Retired
+Phase-A schema types and AerialVLN data defaults are gone. Active guidance,
+topology, I/O contract, Ralph prompt, and the newly tracked B3-CS plan now record
+CS3 complete and CS4 as the dual USER/normative-spec gate. The two report paths
+delegating CS4+ formulas were verified absent from the workspace and all Git
+history; the plan records this blocker instead of inventing their contents.
+
+**Verification:** focused P0/compatibility/PURE tests: `187 passed, 1 skipped`;
+full non-torch regression: `555 passed, 67 deselected`; PURE mypy:
+`Success: no issues found in 15 source files`; PURE import smoke, scoped Ruff,
+`bash -n scripts/ralph.sh`, `git diff --check`, and blob guard all pass. Active
+reference scans find no live import or runnable reference to the deleted P0
+modules. Requested repository cache/QC/output directories are absent.
+Independent read-only review found no unresolved semantic CRITICAL/HIGH issue;
+its stale package-description findings were corrected and targeted re-review
+returned PASS.
+
+No network, download, asset acquisition, Blender/render, data generation or
+encoding, training, GPU/H20, controller, SSH, Docker, GUI, publication, push, or
+real-flight operation occurred.
 
 ---
 
